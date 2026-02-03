@@ -130,7 +130,7 @@ output_dir/psd/
 ### Resolved
 - ~~MNE dependency for sfreq~~ → Reads from .set file via scipy.io.loadmat
 - ~~Duplicate subject IDs across groups~~ → Composite keys (group_subject)
-- ~~ROI name mismatch in config~~ → Updated forge_fxs.yaml with actual atlas names
+- ~~ROI name mismatch in config~~ → Updated analysis.yaml with actual atlas names
 - ~~lme4 Matrix ABI mismatch~~ → Reinstalled lme4 from source
 - ~~Incorrect sfreq in R report~~ → Python exports sfreq in study_config.yaml
 

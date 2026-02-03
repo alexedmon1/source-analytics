@@ -19,8 +19,8 @@ Rscript -e 'install.packages(c("ggplot2","dplyr","tidyr","readr","stringr","lme4
 ## Usage
 
 ```bash
-source-analytics validate --study configs/forge_fxs.yaml
-source-analytics run --study configs/forge_fxs.yaml --analysis psd
+source-analytics validate --study /mnt/d/research/EEG/FORGE/analysis.yaml
+source-analytics run --study /mnt/d/research/EEG/FORGE/analysis.yaml --analysis psd
 source-analytics list
 ```
 
