@@ -11,6 +11,7 @@ from .analyses.base import BaseAnalysis
 from .analyses.psd_analysis import PSDAnalysis
 from .analyses.aperiodic_analysis import AperiodicAnalysis
 from .analyses.connectivity_analysis import ConnectivityAnalysis
+from .analyses.pac_analysis import PACAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "psd": PSDAnalysis,
     "aperiodic": AperiodicAnalysis,
     "connectivity": ConnectivityAnalysis,
+    "pac": PACAnalysis,
 }
 
 

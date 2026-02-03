@@ -229,9 +229,43 @@ output_dir/connectivity/
     connectivity_region_pair_forest_*.png
 ```
 
-### Cross-Frequency Coupling -- Planned
+### PAC (Phase-Amplitude Coupling) -- Implemented
 
-Phase-amplitude coupling analysis.
+Cross-frequency phase-amplitude coupling via the Modulation Index (Tort et al., 2010) with surrogate-based z-scoring. Uses **signed** (phase-preserving) ROI timeseries.
+
+**Python side:**
+- Bandpass filtering (Butterworth, zero-phase; auto-reduces order for narrow bands)
+- Hilbert transform for instantaneous phase and amplitude envelope
+- Phase binning (18 bins, 20° each), mean amplitude per bin
+- MI = KL divergence from uniform / log(N)
+- 200 surrogate MIs via circular time-shifts of amplitude envelope (min 1 sec shift)
+- z-score = (observed MI - mean(surrogates)) / std(surrogates)
+- Auto-generates valid frequency pairs from config bands (amplitude center >= 2.5× phase center)
+- Exports `pac_values.csv` (subject x roi x freq_pair)
+
+**R side:**
+- **Global analysis:** Mean z-scored MI across all ROIs per subject x freq_pair; Welch t-test per freq_pair, BH FDR across pairs
+- **Region-level analysis:** ROIs mapped to regions via roi_categories, averaged within; LMM `z_score ~ group * region + (1|subject)`, BH FDR across freq_pairs, post-hoc emmeans per region gated on significance, Holm correction
+- Global bar chart, comodulogram heatmaps (per group + difference), region forest plots
+- Markdown summary
+
+**Output:**
+
+```
+output_dir/pac/
+  ANALYSIS_SUMMARY.md
+  data/
+    pac_values.csv              # subject x roi x freq_pair (z-scored MI)
+    study_config.yaml
+  tables/
+    pac_global.csv              # global t-tests per freq_pair
+    pac_omnibus_region.csv      # region-level LMM omnibus (if roi_categories)
+    pac_posthoc_region.csv      # post-hoc per region (if significant)
+  figures/
+    pac_global_bar.png
+    pac_comodulogram_*.png
+    pac_region_forest_*.png
+```
 
 ## Adding a New Analysis
 
