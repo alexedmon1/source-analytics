@@ -1,2 +1,0 @@
-[console_scripts]
-source-analytics = source_analytics.cli:main
