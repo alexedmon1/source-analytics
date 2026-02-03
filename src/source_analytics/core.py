@@ -9,12 +9,16 @@ from .config import StudyConfig
 from .io.discovery import SubjectInfo, discover_subjects
 from .analyses.base import BaseAnalysis
 from .analyses.psd_analysis import PSDAnalysis
+from .analyses.aperiodic_analysis import AperiodicAnalysis
+from .analyses.connectivity_analysis import ConnectivityAnalysis
 
 logger = logging.getLogger(__name__)
 
 # Registry of available analyses
 ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "psd": PSDAnalysis,
+    "aperiodic": AperiodicAnalysis,
+    "connectivity": ConnectivityAnalysis,
 }
 
 

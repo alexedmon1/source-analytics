@@ -18,8 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 mne = ["mne>=1.5"]
+specparam = ["specparam>=2.0"]
 dev = ["pytest>=7.0", "black", "ruff"]
-all = ["source-analytics[mne,dev]"]
+all = ["source-analytics[mne,specparam,dev]"]
 
 [project.scripts]
 source-analytics = "source_analytics.cli:main"

@@ -13,7 +13,7 @@ uv venv && source .venv/bin/activate
 uv pip install -e .
 
 # R packages (one-time)
-Rscript -e 'install.packages(c("ggplot2","dplyr","tidyr","readr","stringr","lme4","lmerTest","effectsize","yaml","argparse","patchwork","scales"))'
+Rscript -e 'install.packages(c("ggplot2","dplyr","tidyr","readr","stringr","forcats","lme4","lmerTest","effectsize","emmeans","yaml","argparse","patchwork","scales"))'
 ```
 
 ## Usage
@@ -50,7 +50,7 @@ Python (orchestration + signal processing)     R (statistics + visualization)
 
 ### R scripts (`R/`)
 - `psd_analysis.R` — Main entry point (called by Python)
-- `stats_utils.R` — LMMs, t-tests, effect sizes, FDR correction
+- `stats_utils.R` — Omnibus LMM (group*roi interaction), emmeans post-hoc, FDR/Holm correction
 - `plot_psd.R` — ggplot2 figures (PSD curves, boxplots, heatmaps)
 - `report.R` — Markdown summary writer
 
@@ -61,12 +61,17 @@ Exported to `{output_dir}/psd/data/`:
 - `psd_curves.csv` — subject, group, roi, freq_hz, psd
 - `study_config.yaml` — copy of study config for R
 
+R outputs to `{output_dir}/psd/tables/`:
+- `psd_omnibus.csv` — Omnibus LMM results (group x ROI interaction, Type III ANOVA)
+- `psd_posthoc_roi.csv` — emmeans post-hoc contrasts per ROI (Holm-corrected)
+
 ## R packages required
 
-ggplot2, dplyr, tidyr, readr, stringr, lme4, lmerTest, effectsize, yaml, argparse, patchwork, scales
+ggplot2, dplyr, tidyr, readr, stringr, forcats, lme4, lmerTest, effectsize, emmeans, yaml, argparse, patchwork, scales
 
 ## Adding a New Analysis
 
 1. Create `src/source_analytics/analyses/my_analysis.py` (Python: data extraction + CSV export)
 2. Create `R/my_analysis.R` (R: statistics + visualization)
 3. Register in `core.py` ANALYSIS_REGISTRY
+4. **Update `README.md`** — add the new module to the "Analysis Modules" section with a description of what it does, its Python/R responsibilities, and its output files

@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-02-03
 **Version:** 0.2.0
-**Status:** Production Ready (PSD Analysis Module)
+**Status:** Production Ready (PSD, Aperiodic, Connectivity Analysis Modules)
 
 ---
 
@@ -24,8 +24,8 @@
 | Module | Status | Description |
 |--------|--------|-------------|
 | **PSD** | Complete | Power spectral density, band power, group comparisons |
-| Connectivity | Planned | ROI-to-ROI coherence, phase-lag index |
-| Aperiodic | Planned | 1/f decomposition (specparam) |
+| **Aperiodic** | Complete | 1/f decomposition (specparam/linreg), exponent + offset |
+| **Connectivity** | Complete | Coherence + imaginary coherence, global t-tests + region-pair LMM |
 | Cross-frequency coupling | Planned | Phase-amplitude coupling |
 | Treatment effects | Planned | Multi-group comparisons with contrasts |
 
@@ -135,7 +135,7 @@ output_dir/psd/
 - ~~Incorrect sfreq in R report~~ → Python exports sfreq in study_config.yaml
 
 ### Current Limitations
-1. **Single analysis module** — Only PSD implemented; connectivity, aperiodic planned
+1. **Three analysis modules** — PSD, aperiodic, and connectivity implemented; cross-frequency coupling planned
 2. **No parallel subject processing** — Subjects processed sequentially in Python
 3. **R package loading noise** — lme4/lmerTest print attachment messages to stderr
 4. **Band order in YAML** — R reads YAML alphabetically; band order in plots follows YAML key order
@@ -150,8 +150,8 @@ output_dir/psd/
 3. Consider ROI-level LMMs: `power ~ group + (1|subject/roi)`
 
 ### Short-term
-4. Connectivity analysis module (coherence, PLI)
-5. Aperiodic analysis module (specparam/FOOOF)
+4. ~~Connectivity analysis module~~ — Done (coherence + imaginary coherence)
+5. ~~Aperiodic analysis module~~ — Done (specparam/FOOOF)
 6. Parallel subject processing
 
 ### Long-term
