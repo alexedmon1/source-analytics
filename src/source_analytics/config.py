@@ -56,6 +56,7 @@ class StudyConfig:
     roi_categories: dict[str, list[str]]
     discovery: dict[str, Any]
     wholebrain: dict[str, Any] = field(default_factory=dict)
+    electrode: dict[str, Any] = field(default_factory=dict)
     raw: dict = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -85,6 +86,7 @@ class StudyConfig:
             roi_categories=data.get("roi_categories", {}),
             discovery=data.get("discovery", {}),
             wholebrain=data.get("wholebrain", {}),
+            electrode=data.get("electrode", {}),
             raw=data,
         )
 

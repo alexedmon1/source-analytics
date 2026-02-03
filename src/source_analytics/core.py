@@ -13,6 +13,8 @@ from .analyses.aperiodic_analysis import AperiodicAnalysis
 from .analyses.connectivity_analysis import ConnectivityAnalysis
 from .analyses.pac_analysis import PACAnalysis
 from .analyses.wholebrain_analysis import WholebrainAnalysis
+from .analyses.electrode_analysis import ElectrodeAnalysis
+from .analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,8 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "connectivity": ConnectivityAnalysis,
     "pac": PACAnalysis,
     "wholebrain": WholebrainAnalysis,
+    "electrode": ElectrodeAnalysis,
+    "electrode_comparison": ElectrodeComparisonAnalysis,
 }
 
 
