@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "source-analytics"
+version = "0.1.0"
+description = "Statistical analysis toolkit for source-localized EEG data"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+    "statsmodels>=0.14",
+    "pyyaml>=6.0",
+    "tabulate>=0.9",
+]
+
+[project.optional-dependencies]
+aperiodic = ["specparam>=1.0"]
+mne = ["mne>=1.5"]
+dev = ["pytest>=7.0", "black", "ruff"]
+all = ["source-analytics[aperiodic,mne,dev]"]
+
+[project.scripts]
+source-analytics = "source_analytics.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 99
+
+[tool.ruff]
+line-length = 99

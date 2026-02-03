@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: source-analytics
+Version: 0.1.0
+Summary: Statistical analysis toolkit for source-localized EEG data
+License: MIT
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.24
+Requires-Dist: scipy>=1.10
+Requires-Dist: pandas>=2.0
+Requires-Dist: matplotlib>=3.7
+Requires-Dist: seaborn>=0.12
+Requires-Dist: statsmodels>=0.14
+Requires-Dist: pyyaml>=6.0
+Provides-Extra: aperiodic
+Requires-Dist: specparam>=1.0; extra == "aperiodic"
+Provides-Extra: mne
+Requires-Dist: mne>=1.5; extra == "mne"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: black; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Provides-Extra: all
+Requires-Dist: source-analytics[aperiodic,dev,mne]; extra == "all"
