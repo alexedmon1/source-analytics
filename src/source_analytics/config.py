@@ -55,6 +55,7 @@ class StudyConfig:
     bands: dict[str, tuple[float, float]]
     roi_categories: dict[str, list[str]]
     discovery: dict[str, Any]
+    wholebrain: dict[str, Any] = field(default_factory=dict)
     raw: dict = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -83,6 +84,7 @@ class StudyConfig:
             bands=bands,
             roi_categories=data.get("roi_categories", {}),
             discovery=data.get("discovery", {}),
+            wholebrain=data.get("wholebrain", {}),
             raw=data,
         )
 

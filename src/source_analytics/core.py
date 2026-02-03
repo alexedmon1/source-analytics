@@ -12,6 +12,7 @@ from .analyses.psd_analysis import PSDAnalysis
 from .analyses.aperiodic_analysis import AperiodicAnalysis
 from .analyses.connectivity_analysis import ConnectivityAnalysis
 from .analyses.pac_analysis import PACAnalysis
+from .analyses.wholebrain_analysis import WholebrainAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "aperiodic": AperiodicAnalysis,
     "connectivity": ConnectivityAnalysis,
     "pac": PACAnalysis,
+    "wholebrain": WholebrainAnalysis,
 }
 
 
@@ -49,7 +51,12 @@ class StudyAnalyzer:
             raise ValueError("No discovery.root_dir in study config")
 
         group_mapping = self.config.discovery.get("group_mapping", {})
-        return discover_subjects(root_dir, group_mapping=group_mapping)
+        required_files = self.config.discovery.get("required_files")
+        return discover_subjects(
+            root_dir,
+            group_mapping=group_mapping,
+            required_files=required_files,
+        )
 
     def get_subjects_for_groups(self, groups: list[str]) -> list[SubjectInfo]:
         """Filter subjects to only those in the specified groups."""

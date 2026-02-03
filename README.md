@@ -1,8 +1,8 @@
 # source-analytics
 
-Statistical analysis toolkit for source-localized EEG data. Reads ROI timeseries output from the [source_localization](https://github.com/alexedmon1/AlexProjects) pipeline and runs group-level analyses with publication-quality statistics and figures.
+Statistical analysis toolkit for source-localized EEG data. Reads pipeline output from the [source_localization](https://github.com/alexedmon1/AlexProjects) package and runs group-level analyses with publication-quality statistics and figures. Supports both ROI-level analyses (PSD, aperiodic, connectivity, PAC) and whole-brain vertex-level analysis with cluster-based permutation testing.
 
-**Python** handles orchestration, signal processing, and data I/O. **R** handles statistics (linear mixed models via lme4) and visualization (ggplot2).
+**Python** handles orchestration, signal processing, and data I/O. **R** handles statistics (linear mixed models via lme4) and visualization (ggplot2). The wholebrain module uses Python for statistics (cluster permutation) and visualization (glass brain plots), with R for report generation.
 
 ## Installation
 
@@ -84,11 +84,20 @@ discovery:
 
 source-analytics reads output files produced by the source_localization pipeline. Each subject directory contains:
 
+**ROI-level analyses** (psd, aperiodic, connectivity, pac) — default discovery:
+
 | File | Format | Contents |
 |------|--------|----------|
 | `step6_roi_timeseries_magnitude.pkl` | Python pickle | Dict[str, ndarray] -- ROI timeseries (unsigned, for PSD) |
 | `step6_roi_timeseries_signed.pkl` | Python pickle | Dict[str, ndarray] -- ROI timeseries (signed, for connectivity) |
 | `roi_timeseries_magnitude.set` | EEGLAB .set | Same data + metadata (sfreq) |
+
+**Wholebrain analysis** — uses `discovery.required_files` in config:
+
+| File | Format | Contents |
+|------|--------|----------|
+| `step5_stc.pkl` | Python pickle | MNE SourceEstimate (n_vertices, n_times) |
+| `step3_source_coords_mm.npy` | NumPy array | Source coordinates (n_vertices, 3) in mm |
 
 Expected directory layout:
 
@@ -265,6 +274,71 @@ output_dir/pac/
     pac_global_bar.png
     pac_comodulogram_*.png
     pac_region_forest_*.png
+```
+
+### Wholebrain (Vertex-Level Spectral Analysis) -- Implemented
+
+Vertex-level spectral analysis on shell_ellipsoid source data (154 vertices) with cluster-based permutation testing (Maris & Oostenveld, 2007). All metrics derived from a single PSD computation per subject.
+
+**Requires a separate study config** pointing to `shell_ellipsoid/` pipeline output (not the default `roi_based_ellipsoid/`). Discovery uses `required_files` to locate `step5_stc.pkl` and `step3_source_coords_mm.npy`.
+
+**Python side (signal processing + statistics + visualization):**
+- PSD via `scipy.signal.welch` with axis=-1 broadcasting on (n_vertices, n_times) arrays
+- Per-vertex metrics: relative/absolute band power, fALFF (high-gamma/total ratio), spectral slope (1/f exponent via log-log regression), peak alpha frequency
+- Voxel-wise Welch's t-tests + Hedges' g per vertex
+- Cluster-based permutation correction: spatial adjacency from source coordinates, BFS connected components, max cluster statistic null distribution
+- Glass brain figures: 3-view (axial/coronal/sagittal) scatter, 6-panel band comparison (group means, difference, t-map, significant clusters, histogram), multi-band summary
+
+**R side (report generation only):**
+- Reads pre-computed CSVs
+- Effect size summary table
+- Formatted ANALYSIS_SUMMARY.md with methods, results tables, figure references
+
+**Study config (`analysis_wholebrain.yaml`):**
+
+```yaml
+discovery:
+  root_dir: "/path/to/source_localization/shell_ellipsoid"
+  group_mapping:
+    "KO ICV": KO_VEH
+    "WT ICV": WT_VEH
+  required_files:
+    - "step5_stc.pkl"
+    - "step3_source_coords_mm.npy"
+
+wholebrain:
+  cluster_threshold: 2.0
+  n_permutations: 1000
+  adjacency_distance_mm: 5.0
+  noise_exclude_hz: [55, 65]
+```
+
+**Output:**
+
+```
+output_dir/wholebrain/
+  ANALYSIS_SUMMARY.md
+  data/
+    wholebrain_values.csv       # subject x vertex x band (relative, absolute, dB)
+    wholebrain_features.csv     # subject x vertex (fALFF, spectral slope, peak alpha)
+    source_coords.csv           # vertex coordinates in mm
+    wholebrain_results.pkl      # full results dict for reuse
+    study_config.yaml
+  tables/
+    voxelwise_stats.csv         # per-vertex t, p, Hedges' g per contrast x metric
+    cluster_results.csv         # cluster summaries with permutation-corrected p-values
+    effect_size_summary.csv     # aggregated effect sizes (from R)
+  figures/
+    wholebrain_delta.png
+    wholebrain_theta.png
+    wholebrain_alpha.png
+    wholebrain_beta.png
+    wholebrain_low_gamma.png
+    wholebrain_high_gamma.png
+    wholebrain_falff.png
+    wholebrain_spectral_slope.png
+    wholebrain_peak_alpha.png
+    wholebrain_summary.png
 ```
 
 ## Adding a New Analysis

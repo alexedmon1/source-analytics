@@ -37,6 +37,7 @@ class SubjectInfo:
 def discover_subjects(
     root_dir: str | Path,
     group_mapping: dict[str, str] | None = None,
+    required_files: list[str] | None = None,
 ) -> list[SubjectInfo]:
     """Walk a pipeline output tree and discover all subjects.
 
@@ -47,6 +48,11 @@ def discover_subjects(
     group_mapping : dict, optional
         Maps directory group names to canonical group IDs.
         E.g. ``{"KO ICV": "KO_VEH", "WT ICV": "WT_VEH"}``.
+    required_files : list[str], optional
+        Files that must exist in ``data/`` for a subject to be included.
+        When *None* (default), checks for ROI timeseries files
+        (``step6_roi_timeseries_magnitude.pkl`` or ``step6_roi_timeseries.pkl``).
+        When provided, *all* listed files must be present.
 
     Returns
     -------
@@ -76,17 +82,27 @@ def discover_subjects(
                 logger.warning("No data/ directory in %s, skipping", subj_dir)
                 continue
 
-            # Verify at least one ROI timeseries file exists
-            has_roi = any(
-                (data_dir / f).exists()
-                for f in [
-                    "step6_roi_timeseries_magnitude.pkl",
-                    "step6_roi_timeseries.pkl",
-                ]
-            )
-            if not has_roi:
-                logger.warning("No ROI timeseries in %s, skipping", data_dir)
-                continue
+            if required_files is not None:
+                # Check that all required files are present
+                missing = [f for f in required_files if not (data_dir / f).exists()]
+                if missing:
+                    logger.warning(
+                        "Missing required files in %s: %s, skipping",
+                        data_dir, ", ".join(missing),
+                    )
+                    continue
+            else:
+                # Default: verify at least one ROI timeseries file exists
+                has_roi = any(
+                    (data_dir / f).exists()
+                    for f in [
+                        "step6_roi_timeseries_magnitude.pkl",
+                        "step6_roi_timeseries.pkl",
+                    ]
+                )
+                if not has_roi:
+                    logger.warning("No ROI timeseries in %s, skipping", data_dir)
+                    continue
 
             subjects.append(
                 SubjectInfo(

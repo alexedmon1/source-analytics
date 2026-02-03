@@ -5,5 +5,13 @@ from .psd_analysis import PSDAnalysis
 from .aperiodic_analysis import AperiodicAnalysis
 from .connectivity_analysis import ConnectivityAnalysis
 from .pac_analysis import PACAnalysis
+from .wholebrain_analysis import WholebrainAnalysis
 
-__all__ = ["BaseAnalysis", "PSDAnalysis", "AperiodicAnalysis", "ConnectivityAnalysis", "PACAnalysis"]
+__all__ = [
+    "BaseAnalysis",
+    "PSDAnalysis",
+    "AperiodicAnalysis",
+    "ConnectivityAnalysis",
+    "PACAnalysis",
+    "WholebrainAnalysis",
+]

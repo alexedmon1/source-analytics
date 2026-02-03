@@ -115,3 +115,24 @@ class SubjectLoader:
 
     def has_file(self, filename: str) -> bool:
         return (self.data_dir / filename).exists()
+
+    def load_source_timecourses(self, magnitude: bool = True) -> np.ndarray:
+        """Load full source time courses from step5_stc.pkl.
+
+        Parameters
+        ----------
+        magnitude : bool
+            If True, return absolute values (default). If False, return
+            signed source amplitudes.
+
+        Returns
+        -------
+        ndarray, shape (n_sources, n_times)
+            Source-space time courses.
+        """
+        stc = self._load_pkl("step5_stc.pkl")
+        # MNE SourceEstimate stores data as (n_sources, n_times)
+        data = stc.data if hasattr(stc, "data") else np.asarray(stc)
+        if magnitude:
+            data = np.abs(data)
+        return data
