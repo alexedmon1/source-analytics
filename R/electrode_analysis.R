@@ -27,6 +27,7 @@ script_dir <- if (exists("script.dir")) {
 
 source(file.path(script_dir, "stats_utils.R"))
 source(file.path(script_dir, "plot_psd.R"))
+source(file.path(script_dir, "report.R"))
 
 # --- Argument parsing ---
 parser <- ArgumentParser(description = "Electrode-level PSD analysis (R)")
@@ -71,6 +72,11 @@ power_types <- c("relative", "dB")
 
 all_omnibus <- list()
 all_posthoc <- list()
+all_omnibus_region_nested <- list()
+all_posthoc_region_nested <- list()
+
+# Check for electrode_categories in config
+electrode_categories <- config$electrode_categories
 
 for (ptype in power_types) {
   message("\n=== Power type: ", ptype, " ===")
@@ -105,11 +111,47 @@ for (ptype in power_types) {
   } else {
     message("  No post-hoc tests (no significant omnibus effects)")
   }
+
+  # --- Region-level nested (electrodes as replicates within regions) ---
+  if (length(electrode_categories) > 0) {
+    message("Running region-level nested omnibus LMM (group * region, electrodes as replicates)...")
+    omnibus_reg_nested <- run_omnibus_lmm_region_nested(band_df, config$contrasts, config$bands,
+                                                         electrode_categories, power_type = ptype)
+    all_omnibus_region_nested[[ptype]] <- omnibus_reg_nested
+
+    if (nrow(omnibus_reg_nested) > 0) {
+      message("\n  === Region-Level Nested Omnibus (", ptype, ") ===")
+      for (i in seq_len(nrow(omnibus_reg_nested))) {
+        row <- omnibus_reg_nested[i, ]
+        grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
+        int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
+        message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
+                        row$contrast, row$band,
+                        row$group_F, row$group_q, grp_sig,
+                        row$interaction_F, row$interaction_q, int_sig))
+      }
+    }
+
+    message("Running region-level nested post-hoc emmeans...")
+    posthoc_reg_nested <- run_posthoc_emmeans_region_nested(band_df, config$contrasts, config$bands,
+                                                             electrode_categories, omnibus_reg_nested,
+                                                             power_type = ptype)
+    all_posthoc_region_nested[[ptype]] <- posthoc_reg_nested
+
+    if (nrow(posthoc_reg_nested) > 0) {
+      sig_count <- sum(posthoc_reg_nested$significant, na.rm = TRUE)
+      message("  ", nrow(posthoc_reg_nested), " nested region contrasts, ", sig_count, " significant")
+    } else {
+      message("  No nested region post-hoc tests (no significant omnibus effects)")
+    }
+  }
 }
 
 # --- Combine results ---
 omnibus_df <- bind_rows(all_omnibus)
 posthoc_df <- bind_rows(all_posthoc)
+omnibus_region_nested_df <- bind_rows(all_omnibus_region_nested)
+posthoc_region_nested_df <- bind_rows(all_posthoc_region_nested)
 
 # --- Export tables ---
 message("\nExporting tables...")
@@ -120,6 +162,14 @@ if (nrow(omnibus_df) > 0) {
 if (nrow(posthoc_df) > 0) {
   write_csv(posthoc_df, file.path(tbl_dir, "electrode_posthoc.csv"))
   message("  Saved: tables/electrode_posthoc.csv")
+}
+if (nrow(omnibus_region_nested_df) > 0) {
+  write_csv(omnibus_region_nested_df, file.path(tbl_dir, "electrode_omnibus_region_nested.csv"))
+  message("  Saved: tables/electrode_omnibus_region_nested.csv")
+}
+if (nrow(posthoc_region_nested_df) > 0) {
+  write_csv(posthoc_region_nested_df, file.path(tbl_dir, "electrode_posthoc_region_nested.csv"))
+  message("  Saved: tables/electrode_posthoc_region_nested.csv")
 }
 
 # --- Figures ---
@@ -205,146 +255,11 @@ n_subjects <- band_df %>%
   dplyr::count(group) %>%
   { setNames(.$n, .$group) }
 
-n_channels <- length(unique(band_df$roi))
 sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
 
-lines <- character()
-add <- function(...) lines <<- c(lines, paste0(...))
+write_summary(omnibus_df, posthoc_df, config, n_subjects, sfreq,
+              fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md"),
+              omnibus_region_nested_df = omnibus_region_nested_df,
+              posthoc_region_nested_df = posthoc_region_nested_df)
 
-add("# Electrode-Level PSD Analysis \u2014 ", config$name)
-add("")
-add("**Generated:** ", format(Sys.time(), "%Y-%m-%d %H:%M"))
-add("")
-
-add("## Methods")
-add("")
-group_str <- paste(
-  sapply(names(n_subjects), function(g) paste0(config$groups[[g]], " (n=", n_subjects[g], ")")),
-  collapse = ", "
-)
-band_str <- paste(
-  sapply(names(config$bands), function(b) {
-    lims <- config$bands[[b]]
-    paste0(b, ": ", lims[1], "-", lims[2], " Hz")
-  }),
-  collapse = ", "
-)
-
-add("**Analysis:** Electrode-Level Power Spectral Density")
-add("")
-add("**Groups:** ", group_str)
-add("")
-add("**Channels:** ", n_channels, " scalp electrodes")
-add("")
-add("**Sampling Rate:** ", sfreq, " Hz")
-add("")
-add("**Frequency Bands:** ", band_str)
-add("")
-add("**PSD Method:** Welch's method (2-second Hann windows, 50% overlap)")
-add("")
-add("**Statistics:** Omnibus LMM: dv ~ group * channel + (1|subject), Type III ANOVA ",
-    "with Satterthwaite df. FDR (BH) correction across bands. ",
-    "Post-hoc: emmeans pairwise group contrasts per channel, Holm correction. ",
-    "Hedges' g = emmean difference / residual SD.")
-add("")
-
-# Omnibus results
-add("## Omnibus LMM Results")
-add("")
-if (nrow(omnibus_df) > 0) {
-  display_cols <- intersect(
-    c("contrast", "band", "power_type", "n_a", "n_b", "n_rois",
-      "group_F", "group_p", "group_q", "group_significant",
-      "interaction_F", "interaction_p", "interaction_q", "interaction_significant"),
-    names(omnibus_df)
-  )
-  tbl <- omnibus_df[, display_cols]
-  for (col in names(tbl)) {
-    if (is.numeric(tbl[[col]])) tbl[[col]] <- sprintf("%.4f", tbl[[col]])
-    if (is.logical(tbl[[col]])) tbl[[col]] <- ifelse(tbl[[col]], "**Yes**", "No")
-  }
-  # Rename n_rois -> n_channels for clarity
-  names(tbl)[names(tbl) == "n_rois"] <- "n_channels"
-
-  header <- paste("|", paste(names(tbl), collapse = " | "), "|")
-  sep <- paste("|", paste(rep("---", ncol(tbl)), collapse = " | "), "|")
-  rows <- apply(tbl, 1, function(r) paste("|", paste(r, collapse = " | "), "|"))
-  add(header)
-  add(sep)
-  for (r in rows) add(r)
-  add("")
-}
-
-# Post-hoc results
-add("## Channel-Level Post-Hoc Contrasts")
-add("")
-if (nrow(posthoc_df) > 0) {
-  sig_posthoc <- posthoc_df %>% dplyr::filter(significant == TRUE)
-  if (nrow(sig_posthoc) > 0) {
-    add("Significant channel-level group differences (Holm-corrected q < 0.05):")
-    add("")
-    for (pt in unique(sig_posthoc$power_type)) {
-      for (bname in unique(sig_posthoc$band[sig_posthoc$power_type == pt])) {
-        band_sig <- sig_posthoc %>% dplyr::filter(power_type == pt, band == bname)
-        add("#### ", bname, " (", pt, ")")
-        add("")
-        add("| Channel | Estimate | SE | t | q | Hedges' g |")
-        add("| --- | --- | --- | --- | --- | --- |")
-        for (i in seq_len(nrow(band_sig))) {
-          row <- band_sig[i, ]
-          add(sprintf("| %s | %.4f | %.4f | %.2f | %.4f | %.2f |",
-                      row$roi, row$estimate, row$SE, row$t_ratio,
-                      row$q_value, row$hedges_g))
-        }
-        add("")
-      }
-    }
-  } else {
-    add("No individual channels reached significance after Holm correction.")
-    add("")
-  }
-} else {
-  add("*Post-hoc not performed (no significant omnibus effects).*")
-  add("")
-}
-
-# Key findings
-add("## Key Findings")
-add("")
-any_sig <- FALSE
-if (nrow(omnibus_df) > 0) {
-  for (i in seq_len(nrow(omnibus_df))) {
-    row <- omnibus_df[i, ]
-    findings <- character()
-    if (isTRUE(row$group_significant))
-      findings <- c(findings, sprintf("group main effect (F=%.2f, q=%.4f)", row$group_F, row$group_q))
-    if (isTRUE(row$interaction_significant))
-      findings <- c(findings, sprintf("group x channel interaction (F=%.2f, q=%.4f)", row$interaction_F, row$interaction_q))
-    if (length(findings) > 0) {
-      any_sig <- TRUE
-      add(sprintf("- **%s %s** [%s]: %s", row$band, row$power_type, row$contrast,
-                  paste(findings, collapse = "; ")))
-    }
-  }
-}
-if (!any_sig) {
-  add("- No bands reached significance after FDR correction.")
-}
-add("")
-
-# Figure references
-fig_files <- sort(list.files(fig_dir, pattern = "\\.png$"))
-if (length(fig_files) > 0) {
-  add("## Figures")
-  add("")
-  for (ff in fig_files) {
-    caption <- gsub("_", " ", tools::file_path_sans_ext(ff))
-    caption <- tools::toTitleCase(caption)
-    add(sprintf("![%s](figures/%s)", caption, ff))
-    add("")
-  }
-}
-
-writeLines(lines, file.path(output_dir, "ANALYSIS_SUMMARY.md"))
-message("  Report written: ", file.path(output_dir, "ANALYSIS_SUMMARY.md"))
 message("\nDone. Output: ", output_dir)

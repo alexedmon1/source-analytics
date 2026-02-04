@@ -86,16 +86,21 @@ format_posthoc_section <- function(sig_df, spatial_col = "roi") {
 #' @param output_path path to write ANALYSIS_SUMMARY.md
 #' @param omnibus_region_df optional data.frame from run_omnibus_lmm_region()
 #' @param posthoc_region_df optional data.frame from run_posthoc_emmeans_region()
+#' @param omnibus_region_nested_df optional data.frame from run_omnibus_lmm_region_nested()
+#' @param posthoc_region_nested_df optional data.frame from run_posthoc_emmeans_region_nested()
 write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
                            fig_dir, output_path,
                            omnibus_region_df = data.frame(),
-                           posthoc_region_df = data.frame()) {
+                           posthoc_region_df = data.frame(),
+                           omnibus_region_nested_df = data.frame(),
+                           posthoc_region_nested_df = data.frame()) {
 
   lines <- character()
   add <- function(...) lines <<- c(lines, paste0(...))
   add_lines <- function(x) lines <<- c(lines, x)
 
   has_region <- nrow(omnibus_region_df) > 0
+  has_region_nested <- nrow(omnibus_region_nested_df) > 0
   power_types_tested <- unique(omnibus_df$power_type)
 
   # Header
@@ -175,6 +180,31 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
     }
   }
 
+  # --- Region-level nested (replicates) results ---
+  if (has_region_nested) {
+    add("## Region-Level LMM Results (Nested Replicates)")
+    add("")
+    add("Individual ROIs/electrodes retained as replicates within regions (not averaged).")
+    add("")
+    add_lines(format_omnibus_table(omnibus_region_nested_df))
+    add("")
+
+    add("### Region-Level Post-Hoc Contrasts (Nested)")
+    add("")
+    if (nrow(posthoc_region_nested_df) > 0) {
+      sig_region_nested <- posthoc_region_nested_df %>% filter(significant == TRUE)
+      add_lines(format_posthoc_section(sig_region_nested, "region"))
+      add("**Total regions tested:** ", length(unique(posthoc_region_nested_df$region)),
+          " across ", length(unique(posthoc_region_nested_df$band)), " band(s)")
+      add("")
+      add("**Significant regions:** ", nrow(sig_region_nested))
+      add("")
+    } else {
+      add("*Nested region post-hoc not performed (no significant omnibus effects).*")
+      add("")
+    }
+  }
+
   # --- ROI-level results ---
   add("## ROI-Level LMM Results")
   add("")
@@ -223,6 +253,31 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
                     paste(findings, collapse = "; ")))
         if (nrow(posthoc_region_df) > 0) {
           band_regions <- posthoc_region_df %>%
+            filter(contrast == row$contrast, band == row$band,
+                   power_type == row$power_type, significant == TRUE)
+          if (nrow(band_regions) > 0) {
+            reg_strs <- sprintf("%s (g=%.2f)", band_regions$region, band_regions$hedges_g)
+            add("  - Significant regions: ", paste(reg_strs, collapse = ", "))
+          }
+        }
+      }
+    }
+  }
+
+  if (has_region_nested) {
+    for (i in seq_len(nrow(omnibus_region_nested_df))) {
+      row <- omnibus_region_nested_df[i, ]
+      findings <- character()
+      if (isTRUE(row$group_significant))
+        findings <- c(findings, sprintf("group main effect (F=%.2f, q=%.4f)", row$group_F, row$group_q))
+      if (isTRUE(row$interaction_significant))
+        findings <- c(findings, sprintf("group x region interaction (F=%.2f, q=%.4f)", row$interaction_F, row$interaction_q))
+      if (length(findings) > 0) {
+        any_sig <- TRUE
+        add(sprintf("- **%s %s** [%s, region-nested]: %s", row$band, row$power_type, row$contrast,
+                    paste(findings, collapse = "; ")))
+        if (nrow(posthoc_region_nested_df) > 0) {
+          band_regions <- posthoc_region_nested_df %>%
             filter(contrast == row$contrast, band == row$band,
                    power_type == row$power_type, significant == TRUE)
           if (nrow(band_regions) > 0) {
