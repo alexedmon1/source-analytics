@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
@@ -106,6 +107,210 @@ def plot_glass_brain(
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     logger.info("Saved glass brain: %s", output_path)
+
+
+def plot_pvalue_glass_brain(
+    source_coords: np.ndarray,
+    p_values: np.ndarray,
+    electrode_coords: np.ndarray,
+    title: str,
+    output_path: str | Path,
+    *,
+    p_threshold: float = 0.05,
+    effect_direction: Optional[np.ndarray] = None,
+    min_radius: float = 20,
+    max_radius: float = 200,
+    alpha: float = 0.6,
+    show_nonsig: bool = True,
+    nonsig_alpha: float = 0.15,
+) -> None:
+    """Plot source p-values with electrode-distance-based sizing.
+
+    Creates a 3-view glass brain where:
+    - Circle SIZE reflects distance from nearest electrode (larger = farther = less certain)
+    - Circle COLOR reflects p-value (using hot colormap, darker = more significant)
+    - Significant sources (p < threshold) are highlighted
+
+    Parameters
+    ----------
+    source_coords : ndarray, shape (n_sources, 3)
+        Source coordinates (x, y, z) in mm.
+    p_values : ndarray, shape (n_sources,)
+        P-values for each source.
+    electrode_coords : ndarray, shape (n_electrodes, 3)
+        Electrode coordinates (x, y, z) in mm.
+    title : str
+        Figure title.
+    output_path : Path
+        Where to save the figure.
+    p_threshold : float
+        Significance threshold (default 0.05).
+    effect_direction : ndarray, optional
+        Sign of effect (+1 or -1) per source. If provided, uses diverging colormap.
+    min_radius : float
+        Minimum marker size (for closest to electrodes).
+    max_radius : float
+        Maximum marker size (for farthest from electrodes).
+    alpha : float
+        Transparency for significant sources.
+    show_nonsig : bool
+        Whether to show non-significant sources.
+    nonsig_alpha : float
+        Transparency for non-significant sources.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import Normalize, LogNorm
+    from matplotlib.cm import ScalarMappable
+
+    n_sources = len(source_coords)
+
+    # Compute distance from each source to nearest electrode
+    distances = np.zeros(n_sources)
+    for i, src in enumerate(source_coords):
+        dists = np.linalg.norm(electrode_coords - src, axis=1)
+        distances[i] = np.min(dists)
+
+    # Normalize distances to marker sizes (farther = larger)
+    dist_min, dist_max = distances.min(), distances.max()
+    if dist_max > dist_min:
+        norm_dist = (distances - dist_min) / (dist_max - dist_min)
+    else:
+        norm_dist = np.zeros(n_sources)
+
+    marker_sizes = min_radius + norm_dist * (max_radius - min_radius)
+
+    # Convert p-values to color intensity (-log10 scale)
+    # Clamp to avoid log(0)
+    p_clamp = np.clip(p_values, 1e-10, 1.0)
+    neg_log_p = -np.log10(p_clamp)
+
+    # Identify significant sources
+    sig_mask = p_values < p_threshold
+
+    # Create figure
+    fig = plt.figure(figsize=(18, 6))
+
+    # Three views
+    view_configs = [
+        ("Axial (top)", 0, 1, "X (mm)", "Y (mm)"),
+        ("Coronal (front)", 0, 2, "X (mm)", "Z (mm)"),
+        ("Sagittal (side)", 1, 2, "Y (mm)", "Z (mm)"),
+    ]
+
+    # Colormap setup
+    if effect_direction is not None:
+        # Diverging colormap for bidirectional effects
+        cmap = plt.cm.RdBu_r
+        # Color = -log10(p) * sign(effect)
+        color_values = neg_log_p * np.sign(effect_direction)
+        vmax = np.max(np.abs(color_values[sig_mask])) if sig_mask.any() else 3
+        norm = Normalize(vmin=-vmax, vmax=vmax)
+        cbar_label = "-log₁₀(p) × sign(effect)"
+    else:
+        # Sequential colormap (hot) for unsigned p-values
+        cmap = plt.cm.hot_r
+        color_values = neg_log_p
+        norm = Normalize(vmin=0, vmax=max(3, neg_log_p.max()))
+        cbar_label = "-log₁₀(p)"
+
+    axes = []
+    for idx, (view_title, xi, yi, xlabel, ylabel) in enumerate(view_configs):
+        ax = fig.add_subplot(1, 3, idx + 1)
+        axes.append(ax)
+
+        # Plot non-significant sources first (background)
+        if show_nonsig:
+            nonsig_mask = ~sig_mask
+            if nonsig_mask.any():
+                ax.scatter(
+                    source_coords[nonsig_mask, xi],
+                    source_coords[nonsig_mask, yi],
+                    s=marker_sizes[nonsig_mask],
+                    c="lightgray",
+                    alpha=nonsig_alpha,
+                    edgecolors="gray",
+                    linewidths=0.3,
+                    zorder=1,
+                )
+
+        # Plot significant sources
+        if sig_mask.any():
+            sc = ax.scatter(
+                source_coords[sig_mask, xi],
+                source_coords[sig_mask, yi],
+                s=marker_sizes[sig_mask],
+                c=color_values[sig_mask],
+                cmap=cmap,
+                norm=norm,
+                alpha=alpha,
+                edgecolors="black",
+                linewidths=0.8,
+                zorder=2,
+            )
+
+        # Plot electrodes as small markers
+        ax.scatter(
+            electrode_coords[:, xi],
+            electrode_coords[:, yi],
+            s=15,
+            c="green",
+            marker="^",
+            alpha=0.7,
+            zorder=3,
+            label="Electrodes",
+        )
+
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(view_title)
+        ax.set_aspect("equal")
+        ax.grid(True, alpha=0.3)
+
+    # Add legend for electrode markers
+    axes[0].legend(loc="upper left", fontsize=8)
+
+    # Colorbar
+    if sig_mask.any():
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=axes, shrink=0.8, pad=0.02)
+        cbar.set_label(cbar_label, fontsize=10)
+
+    # Title with stats
+    n_sig = sig_mask.sum()
+    pct_sig = 100 * n_sig / n_sources
+    fig.suptitle(
+        f"{title}\n{n_sig}/{n_sources} vertices p<{p_threshold} ({pct_sig:.1f}%)",
+        fontsize=14, fontweight="bold", y=1.02,
+    )
+
+    # Add size legend
+    # Create a separate axis for size legend
+    size_legend_ax = fig.add_axes([0.02, 0.02, 0.15, 0.08])
+    size_legend_ax.axis("off")
+
+    # Show example sizes
+    example_sizes = [min_radius, (min_radius + max_radius) / 2, max_radius]
+    example_dists = [dist_min, (dist_min + dist_max) / 2, dist_max]
+    for i, (sz, d) in enumerate(zip(example_sizes, example_dists)):
+        size_legend_ax.scatter([i * 0.4], [0.5], s=sz, c="gray", alpha=0.5, edgecolors="black")
+        size_legend_ax.text(i * 0.4, -0.3, f"{d:.1f}mm", ha="center", fontsize=7)
+    size_legend_ax.text(0.4, 1.2, "Distance to electrode", ha="center", fontsize=8)
+    size_legend_ax.set_xlim(-0.2, 1.0)
+    size_legend_ax.set_ylim(-0.8, 1.5)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved p-value glass brain: %s", output_path)
+
+    return {
+        "n_significant": int(n_sig),
+        "pct_significant": float(pct_sig),
+        "distance_range": (float(dist_min), float(dist_max)),
+    }
 
 
 def plot_band_comparison(

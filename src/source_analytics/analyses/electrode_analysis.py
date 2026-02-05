@@ -86,8 +86,16 @@ class ElectrodeAnalysis(BaseAnalysis):
 
     def _find_eeg_path(self, subject: SubjectInfo) -> Path | None:
         """Look up the raw EEG file path for a subject from the roster."""
-        # Match on subject_id (roster subject_id == discovery subject_id)
-        matches = self._roster[self._roster["subject_id"] == subject.subject_id]
+        # Match on subject_id AND group to avoid collisions when the same
+        # base ID exists in multiple groups (e.g., Dsbpro_0 in KO and WT).
+        roster_group = subject.pipeline_dir.parent.name  # e.g., "KO ICV"
+        matches = self._roster[
+            (self._roster["subject_id"] == subject.subject_id)
+            & (self._roster["group"] == roster_group)
+        ]
+        if matches.empty:
+            # Fallback: match by subject_id only (safe when IDs are unique)
+            matches = self._roster[self._roster["subject_id"] == subject.subject_id]
         if matches.empty:
             # Try matching by pipeline_dir basename
             matches = self._roster[
@@ -99,6 +107,12 @@ class ElectrodeAnalysis(BaseAnalysis):
                 subject.subject_id,
             )
             return None
+
+        if len(matches) > 1:
+            logger.warning(
+                "Multiple roster matches for %s in group %s, using first",
+                subject.subject_id, roster_group,
+            )
 
         row = matches.iloc[0]
         eeg_path = Path(row["eeg_dir"]) / row["eeg_filename"]
