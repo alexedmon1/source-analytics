@@ -15,6 +15,12 @@ from .analyses.pac_analysis import PACAnalysis
 from .analyses.wholebrain_analysis import WholebrainAnalysis
 from .analyses.electrode_analysis import ElectrodeAnalysis
 from .analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
+from .analyses.tfce_analysis import TFCEAnalysis
+from .analyses.vertex_connectivity_analysis import VertexConnectivityAnalysis
+from .analyses.specparam_vertex_analysis import SpecparamVertexAnalysis
+from .analyses.mvpa_analysis import MVPAAnalysis
+from .analyses.network_analysis import NetworkAnalysis
+from .analyses.spatial_lmm_analysis import SpatialLMMAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +33,12 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "wholebrain": WholebrainAnalysis,
     "electrode": ElectrodeAnalysis,
     "electrode_comparison": ElectrodeComparisonAnalysis,
+    "tfce": TFCEAnalysis,
+    "vertex_connectivity": VertexConnectivityAnalysis,
+    "specparam_vertex": SpecparamVertexAnalysis,
+    "mvpa": MVPAAnalysis,
+    "network": NetworkAnalysis,
+    "spatial_lmm": SpatialLMMAnalysis,
 }
 
 

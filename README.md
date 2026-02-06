@@ -341,6 +341,226 @@ output_dir/wholebrain/
     wholebrain_summary.png
 ```
 
+### TFCE (Threshold-Free Cluster Enhancement) -- Implemented
+
+TFCE (Smith & Nichols, 2009) eliminates the arbitrary cluster-forming threshold by integrating cluster extent and height across all possible thresholds. More sensitive for diffuse effects than standard cluster-based permutation.
+
+**Python side:**
+- Vertex-level PSD and band power (same as wholebrain)
+- TFCE scoring: `TFCE(v) = sum_h { e(h)^E * h^H * dh }`
+- Permutation test: max|TFCE| null distribution
+- Glass brain visualizations of TFCE scores and significant vertices
+
+**R side:**
+- Per-band summary table (significant vertices, mean/max TFCE, effect sizes)
+- ANALYSIS_SUMMARY.md
+
+**Config:**
+```yaml
+tfce:
+  n_permutations: 1000
+  E: 0.5
+  H: 2.0
+  dh: 0.1
+  adjacency_distance_mm: 5.0
+```
+
+**Output:**
+```
+output_dir/tfce/
+  ANALYSIS_SUMMARY.md
+  data/tfce_band_power.csv, source_coords.csv
+  tables/tfce_stats.csv (vertex × band × t, tfce_score, p_corrected, hedges_g)
+  figures/tfce_scores_*.png, tfce_significant_*.png
+```
+
+### Vertex Connectivity (Functional Connectivity Density) -- Implemented
+
+All-to-all imaginary coherence between 154 vertices, deriving Functional Connectivity Density (FCD) maps showing how connected each vertex is to the rest of the brain.
+
+**Python side:**
+- CSD-based imaginary coherence for all 11,781 unique vertex pairs per band
+- FCD: fraction of connections above threshold per vertex
+- Cluster-based permutation testing on FCD maps
+- Glass brain FCD visualizations
+
+**R side:**
+- FCD summary by group, cluster statistics
+- ANALYSIS_SUMMARY.md
+
+**Config:**
+```yaml
+vertex_connectivity:
+  metric: imag_coherence
+  fcd_threshold: 0.05
+  n_permutations: 1000
+```
+
+**Output:**
+```
+output_dir/vertex_connectivity/
+  ANALYSIS_SUMMARY.md
+  data/vertex_fcd.csv, vertex_connectivity_matrices.pkl, source_coords.csv
+  tables/vertex_connectivity_stats.csv
+  figures/fcd_*.png
+```
+
+### Specparam Vertex (Vertex-Level Spectral Parameterization) -- Implemented
+
+Determines whether gamma elevation is a true oscillatory peak vs. broadband shift by fitting aperiodic (1/f) models at each vertex using specparam (FOOOF) or linear regression fallback.
+
+**Python side:**
+- Per-vertex specparam fit: exponent, offset, R², peak detection
+- Gamma peak presence detection per vertex
+- Cluster-based permutation on exponent/offset maps
+- Chi-squared tests on gamma peak presence rates
+- Glass brain maps: aperiodic parameters, gamma peak prevalence
+
+**R side:**
+- Group summary of aperiodic parameters, method distribution
+- ANALYSIS_SUMMARY.md
+
+**Config:**
+```yaml
+specparam_vertex:
+  freq_range: [1, 100]
+  peak_width_limits: [1.0, 12.0]
+  max_n_peaks: 6
+```
+
+**Output:**
+```
+output_dir/specparam_vertex/
+  ANALYSIS_SUMMARY.md
+  data/specparam_vertex.csv, source_coords.csv
+  tables/specparam_vertex_stats.csv, gamma_peak_chi2.csv
+  figures/specparam_*.png, gamma_peak_presence.png
+```
+
+### MVPA (Multivariate Pattern Analysis) -- Implemented
+
+Single omnibus test per band: can the whole-brain spatial pattern classify KO vs WT? Uses linear SVM + Leave-One-Out Cross-Validation with permutation testing.
+
+**Python side:**
+- Feature matrix: 154-vertex relative band power per subject
+- Linear SVM with LOOCV
+- Permutation test (shuffled group labels, 1000 permutations)
+- Reports: accuracy, p-value, sensitivity, specificity, AUC, 95% CI
+- Feature importance from SVM coefficients
+- Figures: null distribution histograms, importance glass brains, confusion matrices
+
+**R side:**
+- Classification results table, significant bands
+- ANALYSIS_SUMMARY.md
+
+**Config:**
+```yaml
+mvpa:
+  classifier: svm_linear
+  cv_method: loocv
+  n_permutations: 1000
+```
+
+**Output:**
+```
+output_dir/mvpa/
+  ANALYSIS_SUMMARY.md
+  data/mvpa_features.csv, source_coords.csv
+  tables/mvpa_results.csv
+  figures/mvpa_importance_*.png, mvpa_null_*.png, mvpa_confusion_*.png
+```
+
+### Network (Graph-Theoretic Analysis + NBS) -- Implemented
+
+Graph-theoretic metrics from thresholded connectivity matrices and Network-Based Statistic (Zalesky et al., 2010) for subnetwork identification.
+
+**Python side:**
+- Graph metrics via networkx: degree, clustering, betweenness, global efficiency, modularity, small-worldness
+- Cluster-based permutation on nodal metrics
+- NBS: edge-wise t-tests + connected component permutation testing
+- Glass brain nodal metric visualizations
+
+**R side:**
+- Global metric group comparisons (t-tests)
+- NBS subnetwork results
+- ANALYSIS_SUMMARY.md
+
+**Config:**
+```yaml
+network:
+  threshold_method: proportional
+  threshold_value: 0.1
+  nbs_threshold: 3.0
+  nbs_permutations: 5000
+```
+
+**Output:**
+```
+output_dir/network/
+  ANALYSIS_SUMMARY.md
+  data/network_nodal_metrics.csv, network_global_metrics.csv, source_coords.csv
+  tables/network_stats.csv, nbs_results.csv
+  figures/network_*.png
+```
+
+### Spatial LMM (Spatial Mixed Effects Models) -- Implemented
+
+Single model per band accounting for spatial correlation, avoiding the multiple comparison problem entirely. Primary computation in R using `nlme::gls` with exponential spatial correlation.
+
+**R side (primary computation):**
+- `gls(relative ~ group, correlation = corExp(form = ~x+y+z | subject))`
+- Spatial vs non-spatial model comparison via AIC/BIC
+- Group effect coefficient, SE, t-value, p-value
+- Estimated spatial range from correlation structure
+- Variogram plots (empirical vs fitted)
+- Fallback to GAM with `s(x,y,z, bs="tp")` if GLS fails
+
+**Python side:**
+- Data preparation: vertex power + coordinates CSVs
+- Spatial residual glass brain maps (from R output)
+
+**Config:**
+```yaml
+spatial_lmm:
+  correlation_structure: exponential
+  spatial_range_mm: 3.0
+```
+
+**Output:**
+```
+output_dir/spatial_lmm/
+  ANALYSIS_SUMMARY.md
+  data/spatial_lmm_data.csv, source_coords.csv
+  tables/spatial_lmm_results.csv, spatial_residuals.csv
+  figures/variogram_*.png, spatial_residuals_*.png
+```
+
+### Cross-Cutting: Random Epoch Sampling
+
+All wholebrain-based analyses support optional random epoch sampling. Instead of computing PSD/connectivity on full continuous recordings, randomly sample non-overlapping epochs of fixed duration. Enable in the wholebrain config section:
+
+```yaml
+wholebrain:
+  epoch_sampling:
+    enabled: true
+    epoch_duration_sec: 2.0
+    n_epochs: 80
+    seed: 42
+```
+
+When enabled, PSD is computed per-epoch then averaged (more robust spectral estimate). Connectivity is computed per-epoch then averaged (standard approach in connectivity literature).
+
+### Atlas Integration
+
+The `source_analytics.atlas` module maps vertex coordinates to anatomical ROI labels from the C57BL/6 MRI atlas. Used by analysis modules to annotate vertices with brain region names.
+
+```python
+from source_analytics.atlas import load_vertex_roi_labels, find_atlas_dir
+
+atlas_dir = find_atlas_dir()  # auto-detects from source_localization package
+labels = load_vertex_roi_labels(coords_mm, atlas_dir)
+```
+
 ## Adding a New Analysis
 
 1. Create `src/source_analytics/analyses/my_analysis.py` subclassing `BaseAnalysis`

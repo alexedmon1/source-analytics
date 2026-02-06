@@ -12,6 +12,14 @@ from .vertex import (
     compute_spectral_slope,
     compute_peak_frequency,
 )
+from .epoch_sampler import sample_epochs, get_epoch_config
+from .vertex_aperiodic import fit_aperiodic_vertices
+from .vertex_connectivity import (
+    compute_vertex_connectivity_matrix,
+    compute_vertex_connectivity_matrix_epochs,
+    compute_fcd,
+    compute_seed_connectivity,
+)
 
 __all__ = [
     "compute_psd",
@@ -27,4 +35,11 @@ __all__ = [
     "compute_falff",
     "compute_spectral_slope",
     "compute_peak_frequency",
+    "sample_epochs",
+    "get_epoch_config",
+    "fit_aperiodic_vertices",
+    "compute_vertex_connectivity_matrix",
+    "compute_vertex_connectivity_matrix_epochs",
+    "compute_fcd",
+    "compute_seed_connectivity",
 ]
