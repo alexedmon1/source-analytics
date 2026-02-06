@@ -49,6 +49,7 @@ class SpatialLMMAnalysis(BaseAnalysis):
         super().__init__(config, output_dir)
         self._power_rows: list[dict] = []
         self._source_coords: np.ndarray | None = None
+        self._vertex_indices: np.ndarray | None = None
         self._sfreq: float | None = None
 
         # Config
@@ -66,6 +67,7 @@ class SpatialLMMAnalysis(BaseAnalysis):
     def setup(self) -> None:
         self._power_rows.clear()
         self._source_coords = None
+        self._vertex_indices = None
 
     def process_subject(self, subject: SubjectInfo) -> None:
         loader = SubjectLoader(subject.data_dir)
@@ -77,8 +79,20 @@ class SpatialLMMAnalysis(BaseAnalysis):
 
         if self._sfreq is None:
             self._sfreq = sfreq
-        if self._source_coords is None:
-            self._source_coords = coords
+
+        # Apply vertex filter (compute mask once from first subject)
+        if self._vertex_indices is None:
+            mask = self.config.get_vertex_mask(coords)
+            self._vertex_indices = np.where(mask)[0]
+            self._source_coords = coords[mask]
+            if self.config.has_vertex_filter:
+                logger.info(
+                    "Vertex filter: %d/%d vertices retained",
+                    len(self._vertex_indices), len(coords),
+                )
+
+        stc_data = stc_data[self._vertex_indices]
+        coords = self._source_coords
 
         # Compute PSD
         fmax = max(hi for _, hi in self.config.bands.values()) + 10
@@ -108,7 +122,7 @@ class SpatialLMMAnalysis(BaseAnalysis):
                 self._power_rows.append({
                     "subject": uid,
                     "group": subject.group,
-                    "vertex_idx": vi,
+                    "vertex_idx": int(self._vertex_indices[vi]),
                     "x": float(coords[vi, 0]),
                     "y": float(coords[vi, 1]),
                     "z": float(coords[vi, 2]),

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import yaml
 
 
@@ -55,6 +56,7 @@ class StudyConfig:
     bands: dict[str, tuple[float, float]]
     roi_categories: dict[str, list[str]]
     discovery: dict[str, Any]
+    vertex_filter: dict[str, Any] = field(default_factory=dict)
     wholebrain: dict[str, Any] = field(default_factory=dict)
     electrode: dict[str, Any] = field(default_factory=dict)
     raw: dict = field(default_factory=dict, repr=False)
@@ -85,6 +87,7 @@ class StudyConfig:
             bands=bands,
             roi_categories=data.get("roi_categories", {}),
             discovery=data.get("discovery", {}),
+            vertex_filter=data.get("vertex_filter", {}),
             wholebrain=data.get("wholebrain", {}),
             electrode=data.get("electrode", {}),
             raw=data,
@@ -97,6 +100,37 @@ class StudyConfig:
     def get_band_limits(self, band_name: str) -> tuple[float, float]:
         """Return (fmin, fmax) for a named band."""
         return self.bands[band_name]
+
+    def get_vertex_mask(self, coords: np.ndarray) -> np.ndarray:
+        """Return boolean mask for vertices passing the vertex_filter.
+
+        Parameters
+        ----------
+        coords : ndarray, shape (n_vertices, 3)
+            Vertex coordinates (x, y, z) in mm.
+
+        Returns
+        -------
+        mask : ndarray of bool, shape (n_vertices,)
+            True for vertices that pass all filter criteria.
+        """
+        mask = np.ones(len(coords), dtype=bool)
+        vf = self.vertex_filter
+        if not vf:
+            return mask
+
+        for axis, idx in [("x", 0), ("y", 1), ("z", 2)]:
+            if f"{axis}_min" in vf:
+                mask &= coords[:, idx] >= vf[f"{axis}_min"]
+            if f"{axis}_max" in vf:
+                mask &= coords[:, idx] <= vf[f"{axis}_max"]
+
+        return mask
+
+    @property
+    def has_vertex_filter(self) -> bool:
+        """True if any vertex filter is configured."""
+        return bool(self.vertex_filter)
 
     def validate(self) -> list[str]:
         """Check configuration for common errors. Returns list of warnings."""

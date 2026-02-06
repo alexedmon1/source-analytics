@@ -76,6 +76,7 @@ class WholebrainAnalysis(BaseAnalysis):
         self._band_power_rows: list[dict] = []
         self._feature_rows: list[dict] = []
         self._source_coords: np.ndarray | None = None
+        self._vertex_indices: np.ndarray | None = None  # original indices of kept vertices
         self._sfreq: float | None = None
         # Per-subject arrays for statistics: {subject_uid: {band: {metric: array}}}
         self._subject_data: dict[str, dict] = {}
@@ -110,6 +111,7 @@ class WholebrainAnalysis(BaseAnalysis):
         self._subject_data.clear()
         self._subject_groups.clear()
         self._source_coords = None
+        self._vertex_indices = None
 
     def process_subject(self, subject: SubjectInfo) -> None:
         loader = SubjectLoader(subject.data_dir)
@@ -128,8 +130,19 @@ class WholebrainAnalysis(BaseAnalysis):
                 subject.subject_id, sfreq, self._sfreq,
             )
 
-        if self._source_coords is None:
-            self._source_coords = coords
+        # Apply vertex filter (compute mask once from first subject)
+        if self._vertex_indices is None:
+            mask = self.config.get_vertex_mask(coords)
+            self._vertex_indices = np.where(mask)[0]
+            self._source_coords = coords[mask]
+            if self.config.has_vertex_filter:
+                logger.info(
+                    "Vertex filter: %d/%d vertices retained",
+                    len(self._vertex_indices), len(coords),
+                )
+
+        stc_data = stc_data[self._vertex_indices]
+        coords = self._source_coords
         n_vertices = stc_data.shape[0]
 
         # Compute PSD for all vertices: (n_vertices, n_freqs)
@@ -156,13 +169,13 @@ class WholebrainAnalysis(BaseAnalysis):
             "peak_alpha": peak_alpha,
         }
 
-        # Accumulate rows for CSV export
+        # Accumulate rows for CSV export (use original vertex indices)
         for band_name, bp in band_power.items():
             for vi in range(n_vertices):
                 self._band_power_rows.append({
                     "subject": uid,
                     "group": subject.group,
-                    "vertex_idx": vi,
+                    "vertex_idx": int(self._vertex_indices[vi]),
                     "band": band_name,
                     "absolute": float(bp["absolute"][vi]),
                     "relative": float(bp["relative"][vi]),
@@ -173,7 +186,7 @@ class WholebrainAnalysis(BaseAnalysis):
             self._feature_rows.append({
                 "subject": uid,
                 "group": subject.group,
-                "vertex_idx": vi,
+                "vertex_idx": int(self._vertex_indices[vi]),
                 "falff": float(falff[vi]),
                 "spectral_slope": float(slope[vi]),
                 "peak_alpha_freq": float(peak_alpha[vi]),
@@ -282,7 +295,7 @@ class WholebrainAnalysis(BaseAnalysis):
             # --- Band power metrics ---
             band_cluster_results = {}
             for band_name in self.config.bands:
-                for metric in ["relative", "dB"]:
+                for metric in ["relative", "dB", "absolute"]:
                     data_a = np.array([
                         self._subject_data[uid]["band_power"][band_name][metric]
                         for uid in group_a_uids

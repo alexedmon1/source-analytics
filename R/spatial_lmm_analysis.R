@@ -37,13 +37,14 @@ corr_struct <- slmm_cfg$correlation_structure %||% "exponential"
 range_mm    <- slmm_cfg$spatial_range_mm %||% 3.0
 
 bands <- unique(dat$band)
+metrics <- c("relative", "dB", "absolute")
 groups <- levels(dat$group)
 n_subjects <- length(unique(dat$subject))
 
-cat(sprintf("Spatial LMM: %d subjects, %d bands, %d vertices per subject\n",
-            n_subjects, length(bands), length(unique(dat$vertex_idx))))
+cat(sprintf("Spatial LMM: %d subjects, %d bands, %d metrics, %d vertices per subject\n",
+            n_subjects, length(bands), length(metrics), length(unique(dat$vertex_idx))))
 
-# --- Fit models per band ------------------------------------------------------
+# --- Fit models per band x metric --------------------------------------------
 fig_dir <- file.path(output_dir, "figures")
 tbl_dir <- file.path(output_dir, "tables")
 dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
@@ -51,168 +52,184 @@ dir.create(tbl_dir, showWarnings = FALSE, recursive = TRUE)
 
 model_results <- list()
 all_residuals <- data.frame()
+result_idx <- 0
 
 for (band in bands) {
-  cat(sprintf("\n--- Fitting spatial GLS for %s ---\n", band))
-  band_dat <- dat[dat$band == band, ]
+  for (metric in metrics) {
+    result_idx <- result_idx + 1
+    result_key <- paste(band, metric, sep = "_")
+    cat(sprintf("\n--- Fitting spatial GLS for %s [%s] ---\n", band, metric))
+    band_dat <- dat[dat$band == band, ]
 
-  # Ensure enough data
-  if (nrow(band_dat) < 10) {
-    cat(sprintf("  Skipping %s: too few rows (%d)\n", band, nrow(band_dat)))
-    next
-  }
+    # Ensure enough data
+    if (nrow(band_dat) < 10) {
+      cat(sprintf("  Skipping %s [%s]: too few rows (%d)\n", band, metric, nrow(band_dat)))
+      next
+    }
 
-  # Non-spatial model (baseline)
-  tryCatch({
-    fit_nonspatial <- gls(relative ~ group, data = band_dat)
-    aic_nonspatial <- AIC(fit_nonspatial)
-    bic_nonspatial <- BIC(fit_nonspatial)
-    cat(sprintf("  Non-spatial GLS: AIC=%.1f, BIC=%.1f\n", aic_nonspatial, bic_nonspatial))
-  }, error = function(e) {
-    cat(sprintf("  Non-spatial GLS failed: %s\n", e$message))
-    aic_nonspatial <<- NA
-    bic_nonspatial <<- NA
-    fit_nonspatial <<- NULL
-  })
+    # Check metric column exists
+    if (!(metric %in% names(band_dat))) {
+      cat(sprintf("  Skipping %s [%s]: column not found\n", band, metric))
+      next
+    }
 
-  # Spatial model with exponential correlation
-  fit_spatial <- NULL
-  convergence <- "failed"
-  aic_spatial <- NA
-  bic_spatial <- NA
+    # Create formula-friendly response column
+    band_dat$response <- band_dat[[metric]]
 
-  tryCatch({
-    fit_spatial <- gls(
-      relative ~ group,
-      data = band_dat,
-      correlation = corExp(value = range_mm, form = ~ x + y + z | subject, nugget = TRUE),
-      control = glsControl(maxIter = 200, msMaxIter = 200, tolerance = 1e-4)
-    )
-    aic_spatial <- AIC(fit_spatial)
-    bic_spatial <- BIC(fit_spatial)
-    convergence <- "converged"
-    cat(sprintf("  Spatial GLS (corExp): AIC=%.1f, BIC=%.1f\n", aic_spatial, bic_spatial))
-  }, error = function(e) {
-    cat(sprintf("  Spatial GLS (corExp) failed: %s\n", e$message))
-
-    # Fallback: simpler correlation structure
+    # Non-spatial model (baseline)
     tryCatch({
-      fit_spatial <<- gls(
-        relative ~ group,
-        data = band_dat,
-        correlation = corExp(value = range_mm, form = ~ x + y + z | subject),
-        control = glsControl(maxIter = 100, msMaxIter = 100)
-      )
-      aic_spatial <<- AIC(fit_spatial)
-      bic_spatial <<- BIC(fit_spatial)
-      convergence <<- "converged (no nugget)"
-      cat(sprintf("  Fallback spatial GLS: AIC=%.1f, BIC=%.1f\n", aic_spatial, bic_spatial))
-    }, error = function(e2) {
-      cat(sprintf("  Fallback also failed: %s\n", e2$message))
+      fit_nonspatial <- gls(response ~ group, data = band_dat)
+      aic_nonspatial <- AIC(fit_nonspatial)
+      bic_nonspatial <- BIC(fit_nonspatial)
+      cat(sprintf("  Non-spatial GLS: AIC=%.1f, BIC=%.1f\n", aic_nonspatial, bic_nonspatial))
+    }, error = function(e) {
+      cat(sprintf("  Non-spatial GLS failed: %s\n", e$message))
+      aic_nonspatial <<- NA
+      bic_nonspatial <<- NA
+      fit_nonspatial <<- NULL
+    })
 
-      # Final fallback: GAM with spatial smooth
+    # Spatial model with exponential correlation
+    fit_spatial <- NULL
+    convergence <- "failed"
+    aic_spatial <- NA
+    bic_spatial <- NA
+
+    tryCatch({
+      fit_spatial <- gls(
+        response ~ group,
+        data = band_dat,
+        correlation = corExp(value = range_mm, form = ~ x + y + z | subject, nugget = TRUE),
+        control = glsControl(maxIter = 200, msMaxIter = 200, tolerance = 1e-4)
+      )
+      aic_spatial <- AIC(fit_spatial)
+      bic_spatial <- BIC(fit_spatial)
+      convergence <- "converged"
+      cat(sprintf("  Spatial GLS (corExp): AIC=%.1f, BIC=%.1f\n", aic_spatial, bic_spatial))
+    }, error = function(e) {
+      cat(sprintf("  Spatial GLS (corExp) failed: %s\n", e$message))
+
+      # Fallback: simpler correlation structure
       tryCatch({
-        library(mgcv)
-        fit_gam <- gam(relative ~ group + s(x, y, z, bs = "tp", k = 20),
-                       data = band_dat)
-        aic_spatial <<- AIC(fit_gam)
-        bic_spatial <<- BIC(fit_gam)
-        fit_spatial <<- fit_gam
-        convergence <<- "gam_fallback"
-        cat(sprintf("  GAM fallback: AIC=%.1f\n", aic_spatial))
-      }, error = function(e3) {
-        cat(sprintf("  GAM fallback also failed: %s\n", e3$message))
+        fit_spatial <<- gls(
+          response ~ group,
+          data = band_dat,
+          correlation = corExp(value = range_mm, form = ~ x + y + z | subject),
+          control = glsControl(maxIter = 100, msMaxIter = 100)
+        )
+        aic_spatial <<- AIC(fit_spatial)
+        bic_spatial <<- BIC(fit_spatial)
+        convergence <<- "converged (no nugget)"
+        cat(sprintf("  Fallback spatial GLS: AIC=%.1f, BIC=%.1f\n", aic_spatial, bic_spatial))
+      }, error = function(e2) {
+        cat(sprintf("  Fallback also failed: %s\n", e2$message))
+
+        # Final fallback: GAM with spatial smooth
+        tryCatch({
+          library(mgcv)
+          fit_gam <- gam(response ~ group + s(x, y, z, bs = "tp", k = 20),
+                         data = band_dat)
+          aic_spatial <<- AIC(fit_gam)
+          bic_spatial <<- BIC(fit_gam)
+          fit_spatial <<- fit_gam
+          convergence <<- "gam_fallback"
+          cat(sprintf("  GAM fallback: AIC=%.1f\n", aic_spatial))
+        }, error = function(e3) {
+          cat(sprintf("  GAM fallback also failed: %s\n", e3$message))
+        })
       })
     })
-  })
 
-  # Extract group effect
-  coef_val <- NA
-  se_val <- NA
-  t_val <- NA
-  p_val <- NA
-  estimated_range <- NA
+    # Extract group effect
+    coef_val <- NA
+    se_val <- NA
+    t_val <- NA
+    p_val <- NA
+    estimated_range <- NA
 
-  if (!is.null(fit_spatial)) {
-    tryCatch({
-      s <- summary(fit_spatial)
+    if (!is.null(fit_spatial)) {
+      tryCatch({
+        s <- summary(fit_spatial)
 
-      if (convergence != "gam_fallback") {
-        tbl <- s$tTable
-        # Group effect is the second row (first non-intercept)
-        if (nrow(tbl) >= 2) {
-          coef_val <- tbl[2, "Value"]
-          se_val <- tbl[2, "Std.Error"]
-          t_val <- tbl[2, "t-value"]
-          p_val <- tbl[2, "p-value"]
+        if (convergence != "gam_fallback") {
+          tbl <- s$tTable
+          # Group effect is the second row (first non-intercept)
+          if (nrow(tbl) >= 2) {
+            coef_val <- tbl[2, "Value"]
+            se_val <- tbl[2, "Std.Error"]
+            t_val <- tbl[2, "t-value"]
+            p_val <- tbl[2, "p-value"]
+          }
+
+          # Extract estimated spatial range
+          tryCatch({
+            cs <- coef(fit_spatial$modelStruct$corStruct, unconstrained = FALSE)
+            estimated_range <- cs["range"]
+          }, error = function(e) {})
+
+        } else {
+          # GAM summary
+          ptbl <- s$p.table
+          if (nrow(ptbl) >= 2) {
+            coef_val <- ptbl[2, "Estimate"]
+            se_val <- ptbl[2, "Std. Error"]
+            t_val <- ptbl[2, "t value"]
+            p_val <- ptbl[2, "Pr(>|t|)"]
+          }
         }
+      }, error = function(e) {
+        cat(sprintf("  Summary extraction failed: %s\n", e$message))
+      })
 
-        # Extract estimated spatial range
-        tryCatch({
-          cs <- coef(fit_spatial$modelStruct$corStruct, unconstrained = FALSE)
-          estimated_range <- cs["range"]
-        }, error = function(e) {})
+      # Extract residuals
+      tryCatch({
+        resids <- data.frame(
+          subject = band_dat$subject,
+          vertex_idx = band_dat$vertex_idx,
+          band = band,
+          metric = metric,
+          residual = residuals(fit_spatial),
+          stringsAsFactors = FALSE
+        )
+        all_residuals <- rbind(all_residuals, resids)
+      }, error = function(e) {})
+    }
 
-      } else {
-        # GAM summary
-        ptbl <- s$p.table
-        if (nrow(ptbl) >= 2) {
-          coef_val <- ptbl[2, "Estimate"]
-          se_val <- ptbl[2, "Std. Error"]
-          t_val <- ptbl[2, "t value"]
-          p_val <- ptbl[2, "Pr(>|t|)"]
-        }
-      }
-    }, error = function(e) {
-      cat(sprintf("  Summary extraction failed: %s\n", e$message))
-    })
+    model_results[[result_key]] <- data.frame(
+      band = band,
+      metric = metric,
+      convergence = convergence,
+      aic_spatial = aic_spatial,
+      bic_spatial = bic_spatial,
+      aic_nonspatial = aic_nonspatial,
+      bic_nonspatial = bic_nonspatial,
+      aic_improvement = ifelse(!is.na(aic_nonspatial) & !is.na(aic_spatial),
+                               aic_nonspatial - aic_spatial, NA),
+      coefficient = coef_val,
+      std_error = se_val,
+      t_value = t_val,
+      p_value = p_val,
+      estimated_range_mm = estimated_range,
+      stringsAsFactors = FALSE
+    )
 
-    # Extract residuals
-    tryCatch({
-      resids <- data.frame(
-        subject = band_dat$subject,
-        vertex_idx = band_dat$vertex_idx,
-        band = band,
-        residual = residuals(fit_spatial),
-        stringsAsFactors = FALSE
-      )
-      all_residuals <- rbind(all_residuals, resids)
-    }, error = function(e) {})
-  }
+    cat(sprintf("  Group effect: coef=%.4f, SE=%.4f, t=%.3f, p=%.4f\n",
+                coef_val, se_val, t_val, p_val))
 
-  model_results[[band]] <- data.frame(
-    band = band,
-    convergence = convergence,
-    aic_spatial = aic_spatial,
-    bic_spatial = bic_spatial,
-    aic_nonspatial = aic_nonspatial,
-    bic_nonspatial = bic_nonspatial,
-    aic_improvement = ifelse(!is.na(aic_nonspatial) & !is.na(aic_spatial),
-                             aic_nonspatial - aic_spatial, NA),
-    coefficient = coef_val,
-    std_error = se_val,
-    t_value = t_val,
-    p_value = p_val,
-    estimated_range_mm = estimated_range,
-    stringsAsFactors = FALSE
-  )
-
-  cat(sprintf("  Group effect: coef=%.4f, SE=%.4f, t=%.3f, p=%.4f\n",
-              coef_val, se_val, t_val, p_val))
-
-  # Variogram plot
-  if (!is.null(fit_spatial) && convergence != "gam_fallback") {
-    tryCatch({
-      safe_band <- gsub(" ", "_", tolower(band))
-      png(file.path(fig_dir, sprintf("variogram_%s.png", safe_band)),
-          width = 800, height = 500)
-      plot(Variogram(fit_spatial, form = ~ x + y + z | subject, maxDist = 8),
-           main = sprintf("Variogram — %s", band))
-      dev.off()
-      cat(sprintf("  Saved variogram_%s.png\n", safe_band))
-    }, error = function(e) {
-      cat(sprintf("  Variogram plot failed: %s\n", e$message))
-    })
+    # Variogram plot (only for relative to avoid figure clutter)
+    if (metric == "relative" && !is.null(fit_spatial) && convergence != "gam_fallback") {
+      tryCatch({
+        safe_band <- gsub(" ", "_", tolower(band))
+        png(file.path(fig_dir, sprintf("variogram_%s.png", safe_band)),
+            width = 800, height = 500)
+        plot(Variogram(fit_spatial, form = ~ x + y + z | subject, maxDist = 8),
+             main = sprintf("Variogram — %s (relative)", band))
+        dev.off()
+        cat(sprintf("  Saved variogram_%s.png\n", safe_band))
+      }, error = function(e) {
+        cat(sprintf("  Variogram plot failed: %s\n", e$message))
+      })
+    }
   }
 }
 
@@ -264,15 +281,15 @@ if (!is.null(epoch_cfg) && isTRUE(epoch_cfg$enabled)) {
 lines <- c(lines,
   "## Model Results",
   "",
-  "| Band | Convergence | AIC (spatial) | AIC (non-spatial) | AIC Improvement | Coef | SE | t | p |",
-  "|------|-------------|---------------|-------------------|-----------------|------|----|---|---|"
+  "| Band | Metric | Convergence | AIC (spatial) | AIC (non-spatial) | AIC Improvement | Coef | SE | t | p |",
+  "|------|--------|-------------|---------------|-------------------|-----------------|------|----|---|---|"
 )
 
 for (i in seq_len(nrow(results_df))) {
   r <- results_df[i, ]
   lines <- c(lines, sprintf(
-    "| %s | %s | %.1f | %.1f | %.1f | %.4f | %.4f | %.3f | %.4f |",
-    r$band, r$convergence,
+    "| %s | %s | %s | %.1f | %.1f | %.1f | %.4f | %.4f | %.3f | %.4f |",
+    r$band, r$metric, r$convergence,
     ifelse(is.na(r$aic_spatial), NA, r$aic_spatial),
     ifelse(is.na(r$aic_nonspatial), NA, r$aic_nonspatial),
     ifelse(is.na(r$aic_improvement), NA, r$aic_improvement),
