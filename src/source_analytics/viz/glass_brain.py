@@ -14,6 +14,10 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Default atlas intensity template filename (continuous-valued MRI volume)
+_ATLAS_INTENSITY_NIFTI = "Atlas_3DRois.nii"
+_ATLAS_VOXEL_SCALE = 0.1
+
 
 def _setup_axes(fig, title: str | None = None):
     """Create 3-view glass brain axes (axial, coronal, sagittal)."""
@@ -522,3 +526,319 @@ def plot_wholebrain_summary(
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     logger.info("Saved summary figure: %s", output_path)
+
+
+def _load_atlas_slices(
+    atlas_dir: str | Path,
+    slice_coords: dict[str, float] | None = None,
+) -> dict:
+    """Load atlas intensity template and extract center slices.
+
+    Parameters
+    ----------
+    atlas_dir : Path
+        Directory containing Atlas_3DRois.nii.
+    slice_coords : dict, optional
+        Override slice positions: {"axial_z": 1.5, "coronal_y": 0.0,
+        "sagittal_x": 0.0}. Defaults to midline/dorsal center.
+
+    Returns
+    -------
+    dict with keys: axial_slice, coronal_slice, sagittal_slice,
+        axial_extent, coronal_extent, sagittal_extent, vmin_img, vmax_img,
+        x_coords, y_coords, z_coords.
+    """
+    import nibabel as nib
+
+    atlas_dir = Path(atlas_dir)
+    nii_path = atlas_dir / _ATLAS_INTENSITY_NIFTI
+    if not nii_path.exists():
+        raise FileNotFoundError(f"Atlas intensity template not found: {nii_path}")
+
+    nii = nib.load(str(nii_path))
+    vol = nii.get_fdata()
+    affine = nii.affine.copy()
+    affine[:3, :3] *= _ATLAS_VOXEL_SCALE
+    affine[:3, 3] *= _ATLAS_VOXEL_SCALE
+    nx, ny, nz = vol.shape
+
+    x_coords = affine[0, 3] + np.arange(nx) * affine[0, 0]
+    y_coords = affine[1, 3] + np.arange(ny) * affine[1, 1]
+    z_coords = affine[2, 3] + np.arange(nz) * affine[2, 2]
+
+    sc = slice_coords or {}
+    iz = int(np.argmin(np.abs(z_coords - sc.get("axial_z", 1.5))))
+    iy = int(np.argmin(np.abs(y_coords - sc.get("coronal_y", 0.0))))
+    ix = int(np.argmin(np.abs(x_coords - sc.get("sagittal_x", 0.0))))
+
+    vmin_img, vmax_img = np.percentile(vol[vol > 0.1], [2, 98])
+
+    return {
+        "axial_slice": vol[:, :, iz].T,       # (ny, nx)
+        "coronal_slice": vol[:, iy, :].T,      # (nz, nx)
+        "sagittal_slice": vol[ix, :, :].T,     # (nz, ny)
+        "axial_extent": [x_coords[0], x_coords[-1], y_coords[0], y_coords[-1]],
+        "coronal_extent": [x_coords[0], x_coords[-1], z_coords[0], z_coords[-1]],
+        "sagittal_extent": [y_coords[0], y_coords[-1], z_coords[0], z_coords[-1]],
+        "vmin_img": float(vmin_img),
+        "vmax_img": float(vmax_img),
+        "x_coords": x_coords,
+        "y_coords": y_coords,
+        "z_coords": z_coords,
+        "slice_z": float(z_coords[iz]),
+        "slice_y": float(y_coords[iy]),
+        "slice_x": float(x_coords[ix]),
+    }
+
+
+def plot_anatomical_glass_brain(
+    coords: np.ndarray,
+    band_data: dict[str, dict],
+    output_path: str | Path,
+    *,
+    atlas_dir: str | Path | None = None,
+    title: str = "",
+    subtitle: str = "",
+    cmap: str = "RdYlBu_r",
+    vlim: tuple[float, float] | None = None,
+    sig_threshold: float | None = 2.0,
+    slice_coords: dict[str, float] | None = None,
+    atlas_alpha: float = 0.55,
+    colorbar_label: str = "Value",
+    sig_marker_size: float = 130,
+    nonsig_marker_size: float = 50,
+    dpi: int = 200,
+) -> None:
+    """Plot vertex-level values on anatomical atlas center slices.
+
+    Creates a 3-view (axial, coronal, sagittal) figure with MRI center
+    slices as background and scatter points colored by value. Supports
+    multiple bands displayed as side-by-side columns.
+
+    Parameters
+    ----------
+    coords : ndarray, shape (n_vertices, 3)
+        Source coordinates (x, y, z) in mm.
+    band_data : dict
+        Mapping of band_name -> dict with keys:
+        - "values" : ndarray, shape (n_vertices,) — values to plot
+        Optional keys for labeling:
+        - "n_sig" : int — number of significant vertices (for subtitle)
+        - "n_total" : int — total vertices
+    output_path : Path
+        Where to save the figure.
+    atlas_dir : Path, optional
+        Directory containing Atlas_3DRois.nii. If None, auto-detected via
+        ``source_analytics.atlas.find_atlas_dir()``.
+    title : str
+        Main figure title.
+    subtitle : str
+        Second line of title.
+    cmap : str
+        Colormap name for scatter points.
+    vlim : tuple, optional
+        (vmin, vmax) for color scale. If None, uses [0, max(|values|)].
+    sig_threshold : float, optional
+        Value threshold for highlighting significant vertices with larger
+        markers and black edges. Set to None to disable.
+    slice_coords : dict, optional
+        Override slice positions: {"axial_z", "coronal_y", "sagittal_x"}.
+    atlas_alpha : float
+        Transparency of anatomical background (0=invisible, 1=opaque).
+    colorbar_label : str
+        Label for the colorbar.
+    sig_marker_size : float
+        Marker size for significant vertices.
+    nonsig_marker_size : float
+        Marker size for non-significant vertices.
+    dpi : int
+        Output resolution.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.patheffects as pe
+    from matplotlib.gridspec import GridSpec
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    # Auto-detect atlas directory
+    if atlas_dir is None:
+        from ..atlas import find_atlas_dir
+        atlas_dir = find_atlas_dir()
+
+    # Load atlas slices
+    atlas = _load_atlas_slices(atlas_dir, slice_coords)
+
+    # View definitions
+    views = [
+        {
+            "label": f"Axial (z = {atlas['slice_z']:.1f} mm)",
+            "xi": 0, "yi": 1,
+            "xlabel": "X (L-R, mm)", "ylabel": "Y (A-P, mm)",
+            "slice": atlas["axial_slice"], "extent": atlas["axial_extent"],
+            "xlim": [-7.0, 7.0], "ylim": [-10.5, 10.5],
+            "annotations": True,
+        },
+        {
+            "label": f"Coronal (y = {atlas['slice_y']:.1f} mm)",
+            "xi": 0, "yi": 2,
+            "xlabel": "X (L-R, mm)", "ylabel": "Z (D-V, mm)",
+            "slice": atlas["coronal_slice"], "extent": atlas["coronal_extent"],
+            "xlim": [-7.0, 7.0], "ylim": [-2.0, 4.5],
+            "annotations": False,
+        },
+        {
+            "label": f"Sagittal (x = {atlas['slice_x']:.1f} mm)",
+            "xi": 1, "yi": 2,
+            "xlabel": "Y (A-P, mm)", "ylabel": "Z (D-V, mm)",
+            "slice": atlas["sagittal_slice"], "extent": atlas["sagittal_extent"],
+            "xlim": [-10.5, 10.5], "ylim": [-2.0, 4.5],
+            "annotations": False,
+        },
+    ]
+
+    # Compute height ratios from data aspect
+    h_ratios = []
+    for v in views:
+        y_range = v["ylim"][1] - v["ylim"][0]
+        x_range = v["xlim"][1] - v["xlim"][0]
+        h_ratios.append(y_range / x_range)
+
+    n_bands = len(band_data)
+    band_names = list(band_data.keys())
+
+    # Compute color limits
+    if vlim is None:
+        all_vals = np.concatenate([bd["values"] for bd in band_data.values()])
+        vmax_val = float(np.ceil(np.nanmax(np.abs(all_vals)) * 10) / 10)
+        vlim = (0, vmax_val)
+
+    # Figure size: scale by number of bands
+    fig_w = 6.5 * n_bands + 1.0  # extra for colorbar
+    fig_h = 16
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    gs = GridSpec(
+        3, n_bands + 1, figure=fig,
+        height_ratios=h_ratios,
+        width_ratios=[1] * n_bands + [0.05],
+        wspace=0.15, hspace=0.10,
+    )
+
+    text_fx = [pe.withStroke(linewidth=2, foreground="black")]
+
+    for col_j, band_name in enumerate(band_names):
+        bd = band_data[band_name]
+        values = bd["values"]
+        n_sig = bd.get("n_sig")
+        n_total = bd.get("n_total", len(values))
+        if n_sig is None and sig_threshold is not None:
+            n_sig = int((np.abs(values) > sig_threshold).sum())
+
+        for row_i, view in enumerate(views):
+            ax = fig.add_subplot(gs[row_i, col_j])
+            xi, yi = view["xi"], view["yi"]
+
+            # Anatomical background
+            ax.imshow(
+                view["slice"], extent=view["extent"], origin="lower",
+                cmap="gray", vmin=atlas["vmin_img"], vmax=atlas["vmax_img"],
+                alpha=atlas_alpha, aspect="equal", interpolation="bilinear",
+            )
+
+            # Scatter: non-significant
+            if sig_threshold is not None:
+                nonsig = np.abs(values) <= sig_threshold
+                sig = np.abs(values) > sig_threshold
+            else:
+                nonsig = np.ones(len(values), dtype=bool)
+                sig = np.zeros(len(values), dtype=bool)
+
+            if nonsig.any():
+                ax.scatter(
+                    coords[nonsig, xi], coords[nonsig, yi],
+                    c=values[nonsig], cmap=cmap,
+                    vmin=vlim[0], vmax=vlim[1],
+                    s=nonsig_marker_size, alpha=0.65,
+                    edgecolors="white", linewidths=0.5, zorder=2,
+                )
+
+            if sig.any():
+                ax.scatter(
+                    coords[sig, xi], coords[sig, yi],
+                    c=values[sig], cmap=cmap,
+                    vmin=vlim[0], vmax=vlim[1],
+                    s=sig_marker_size, alpha=0.95,
+                    edgecolors="black", linewidths=1.3, zorder=3,
+                )
+
+            ax.set_xlim(view["xlim"])
+            ax.set_ylim(view["ylim"])
+            ax.set_aspect("equal")
+            ax.tick_params(labelsize=8)
+
+            # Axis labels
+            if row_i == len(views) - 1:
+                ax.set_xlabel(view["xlabel"], fontsize=10)
+            else:
+                ax.set_xticklabels([])
+            if col_j == 0:
+                ax.set_ylabel(view["ylabel"], fontsize=10)
+            else:
+                ax.set_yticklabels([])
+
+            # View label on left column
+            if col_j == 0:
+                ax.text(
+                    -0.18, 0.5, view["label"], transform=ax.transAxes,
+                    fontsize=10, fontweight="bold", ha="center", va="center",
+                    rotation=90, color="#333333",
+                )
+
+            # Band title on top row
+            if row_i == 0:
+                sig_label = f"\n({n_sig}/{n_total} sig.)" if n_sig is not None else ""
+                ax.set_title(
+                    f"{band_name}{sig_label}",
+                    fontsize=12, fontweight="bold", pad=10,
+                )
+
+            # L/R, A/P annotations on axial views
+            if view["annotations"]:
+                xlim, ylim = view["xlim"], view["ylim"]
+                for txt, pos, ha, va in [
+                    ("L", (xlim[0] + 0.4, 0), "left", "center"),
+                    ("R", (xlim[1] - 0.4, 0), "right", "center"),
+                    ("A", (0, ylim[1] - 0.4), "center", "top"),
+                    ("P", (0, ylim[0] + 0.4), "center", "bottom"),
+                ]:
+                    ax.text(
+                        *pos, txt, fontsize=9, fontweight="bold",
+                        ha=ha, va=va, color="white", path_effects=text_fx,
+                    )
+
+    # Colorbar
+    cbar_ax = fig.add_subplot(gs[:, n_bands])
+    sm = ScalarMappable(cmap=cmap, norm=Normalize(vmin=vlim[0], vmax=vlim[1]))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar.set_label(colorbar_label, fontsize=11)
+    if sig_threshold is not None:
+        cbar.ax.axhline(y=sig_threshold, color="black", linestyle="--", linewidth=1.0)
+        cbar.ax.text(
+            1.5, sig_threshold, f"t = {sig_threshold}", fontsize=8,
+            va="center", transform=cbar.ax.get_yaxis_transform(),
+        )
+
+    # Title
+    title_text = title
+    if subtitle:
+        title_text += f"\n{subtitle}"
+    if title_text:
+        fig.suptitle(title_text, fontsize=13, fontweight="bold", y=0.98)
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    logger.info("Saved anatomical glass brain: %s", output_path)
