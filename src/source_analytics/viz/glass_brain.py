@@ -318,13 +318,14 @@ def plot_band_comparison(
     mean_a: np.ndarray,
     mean_b: np.ndarray,
     t_map: np.ndarray,
-    cluster_labels: np.ndarray,
-    cluster_pvalues: list[float],
+    cluster_labels: np.ndarray | None,
+    cluster_pvalues: list[float] | None,
     band_name: str,
     group_labels: tuple[str, str],
     output_path: str | Path,
     *,
     alpha_threshold: float = 0.05,
+    p_corrected: np.ndarray | None = None,
 ) -> None:
     """Generate 6-panel comparison figure for a single band/metric.
 
@@ -333,7 +334,7 @@ def plot_band_comparison(
     2. Group B mean
     3. Difference (A - B)
     4. T-statistic map
-    5. Significant clusters
+    5. Significant clusters/vertices
     6. Histogram of vertex-level differences
 
     Parameters
@@ -343,16 +344,19 @@ def plot_band_comparison(
         Group-level mean values.
     t_map : ndarray, shape (n_vertices,)
         T-statistics per vertex.
-    cluster_labels : ndarray, shape (n_vertices,)
-        Cluster label per vertex (0 = no cluster).
-    cluster_pvalues : list[float]
-        Corrected p-value per cluster.
+    cluster_labels : ndarray or None, shape (n_vertices,)
+        Cluster label per vertex (0 = no cluster). Used with cluster correction.
+    cluster_pvalues : list[float] or None
+        Corrected p-value per cluster. Used with cluster correction.
     band_name : str
     group_labels : tuple of str
         (label_a, label_b) for display.
     output_path : Path
     alpha_threshold : float
-        Significance threshold for clusters.
+        Significance threshold.
+    p_corrected : ndarray or None, shape (n_vertices,)
+        Per-vertex corrected p-values (e.g., from TFCE). If provided, used
+        instead of cluster_labels/cluster_pvalues for significance.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -411,21 +415,28 @@ def plot_band_comparison(
     ax.set_aspect("equal")
     fig.colorbar(sc, ax=ax, shrink=0.8)
 
-    # Panel 5: Significant clusters
+    # Panel 5: Significant clusters/vertices
     ax = axes[1, 1]
     # Build significance mask
     sig_mask = np.zeros(len(t_map), dtype=bool)
-    for ci, p_val in enumerate(cluster_pvalues, start=1):
-        if p_val < alpha_threshold:
-            sig_mask |= (cluster_labels == ci)
+    if p_corrected is not None:
+        sig_mask = p_corrected < alpha_threshold
+        correction_label = "TFCE Vertices"
+    elif cluster_pvalues is not None and cluster_labels is not None:
+        for ci, p_val in enumerate(cluster_pvalues, start=1):
+            if p_val < alpha_threshold:
+                sig_mask |= (cluster_labels == ci)
+        correction_label = "Clusters"
+    else:
+        correction_label = "Vertices"
 
     colors = np.where(sig_mask, t_map, 0.0)
     vmax_sig = np.nanmax(np.abs(colors)) if sig_mask.any() else 1.0
     sc = ax.scatter(coords[:, 0], coords[:, 1], c=colors,
                     cmap="RdBu_r", vmin=-vmax_sig, vmax=vmax_sig,
                     s=30, alpha=0.8, edgecolors="0.3", linewidths=0.3)
-    n_sig = sum(1 for p in cluster_pvalues if p < alpha_threshold)
-    ax.set_title(f"Significant Clusters (n={n_sig}, p<{alpha_threshold})")
+    n_sig = int(sig_mask.sum())
+    ax.set_title(f"Significant {correction_label} (n={n_sig}, p<{alpha_threshold})")
     ax.set_xlabel("X (mm)")
     ax.set_ylabel("Y (mm)")
     ax.set_aspect("equal")
@@ -487,11 +498,14 @@ def plot_wholebrain_summary(
             cmap="RdBu_r", vmin=-vmax, vmax=vmax,
             s=20, alpha=0.8, edgecolors="0.3", linewidths=0.2,
         )
-        # Mark significant clusters
+        # Mark significant vertices/clusters
         sig_vertices = np.zeros(len(t_map), dtype=bool)
-        for ci, p_val in enumerate(res.get("cluster_pvalues", []), start=1):
-            if p_val < 0.05:
-                sig_vertices |= (res["cluster_labels"] == ci)
+        if "p_corrected" in res:
+            sig_vertices = res["p_corrected"] < 0.05
+        else:
+            for ci, p_val in enumerate(res.get("cluster_pvalues", []), start=1):
+                if p_val < 0.05:
+                    sig_vertices |= (res["cluster_labels"] == ci)
         if sig_vertices.any():
             ax.scatter(
                 coords[sig_vertices, 0], coords[sig_vertices, 1],

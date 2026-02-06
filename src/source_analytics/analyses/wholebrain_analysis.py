@@ -36,6 +36,7 @@ from ..stats.cluster_permutation import (
     hedges_g,
     voxelwise_ttest,
 )
+from ..stats.tfce import tfce_permutation_test
 from ..viz.glass_brain import (
     plot_band_comparison,
     plot_glass_brain,
@@ -88,6 +89,20 @@ class WholebrainAnalysis(BaseAnalysis):
         self._noise_exclude = wb_cfg.get("noise_exclude_hz")
         if self._noise_exclude is not None:
             self._noise_exclude = tuple(self._noise_exclude)
+
+        # Correction method: "cluster" (default) or "tfce"
+        self._correction_method = wb_cfg.get("correction_method", "cluster")
+        if self._correction_method == "tfce":
+            tfce_cfg = wb_cfg.get("tfce", {})
+            self._tfce_E = float(tfce_cfg.get("E", 0.5))
+            self._tfce_H = float(tfce_cfg.get("H", 2.0))
+            self._tfce_dh = float(tfce_cfg.get("dh", 0.1))
+        elif self._correction_method != "cluster":
+            logger.warning(
+                "Unknown correction_method '%s', using 'cluster'",
+                self._correction_method,
+            )
+            self._correction_method = "cluster"
 
     def setup(self) -> None:
         self._band_power_rows.clear()
@@ -192,8 +207,39 @@ class WholebrainAnalysis(BaseAnalysis):
             coords_df.to_csv(data_dir / "source_coords.csv")
             logger.info("Exported source_coords.csv (%d rows)", len(coords_df))
 
+    def _run_test(self, data_a, data_b, coords):
+        """Run the configured correction method and return standardized results."""
+        if self._correction_method == "tfce":
+            result = tfce_permutation_test(
+                data_a, data_b, coords,
+                n_perms=self._n_permutations,
+                E=self._tfce_E, H=self._tfce_H, dh=self._tfce_dh,
+                distance_mm=self._adjacency_distance, seed=42,
+            )
+            return {
+                "t_map": result.t_map,
+                "hedges_g": result.hedges_g_map,
+                "p_corrected": result.p_corrected,
+                "tfce_scores": result.tfce_scores,
+            }
+        else:
+            result = cluster_permutation_test(
+                data_a, data_b, coords,
+                n_perms=self._n_permutations,
+                threshold=self._cluster_threshold,
+                distance_mm=self._adjacency_distance, seed=42,
+            )
+            return {
+                "t_map": result.t_map,
+                "hedges_g": hedges_g(data_a, data_b),
+                "p_map": result.p_map,
+                "cluster_labels": result.cluster_labels,
+                "cluster_pvalues": result.cluster_pvalues,
+                "cluster_stats": result.cluster_stats,
+            }
+
     def statistics(self) -> None:
-        """Run voxel-wise t-tests + cluster permutation for each contrast and metric."""
+        """Run voxel-wise t-tests with cluster permutation or TFCE correction."""
         if self._source_coords is None:
             logger.error("No source coordinates — cannot run statistics")
             return
@@ -201,6 +247,9 @@ class WholebrainAnalysis(BaseAnalysis):
         coords = self._source_coords
         tbl_dir = self.output_dir / "tables"
         data_dir = self.output_dir / "data"
+        is_tfce = self._correction_method == "tfce"
+
+        logger.info("Correction method: %s", self._correction_method)
 
         all_voxelwise = []
         all_cluster = []
@@ -243,61 +292,63 @@ class WholebrainAnalysis(BaseAnalysis):
                         for uid in group_b_uids
                     ])
 
-                    # Cluster permutation test
-                    result = cluster_permutation_test(
-                        data_a, data_b, coords,
-                        n_perms=self._n_permutations,
-                        threshold=self._cluster_threshold,
-                        distance_mm=self._adjacency_distance,
-                        seed=42,
-                    )
-
-                    # Effect size
-                    g_map = hedges_g(data_a, data_b)
+                    res = self._run_test(data_a, data_b, coords)
 
                     # Store for plotting (use relative power for band plots)
                     if metric == "relative":
-                        band_cluster_results[band_name] = {
-                            "t_map": result.t_map,
-                            "cluster_labels": result.cluster_labels,
-                            "cluster_pvalues": result.cluster_pvalues,
+                        plot_res = {
+                            "t_map": res["t_map"],
                             "mean_a": data_a.mean(axis=0),
                             "mean_b": data_b.mean(axis=0),
                         }
+                        if is_tfce:
+                            plot_res["p_corrected"] = res["p_corrected"]
+                            plot_res["tfce_scores"] = res["tfce_scores"]
+                            plot_res["hedges_g_map"] = res["hedges_g"]
+                        else:
+                            plot_res["cluster_labels"] = res["cluster_labels"]
+                            plot_res["cluster_pvalues"] = res["cluster_pvalues"]
+                        band_cluster_results[band_name] = plot_res
 
                     # Voxelwise stats rows
-                    for vi in range(len(result.t_map)):
-                        all_voxelwise.append({
+                    for vi in range(len(res["t_map"])):
+                        row = {
                             "contrast": contrast.name,
                             "band": band_name,
                             "metric": metric,
                             "vertex_idx": vi,
-                            "t": float(result.t_map[vi]),
-                            "p": float(result.p_map[vi]),
-                            "hedges_g": float(g_map[vi]),
-                            "cluster_id": int(result.cluster_labels[vi]),
-                        })
+                            "t": float(res["t_map"][vi]),
+                            "hedges_g": float(res["hedges_g"][vi]),
+                        }
+                        if is_tfce:
+                            row["tfce_score"] = float(res["tfce_scores"][vi])
+                            row["p_corrected"] = float(res["p_corrected"][vi])
+                        else:
+                            row["p"] = float(res["p_map"][vi])
+                            row["cluster_id"] = int(res["cluster_labels"][vi])
+                        all_voxelwise.append(row)
 
-                    # Cluster summary rows
-                    for ci, (cs, cp) in enumerate(
-                        zip(result.cluster_stats, result.cluster_pvalues), start=1
-                    ):
-                        n_verts = int(np.sum(result.cluster_labels == ci))
-                        peak_t = float(
-                            result.t_map[result.cluster_labels == ci][
-                                np.argmax(np.abs(result.t_map[result.cluster_labels == ci]))
-                            ]
-                        )
-                        all_cluster.append({
-                            "contrast": contrast.name,
-                            "band": band_name,
-                            "metric": metric,
-                            "cluster_id": ci,
-                            "n_vertices": n_verts,
-                            "cluster_stat": float(cs),
-                            "peak_t": peak_t,
-                            "p_corrected": float(cp),
-                        })
+                    # Cluster summary rows (cluster method only)
+                    if not is_tfce:
+                        for ci, (cs, cp) in enumerate(
+                            zip(res["cluster_stats"], res["cluster_pvalues"]),
+                            start=1,
+                        ):
+                            n_verts = int(np.sum(res["cluster_labels"] == ci))
+                            mask = res["cluster_labels"] == ci
+                            peak_t = float(
+                                res["t_map"][mask][np.argmax(np.abs(res["t_map"][mask]))]
+                            )
+                            all_cluster.append({
+                                "contrast": contrast.name,
+                                "band": band_name,
+                                "metric": metric,
+                                "cluster_id": ci,
+                                "n_vertices": n_verts,
+                                "cluster_stat": float(cs),
+                                "peak_t": peak_t,
+                                "p_corrected": float(cp),
+                            })
 
             # --- Feature metrics (falff, slope, peak_alpha) ---
             feature_cluster_results = {}
@@ -313,55 +364,59 @@ class WholebrainAnalysis(BaseAnalysis):
                     self._subject_data[uid][feat_key] for uid in group_b_uids
                 ])
 
-                result = cluster_permutation_test(
-                    data_a, data_b, coords,
-                    n_perms=self._n_permutations,
-                    threshold=self._cluster_threshold,
-                    distance_mm=self._adjacency_distance,
-                    seed=42,
-                )
+                res = self._run_test(data_a, data_b, coords)
 
-                g_map = hedges_g(data_a, data_b)
-
-                feature_cluster_results[feat_name] = {
-                    "t_map": result.t_map,
-                    "cluster_labels": result.cluster_labels,
-                    "cluster_pvalues": result.cluster_pvalues,
+                feat_res = {
+                    "t_map": res["t_map"],
                     "mean_a": data_a.mean(axis=0),
                     "mean_b": data_b.mean(axis=0),
                 }
+                if is_tfce:
+                    feat_res["p_corrected"] = res["p_corrected"]
+                    feat_res["tfce_scores"] = res["tfce_scores"]
+                    feat_res["hedges_g_map"] = res["hedges_g"]
+                else:
+                    feat_res["cluster_labels"] = res["cluster_labels"]
+                    feat_res["cluster_pvalues"] = res["cluster_pvalues"]
+                feature_cluster_results[feat_name] = feat_res
 
-                for vi in range(len(result.t_map)):
-                    all_voxelwise.append({
+                for vi in range(len(res["t_map"])):
+                    row = {
                         "contrast": contrast.name,
                         "band": feat_name,
                         "metric": feat_name,
                         "vertex_idx": vi,
-                        "t": float(result.t_map[vi]),
-                        "p": float(result.p_map[vi]),
-                        "hedges_g": float(g_map[vi]),
-                        "cluster_id": int(result.cluster_labels[vi]),
-                    })
+                        "t": float(res["t_map"][vi]),
+                        "hedges_g": float(res["hedges_g"][vi]),
+                    }
+                    if is_tfce:
+                        row["tfce_score"] = float(res["tfce_scores"][vi])
+                        row["p_corrected"] = float(res["p_corrected"][vi])
+                    else:
+                        row["p"] = float(res["p_map"][vi])
+                        row["cluster_id"] = int(res["cluster_labels"][vi])
+                    all_voxelwise.append(row)
 
-                for ci, (cs, cp) in enumerate(
-                    zip(result.cluster_stats, result.cluster_pvalues), start=1
-                ):
-                    n_verts = int(np.sum(result.cluster_labels == ci))
-                    peak_t = float(
-                        result.t_map[result.cluster_labels == ci][
-                            np.argmax(np.abs(result.t_map[result.cluster_labels == ci]))
-                        ]
-                    )
-                    all_cluster.append({
-                        "contrast": contrast.name,
-                        "band": feat_name,
-                        "metric": feat_name,
-                        "cluster_id": ci,
-                        "n_vertices": n_verts,
-                        "cluster_stat": float(cs),
-                        "peak_t": peak_t,
-                        "p_corrected": float(cp),
-                    })
+                if not is_tfce:
+                    for ci, (cs, cp) in enumerate(
+                        zip(res["cluster_stats"], res["cluster_pvalues"]),
+                        start=1,
+                    ):
+                        n_verts = int(np.sum(res["cluster_labels"] == ci))
+                        mask = res["cluster_labels"] == ci
+                        peak_t = float(
+                            res["t_map"][mask][np.argmax(np.abs(res["t_map"][mask]))]
+                        )
+                        all_cluster.append({
+                            "contrast": contrast.name,
+                            "band": feat_name,
+                            "metric": feat_name,
+                            "cluster_id": ci,
+                            "n_vertices": n_verts,
+                            "cluster_stat": float(cs),
+                            "peak_t": peak_t,
+                            "p_corrected": float(cp),
+                        })
 
             # Store results for figures phase
             self._band_cluster_results = band_cluster_results
@@ -374,7 +429,19 @@ class WholebrainAnalysis(BaseAnalysis):
             vox_df.to_csv(tbl_dir / "voxelwise_stats.csv", index=False)
             logger.info("Exported voxelwise_stats.csv (%d rows)", len(vox_df))
 
-        if all_cluster:
+        if is_tfce:
+            # Log TFCE summary
+            if all_voxelwise:
+                vox_df = pd.DataFrame(all_voxelwise)
+                sig = vox_df[vox_df["p_corrected"] < 0.05]
+                if len(sig) > 0:
+                    logger.info("TFCE significant vertices (p<0.05): %d", len(sig))
+                    for band in sig["band"].unique():
+                        n = len(sig[sig["band"] == band])
+                        logger.info("  %s: %d vertices", band, n)
+                else:
+                    logger.info("TFCE: no significant vertices at p<0.05")
+        elif all_cluster:
             clust_df = pd.DataFrame(all_cluster)
             clust_df.to_csv(tbl_dir / "cluster_results.csv", index=False)
             logger.info("Exported cluster_results.csv (%d rows)", len(clust_df))
@@ -399,12 +466,19 @@ class WholebrainAnalysis(BaseAnalysis):
             "feature_cluster_results": getattr(self, "_feature_cluster_results", {}),
             "source_coords": self._source_coords,
             "subject_groups": self._subject_groups,
+            "correction_method": self._correction_method,
             "config": {
-                "cluster_threshold": self._cluster_threshold,
+                "correction_method": self._correction_method,
                 "n_permutations": self._n_permutations,
                 "adjacency_distance_mm": self._adjacency_distance,
             },
         }
+        if is_tfce:
+            results_pkl["config"]["tfce_E"] = self._tfce_E
+            results_pkl["config"]["tfce_H"] = self._tfce_H
+            results_pkl["config"]["tfce_dh"] = self._tfce_dh
+        else:
+            results_pkl["config"]["cluster_threshold"] = self._cluster_threshold
         with open(data_dir / "wholebrain_results.pkl", "wb") as f:
             pickle.dump(results_pkl, f)
         logger.info("Saved wholebrain_results.pkl")
@@ -418,6 +492,7 @@ class WholebrainAnalysis(BaseAnalysis):
         coords = self._source_coords
         fig_dir = self.output_dir / "figures"
         group_labels = getattr(self, "_contrast_labels", ("Group A", "Group B"))
+        is_tfce = self._correction_method == "tfce"
 
         # Band power figures
         band_results = getattr(self, "_band_cluster_results", {})
@@ -428,12 +503,22 @@ class WholebrainAnalysis(BaseAnalysis):
                 mean_a=res["mean_a"],
                 mean_b=res["mean_b"],
                 t_map=res["t_map"],
-                cluster_labels=res["cluster_labels"],
-                cluster_pvalues=res["cluster_pvalues"],
+                cluster_labels=res.get("cluster_labels"),
+                cluster_pvalues=res.get("cluster_pvalues"),
                 band_name=band_name,
                 group_labels=group_labels,
                 output_path=fig_dir / f"wholebrain_{safe_name}.png",
+                p_corrected=res.get("p_corrected"),
             )
+            # TFCE score maps
+            if is_tfce and "tfce_scores" in res:
+                plot_glass_brain(
+                    coords=coords,
+                    values=res["tfce_scores"],
+                    title=f"TFCE Scores — {band_name}",
+                    output_path=fig_dir / f"tfce_scores_{safe_name}.png",
+                    cmap="RdBu_r",
+                )
 
         # Feature figures
         feature_results = getattr(self, "_feature_cluster_results", {})
@@ -443,11 +528,12 @@ class WholebrainAnalysis(BaseAnalysis):
                 mean_a=res["mean_a"],
                 mean_b=res["mean_b"],
                 t_map=res["t_map"],
-                cluster_labels=res["cluster_labels"],
-                cluster_pvalues=res["cluster_pvalues"],
+                cluster_labels=res.get("cluster_labels"),
+                cluster_pvalues=res.get("cluster_pvalues"),
                 band_name=feat_name,
                 group_labels=group_labels,
                 output_path=fig_dir / f"wholebrain_{feat_name}.png",
+                p_corrected=res.get("p_corrected"),
             )
 
         # Summary figure
@@ -520,29 +606,71 @@ class WholebrainAnalysis(BaseAnalysis):
     def _write_python_summary(self) -> None:
         """Fallback summary when R is not available."""
         tbl_dir = self.output_dir / "tables"
-        cluster_csv = tbl_dir / "cluster_results.csv"
+        is_tfce = self._correction_method == "tfce"
+
+        if is_tfce:
+            correction_desc = (
+                "TFCE (Smith & Nichols, 2009) was applied to vertex-level band power maps. "
+                "TFCE integrates cluster extent and height across all possible thresholds "
+                f"(E={self._tfce_E}, H={self._tfce_H}, dh={self._tfce_dh}), "
+                "eliminating the need for an arbitrary cluster-forming threshold. "
+                "Statistical significance was assessed via permutation testing."
+            )
+            method_label = "Vertex-level spectral analysis with TFCE correction"
+        else:
+            correction_desc = (
+                "Group differences were tested using independent-samples t-tests at each vertex, "
+                "with cluster-based permutation correction for multiple comparisons "
+                "(Maris & Oostenveld, 2007)."
+            )
+            method_label = "Vertex-level spectral analysis with cluster permutation testing"
 
         lines = [
             "# Whole-Brain Analysis Summary",
             "",
             f"**Study**: {self.config.name}",
-            f"**Analysis**: Vertex-level spectral analysis with cluster permutation testing",
+            f"**Analysis**: {method_label}",
+            f"**Correction method**: {self._correction_method}",
             f"**Permutations**: {self._n_permutations}",
-            f"**Cluster threshold**: t = {self._cluster_threshold}",
             f"**Adjacency distance**: {self._adjacency_distance} mm",
-            "",
-            "## Methods",
-            "",
+        ]
+        if not is_tfce:
+            lines.append(f"**Cluster threshold**: t = {self._cluster_threshold}")
+        lines.extend(["", "## Methods", ""])
+        lines.append(
             "Power spectral density was computed for each source vertex using Welch's method "
             "(2-second windows, 50% overlap). Band power (absolute and relative), fALFF, "
             "spectral slope, and peak alpha frequency were extracted per vertex. "
-            "Group differences were tested using independent-samples t-tests at each vertex, "
-            "with cluster-based permutation correction for multiple comparisons "
-            "(Maris & Oostenveld, 2007).",
-            "",
-        ]
+            + correction_desc
+        )
+        lines.append("")
 
-        if cluster_csv.exists():
+        # Results section
+        voxelwise_csv = tbl_dir / "voxelwise_stats.csv"
+        cluster_csv = tbl_dir / "cluster_results.csv"
+
+        if is_tfce and voxelwise_csv.exists():
+            vox_df = pd.read_csv(voxelwise_csv)
+            sig = vox_df[vox_df["p_corrected"] < 0.05]
+
+            lines.append("## Results")
+            lines.append("")
+            if len(sig) > 0:
+                lines.append(f"**{len(sig)} significant vertices** (TFCE p < 0.05):")
+                lines.append("")
+                for band in vox_df["band"].unique():
+                    for metric in vox_df["metric"].unique():
+                        subset = sig[(sig["band"] == band) & (sig["metric"] == metric)]
+                        total = len(vox_df[
+                            (vox_df["band"] == band) & (vox_df["metric"] == metric)
+                        ])
+                        lines.append(f"- **{band}** ({metric}): {len(subset)}/{total} vertices")
+                lines.append("")
+            else:
+                lines.append("No significant vertices at TFCE p < 0.05.")
+                lines.append("")
+
+        elif not is_tfce and cluster_csv.exists():
             clust_df = pd.read_csv(cluster_csv)
             sig = clust_df[clust_df["p_corrected"] < 0.05]
 
@@ -572,9 +700,12 @@ class WholebrainAnalysis(BaseAnalysis):
         lines.append("- `data/wholebrain_values.csv` — per-subject per-vertex band power")
         lines.append("- `data/wholebrain_features.csv` — per-subject per-vertex fALFF, slope, peak alpha")
         lines.append("- `data/source_coords.csv` — vertex coordinates (mm)")
-        lines.append("- `tables/voxelwise_stats.csv` — per-vertex t, p, Hedges' g")
-        lines.append("- `tables/cluster_results.csv` — cluster summaries with corrected p-values")
+        lines.append("- `tables/voxelwise_stats.csv` — per-vertex statistics")
+        if not is_tfce:
+            lines.append("- `tables/cluster_results.csv` — cluster summaries with corrected p-values")
         lines.append("- `figures/wholebrain_*.png` — glass brain visualizations")
+        if is_tfce:
+            lines.append("- `figures/tfce_scores_*.png` — TFCE score glass brains")
         lines.append("")
 
         summary_path = self.output_dir / "ANALYSIS_SUMMARY.md"

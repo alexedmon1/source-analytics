@@ -1,4 +1,4 @@
-"""Connectivity Analysis: coherence and imaginary coherence between ROI pairs."""
+"""ROI Connectivity Analysis: coherence and imaginary coherence between ROI pairs."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ class ConnectivityAnalysis(BaseAnalysis):
     and summary report.
     """
 
-    name = "connectivity"
+    name = "roi_connectivity"
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -103,8 +103,8 @@ class ConnectivityAnalysis(BaseAnalysis):
             logger.warning("No connectivity data collected")
             return
 
-        edge_df.to_csv(data_dir / "connectivity_edges.csv", index=False)
-        logger.info("Exported connectivity_edges.csv (%d rows)", len(edge_df))
+        edge_df.to_csv(data_dir / "roi_connectivity_edges.csv", index=False)
+        logger.info("Exported roi_connectivity_edges.csv (%d rows)", len(edge_df))
 
     def statistics(self) -> None:
         """Delegated to R."""
@@ -118,8 +118,8 @@ class ConnectivityAnalysis(BaseAnalysis):
         """Call Rscript for statistics, figures, and summary report."""
         data_dir = self.output_dir / "data"
 
-        if not (data_dir / "connectivity_edges.csv").exists():
-            logger.error("connectivity_edges.csv not found -- skipping R analysis")
+        if not (data_dir / "roi_connectivity_edges.csv").exists():
+            logger.error("roi_connectivity_edges.csv not found -- skipping R analysis")
             return
 
         # Find R scripts
@@ -129,7 +129,7 @@ class ConnectivityAnalysis(BaseAnalysis):
             logger.error(str(e))
             return
 
-        r_script = r_dir / "connectivity_analysis.R"
+        r_script = r_dir / "roi_connectivity_analysis.R"
         if not r_script.exists():
             logger.error("R script not found: %s", r_script)
             return

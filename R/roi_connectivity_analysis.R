@@ -1,9 +1,9 @@
 #!/usr/bin/env Rscript
-# connectivity_analysis.R — Functional connectivity statistics, figures, and report
+# roi_connectivity_analysis.R — ROI functional connectivity statistics, figures, and report
 #
 # Called by Python: Rscript R/connectivity_analysis.R --data-dir ... --config ... --output-dir ...
 #
-# Reads connectivity_edges.csv exported by Python.
+# Reads roi_connectivity_edges.csv exported by Python.
 # Two analysis tiers:
 #   1. Global connectivity: average all edges per subject x band, Welch t-test per band, BH FDR
 #   2. Region-pair level: map edges to region pairs via roi_categories, LMM per band, post-hoc emmeans
@@ -433,7 +433,7 @@ plot_connectivity_matrices <- function(edges, metric_col, group_colors,
       )
 
     n_groups <- length(unique(bdata_sym$group_label))
-    fname <- paste0("connectivity_matrix_", metric_col, "_", bname, ".png")
+    fname <- paste0("roi_connectivity_matrix_", metric_col, "_", bname, ".png")
     ggsave(file.path(output_dir, fname), p,
            width = 7 * n_groups, height = 7, dpi = 200, limitsize = FALSE)
     message("  Saved: ", fname)
@@ -495,9 +495,9 @@ plot_global_connectivity_bar <- function(global_df, group_colors, group_labels,
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
   n_bands <- length(unique(summary_data$band))
-  ggsave(file.path(output_dir, "connectivity_global_bar.png"), p,
+  ggsave(file.path(output_dir, "roi_connectivity_global_bar.png"), p,
          width = max(8, 2 * n_bands), height = 5, dpi = 300)
-  message("  Saved: connectivity_global_bar.png")
+  message("  Saved: roi_connectivity_global_bar.png")
 }
 
 #' Forest plot for region-pair post-hoc results
@@ -540,7 +540,7 @@ plot_region_pair_forest <- function(posthoc_df, output_dir) {
         )
 
       n_pairs <- length(unique(pdata$region_pair))
-      fname <- paste0("connectivity_region_pair_forest_", metric_name, "_", cname, ".png")
+      fname <- paste0("roi_connectivity_region_pair_forest_", metric_name, "_", cname, ".png")
       ggsave(file.path(output_dir, fname), p,
              width = max(10, 4 * n_bands), height = max(6, n_pairs * 0.35 + 2),
              dpi = 300, limitsize = FALSE)
@@ -565,7 +565,7 @@ write_connectivity_summary <- function(global_df, global_ttest_df,
   has_region_pair <- nrow(omnibus_region_pair_df) > 0
 
   # Header
-  add("# Connectivity Analysis \u2014 ", config$name)
+  add("# ROI Connectivity Analysis \u2014 ", config$name)
   add("")
   add("**Generated:** ", format(Sys.time(), "%Y-%m-%d %H:%M"))
   add("")
@@ -769,7 +769,7 @@ write_connectivity_summary <- function(global_df, global_ttest_df,
 
 parser <- ArgumentParser(description = "Connectivity statistical analysis (R)")
 parser$add_argument("--data-dir", required = TRUE,
-                    help = "Directory containing connectivity_edges.csv")
+                    help = "Directory containing roi_connectivity_edges.csv")
 parser$add_argument("--config", required = TRUE,
                     help = "Path to study YAML config")
 parser$add_argument("--output-dir", required = TRUE,
@@ -788,8 +788,8 @@ dir.create(tbl_dir, showWarnings = FALSE, recursive = TRUE)
 
 # --- Load data ---
 message("Loading data...")
-edges <- read_csv(file.path(data_dir, "connectivity_edges.csv"), show_col_types = FALSE)
-message("  connectivity_edges.csv: ", nrow(edges), " rows")
+edges <- read_csv(file.path(data_dir, "roi_connectivity_edges.csv"), show_col_types = FALSE)
+message("  roi_connectivity_edges.csv: ", nrow(edges), " rows")
 
 # --- Load config ---
 config <- read_yaml(config_path)
@@ -883,16 +883,16 @@ if (length(config$roi_categories) > 0 && has_lme4) {
 message("\nExporting tables...")
 
 if (nrow(global_ttest_df) > 0) {
-  write_csv(global_ttest_df, file.path(tbl_dir, "connectivity_global.csv"))
-  message("  Saved: tables/connectivity_global.csv")
+  write_csv(global_ttest_df, file.path(tbl_dir, "roi_connectivity_global.csv"))
+  message("  Saved: tables/roi_connectivity_global.csv")
 }
 if (nrow(omnibus_region_pair_df) > 0) {
-  write_csv(omnibus_region_pair_df, file.path(tbl_dir, "connectivity_omnibus_region_pair.csv"))
-  message("  Saved: tables/connectivity_omnibus_region_pair.csv")
+  write_csv(omnibus_region_pair_df, file.path(tbl_dir, "roi_connectivity_omnibus_region_pair.csv"))
+  message("  Saved: tables/roi_connectivity_omnibus_region_pair.csv")
 }
 if (nrow(posthoc_region_pair_df) > 0) {
-  write_csv(posthoc_region_pair_df, file.path(tbl_dir, "connectivity_posthoc_region_pair.csv"))
-  message("  Saved: tables/connectivity_posthoc_region_pair.csv")
+  write_csv(posthoc_region_pair_df, file.path(tbl_dir, "roi_connectivity_posthoc_region_pair.csv"))
+  message("  Saved: tables/roi_connectivity_posthoc_region_pair.csv")
 }
 
 # ===========================================================================

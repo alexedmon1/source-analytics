@@ -10,12 +10,11 @@ from .io.discovery import SubjectInfo, discover_subjects
 from .analyses.base import BaseAnalysis
 from .analyses.psd_analysis import PSDAnalysis
 from .analyses.aperiodic_analysis import AperiodicAnalysis
-from .analyses.connectivity_analysis import ConnectivityAnalysis
+from .analyses.roi_connectivity_analysis import ConnectivityAnalysis
 from .analyses.pac_analysis import PACAnalysis
 from .analyses.wholebrain_analysis import WholebrainAnalysis
 from .analyses.electrode_analysis import ElectrodeAnalysis
 from .analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
-from .analyses.tfce_analysis import TFCEAnalysis
 from .analyses.vertex_connectivity_analysis import VertexConnectivityAnalysis
 from .analyses.specparam_vertex_analysis import SpecparamVertexAnalysis
 from .analyses.mvpa_analysis import MVPAAnalysis
@@ -28,12 +27,11 @@ logger = logging.getLogger(__name__)
 ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "psd": PSDAnalysis,
     "aperiodic": AperiodicAnalysis,
-    "connectivity": ConnectivityAnalysis,
+    "roi_connectivity": ConnectivityAnalysis,
     "pac": PACAnalysis,
     "wholebrain": WholebrainAnalysis,
     "electrode": ElectrodeAnalysis,
     "electrode_comparison": ElectrodeComparisonAnalysis,
-    "tfce": TFCEAnalysis,
     "vertex_connectivity": VertexConnectivityAnalysis,
     "specparam_vertex": SpecparamVertexAnalysis,
     "mvpa": MVPAAnalysis,

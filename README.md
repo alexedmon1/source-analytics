@@ -1,6 +1,6 @@
 # source-analytics
 
-Statistical analysis toolkit for source-localized EEG data. Reads pipeline output from the [source_localization](https://github.com/alexedmon1/AlexProjects) package and runs group-level analyses with publication-quality statistics and figures. Supports both ROI-level analyses (PSD, aperiodic, connectivity, PAC) and whole-brain vertex-level analysis with cluster-based permutation testing.
+Statistical analysis toolkit for source-localized EEG data. Reads pipeline output from the [source_localization](https://github.com/alexedmon1/AlexProjects) package and runs group-level analyses with publication-quality statistics and figures. Supports both ROI-level analyses (PSD, aperiodic, roi_connectivity, PAC) and whole-brain vertex-level analysis with cluster-based permutation testing.
 
 **Python** handles orchestration, signal processing, and data I/O. **R** handles statistics (linear mixed models via lme4) and visualization (ggplot2). The wholebrain module uses Python for statistics (cluster permutation) and visualization (glass brain plots), with R for report generation.
 
@@ -84,7 +84,7 @@ discovery:
 
 source-analytics reads output files produced by the source_localization pipeline. Each subject directory contains:
 
-**ROI-level analyses** (psd, aperiodic, connectivity, pac) — default discovery:
+**ROI-level analyses** (psd, aperiodic, roi_connectivity, pac) — default discovery:
 
 | File | Format | Contents |
 |------|--------|----------|
@@ -204,14 +204,14 @@ output_dir/aperiodic/
     aperiodic_roi_forest_*.png
 ```
 
-### Connectivity (Functional Connectivity) -- Implemented
+### ROI Connectivity (Functional Connectivity) -- Implemented
 
 ROI-to-ROI coherence and imaginary coherence using **signed** (phase-preserving) source timeseries.
 
 **Python side:**
 - Cross-spectral density via `scipy.signal.csd` (Welch, 2s Hann, 50% overlap)
 - Magnitude-squared coherence and absolute imaginary coherence for all 1035 unique ROI pairs
-- Exports `connectivity_edges.csv` (subject x edge x band)
+- Exports `roi_connectivity_edges.csv` (subject x edge x band)
 
 **R side:**
 - **Global analysis:** Mean connectivity across all edges per subject x band; Welch t-test per band, BH FDR across bands
@@ -222,20 +222,20 @@ ROI-to-ROI coherence and imaginary coherence using **signed** (phase-preserving)
 **Output:**
 
 ```
-output_dir/connectivity/
+output_dir/roi_connectivity/
   ANALYSIS_SUMMARY.md
   data/
-    connectivity_edges.csv          # subject x roi_pair x band (full edge data)
+    roi_connectivity_edges.csv      # subject x roi_pair x band (full edge data)
     study_config.yaml
   tables/
-    connectivity_global.csv         # global t-tests per band x metric
-    connectivity_omnibus_region_pair.csv   # LMM results (if roi_categories)
-    connectivity_posthoc_region_pair.csv   # post-hoc per region pair (if significant)
+    roi_connectivity_global.csv     # global t-tests per band x metric
+    roi_connectivity_omnibus_region_pair.csv   # LMM results (if roi_categories)
+    roi_connectivity_posthoc_region_pair.csv   # post-hoc per region pair (if significant)
   figures/
-    connectivity_matrix_coherence_*.png
-    connectivity_matrix_imag_coherence_*.png
-    connectivity_global_bar.png
-    connectivity_region_pair_forest_*.png
+    roi_connectivity_matrix_coherence_*.png
+    roi_connectivity_matrix_imag_coherence_*.png
+    roi_connectivity_global_bar.png
+    roi_connectivity_region_pair_forest_*.png
 ```
 
 ### PAC (Phase-Amplitude Coupling) -- Implemented
@@ -307,10 +307,15 @@ discovery:
     - "step3_source_coords_mm.npy"
 
 wholebrain:
-  cluster_threshold: 2.0
+  correction_method: cluster  # "cluster" (default) or "tfce"
+  cluster_threshold: 2.0      # only used when correction_method: cluster
   n_permutations: 1000
   adjacency_distance_mm: 5.0
   noise_exclude_hz: [55, 65]
+  tfce:                        # only used when correction_method: tfce
+    E: 0.5
+    H: 2.0
+    dh: 0.1
 ```
 
 **Output:**
@@ -341,38 +346,9 @@ output_dir/wholebrain/
     wholebrain_summary.png
 ```
 
-### TFCE (Threshold-Free Cluster Enhancement) -- Implemented
+#### TFCE Correction Option
 
-TFCE (Smith & Nichols, 2009) eliminates the arbitrary cluster-forming threshold by integrating cluster extent and height across all possible thresholds. More sensitive for diffuse effects than standard cluster-based permutation.
-
-**Python side:**
-- Vertex-level PSD and band power (same as wholebrain)
-- TFCE scoring: `TFCE(v) = sum_h { e(h)^E * h^H * dh }`
-- Permutation test: max|TFCE| null distribution
-- Glass brain visualizations of TFCE scores and significant vertices
-
-**R side:**
-- Per-band summary table (significant vertices, mean/max TFCE, effect sizes)
-- ANALYSIS_SUMMARY.md
-
-**Config:**
-```yaml
-tfce:
-  n_permutations: 1000
-  E: 0.5
-  H: 2.0
-  dh: 0.1
-  adjacency_distance_mm: 5.0
-```
-
-**Output:**
-```
-output_dir/tfce/
-  ANALYSIS_SUMMARY.md
-  data/tfce_band_power.csv, source_coords.csv
-  tables/tfce_stats.csv (vertex × band × t, tfce_score, p_corrected, hedges_g)
-  figures/tfce_scores_*.png, tfce_significant_*.png
-```
+The wholebrain analysis supports TFCE (Smith & Nichols, 2009) as an alternative to cluster-based permutation testing. Set `correction_method: tfce` in the wholebrain config section. TFCE eliminates the arbitrary cluster-forming threshold by integrating cluster extent and height across all thresholds: `TFCE(v) = sum_h { e(h)^E * h^H * dh }`. When using TFCE, additional output includes `tfce_scores_*.png` glass brains and per-vertex corrected p-values in `voxelwise_stats.csv`.
 
 ### Vertex Connectivity (Functional Connectivity Density) -- Implemented
 

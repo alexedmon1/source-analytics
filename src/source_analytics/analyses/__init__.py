@@ -3,12 +3,11 @@
 from .base import BaseAnalysis
 from .psd_analysis import PSDAnalysis
 from .aperiodic_analysis import AperiodicAnalysis
-from .connectivity_analysis import ConnectivityAnalysis
+from .roi_connectivity_analysis import ConnectivityAnalysis
 from .pac_analysis import PACAnalysis
 from .wholebrain_analysis import WholebrainAnalysis
 from .electrode_analysis import ElectrodeAnalysis
 from .electrode_comparison_analysis import ElectrodeComparisonAnalysis
-from .tfce_analysis import TFCEAnalysis
 from .vertex_connectivity_analysis import VertexConnectivityAnalysis
 from .specparam_vertex_analysis import SpecparamVertexAnalysis
 from .mvpa_analysis import MVPAAnalysis
@@ -24,7 +23,6 @@ __all__ = [
     "WholebrainAnalysis",
     "ElectrodeAnalysis",
     "ElectrodeComparisonAnalysis",
-    "TFCEAnalysis",
     "VertexConnectivityAnalysis",
     "SpecparamVertexAnalysis",
     "MVPAAnalysis",
