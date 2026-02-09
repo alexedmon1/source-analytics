@@ -366,8 +366,8 @@ def plot_circos(
     r_inner, r_outer = 0.88, 0.96
     r_region_outer = 1.0  # outer region band
 
-    ax.set_xlim(-1.55, 1.55)
-    ax.set_ylim(-1.55, 1.55)
+    ax.set_xlim(-1.7, 1.7)
+    ax.set_ylim(-1.7, 1.7)
     ax.set_aspect("equal")
     ax.axis("off")
 
@@ -388,8 +388,8 @@ def plot_circos(
 
         # Region label at midpoint of region arc
         mid_angle = np.radians((theta1 + theta2) / 2)
-        lx = 1.08 * np.cos(mid_angle)
-        ly = 1.08 * np.sin(mid_angle)
+        lx = 1.12 * np.cos(mid_angle)
+        ly = 1.12 * np.sin(mid_angle)
         rotation = np.degrees(mid_angle)
         ha = "left"
         if 90 < rotation % 360 < 270:
@@ -398,7 +398,7 @@ def plot_circos(
         ax.text(
             lx, ly, region_names[ri],
             ha=ha, va="center",
-            fontsize=6.5, fontweight="bold",
+            fontsize=9, fontweight="bold",
             rotation=rotation,
             rotation_mode="anchor",
             color=region_colors[ri],
@@ -422,8 +422,8 @@ def plot_circos(
 
         # ROI label
         mid_angle = np.radians((theta1 + theta2) / 2)
-        lx = 1.28 * np.cos(mid_angle)
-        ly = 1.28 * np.sin(mid_angle)
+        lx = 1.35 * np.cos(mid_angle)
+        ly = 1.35 * np.sin(mid_angle)
         rotation = np.degrees(mid_angle)
         ha = "left"
         if 90 < rotation % 360 < 270:
@@ -432,7 +432,7 @@ def plot_circos(
         ax.text(
             lx, ly, short_labels[i],
             ha=ha, va="center",
-            fontsize=4.2,
+            fontsize=6,
             rotation=rotation,
             rotation_mode="anchor",
             color="0.2",
@@ -649,7 +649,7 @@ def plot_connectivity_comparison(
     group_labels: tuple[str, str] = ("Group A", "Group B"),
     title: str = "",
     threshold: float = 0.0,
-    dpi: int = 200,
+    dpi: int = 300,
 ) -> None:
     """Three-panel figure: Group A | Group B | Difference.
 
@@ -699,7 +699,7 @@ def plot_connectivity_comparison(
         diff_ut = diff[np.triu_indices_from(diff, k=1)]
         diff_thresh = float(np.std(diff_ut))
 
-        fig, axes = plt.subplots(1, 3, figsize=(26, 9))
+        fig, axes = plt.subplots(1, 3, figsize=(30, 12))
         for ax_i, (mat, label, cm, lo, hi, thresh) in enumerate([
             (mat_a, group_labels[0], "YlOrRd", group_vmin, group_vmax, threshold),
             (mat_b, group_labels[1], "YlOrRd", group_vmin, group_vmax, threshold),
@@ -711,7 +711,7 @@ def plot_connectivity_comparison(
                 threshold=thresh,
                 vmin=lo, vmax=hi,
             )
-            axes[ax_i].set_title(label, fontsize=12, fontweight="bold", pad=12)
+            axes[ax_i].set_title(label, fontsize=14, fontweight="bold", pad=12)
 
         # Colorbars below
         sm_grp = ScalarMappable(
@@ -722,7 +722,7 @@ def plot_connectivity_comparison(
             sm_grp, ax=[axes[0], axes[1]], orientation="horizontal",
             fraction=0.04, pad=0.06, shrink=0.6,
         )
-        cbar_grp.set_label("Mean connectivity", fontsize=9)
+        cbar_grp.set_label("Mean connectivity", fontsize=11)
 
         sm_diff = ScalarMappable(
             cmap="RdBu_r", norm=Normalize(vmin=-diff_vmax, vmax=diff_vmax),
@@ -732,7 +732,7 @@ def plot_connectivity_comparison(
             sm_diff, ax=axes[2], orientation="horizontal",
             fraction=0.04, pad=0.06, shrink=0.6,
         )
-        cbar_diff.set_label("Difference", fontsize=9)
+        cbar_diff.set_label("Difference", fontsize=11)
 
     elif plot_type == "heatmap":
         fig, axes = plt.subplots(1, 3, figsize=(30, 9))
@@ -752,7 +752,7 @@ def plot_connectivity_comparison(
         raise ValueError(f"Unknown plot_type: {plot_type!r}")
 
     if title:
-        fig.suptitle(title, fontsize=14, fontweight="bold", y=1.02)
+        fig.suptitle(title, fontsize=16, fontweight="bold", y=1.02)
 
     if plot_type == "heatmap":
         fig.tight_layout()

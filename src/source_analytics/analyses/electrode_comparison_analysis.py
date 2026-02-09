@@ -16,6 +16,7 @@ import pandas as pd
 
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
+from ..viz.constants import BAND_ORDER, CC_ROIS
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,11 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                 "Run the 'psd' analysis first."
             )
         self._source_df = pd.read_csv(source_csv)
-        logger.info("Loaded source data: %d rows", len(self._source_df))
+        # Exclude Corpus Callosum (white matter) ROIs
+        n_before = len(self._source_df)
+        self._source_df = self._source_df[~self._source_df["roi"].isin(CC_ROIS)]
+        logger.info("Loaded source data: %d rows (%d CC rows excluded)",
+                     len(self._source_df), n_before - len(self._source_df))
 
     def process_subject(self, subject: SubjectInfo) -> None:
         """No-op — data already loaded from CSVs."""
@@ -319,6 +324,9 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             self._plot_regional_forest(regional_df, fig_dir)
             self._plot_spatial_advantage(regional_df, fig_dir)
 
+        # --- Fig 5: ROI-level forest plot (from PSD posthoc) ---
+        self._plot_roi_forest(fig_dir)
+
     def _plot_correlation_scatter(
         self, comp_df: pd.DataFrame, stats_df: pd.DataFrame,
         fig_dir: Path, group_colors: dict, group_labels: dict,
@@ -327,7 +335,8 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
 
         for power_type in ["relative", "dB"]:
             pt_stats = stats_df[stats_df["power_type"] == power_type]
-            bands = pt_stats["band"].unique()
+            # Sort bands by ascending Hz order
+            bands = [b for b in BAND_ORDER if b in pt_stats["band"].values]
             n_bands = len(bands)
             if n_bands == 0:
                 continue
@@ -384,19 +393,48 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             if pt_df.empty:
                 continue
 
-            bands = pt_df["band"].unique()
+            # Sort by standard ascending Hz order
+            pt_df["band"] = pd.Categorical(pt_df["band"], categories=BAND_ORDER, ordered=True)
+            pt_df = pt_df.sort_values("band").dropna(subset=["band"])
+
+            bands = pt_df["band"].values
             n = len(bands)
             x = np.arange(n)
             width = 0.35
 
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6 + n * 1.2, 5))
 
-            # Bar chart
+            # Bar chart with error bars (CIs)
             elec_g = pt_df["electrode_hedges_g"].values
             src_g = pt_df["source_hedges_g"].values
+            elec_ci_lo = pt_df["electrode_ci_lo"].values
+            elec_ci_hi = pt_df["electrode_ci_hi"].values
+            src_ci_lo = pt_df["source_ci_lo"].values
+            src_ci_hi = pt_df["source_ci_hi"].values
 
-            ax1.bar(x - width / 2, elec_g, width, label="Electrode", color="#7FB3D8", edgecolor="white")
-            ax1.bar(x + width / 2, src_g, width, label="Source", color="#E8A0A0", edgecolor="white")
+            elec_err = np.array([elec_g - elec_ci_lo, elec_ci_hi - elec_g])
+            src_err = np.array([src_g - src_ci_lo, src_ci_hi - src_g])
+
+            ax1.bar(x - width / 2, elec_g, width, label="Electrode", color="#7FB3D8",
+                    edgecolor="white", yerr=elec_err, capsize=3, error_kw={"linewidth": 1})
+            ax1.bar(x + width / 2, src_g, width, label="Source", color="#E8A0A0",
+                    edgecolor="white", yerr=src_err, capsize=3, error_kw={"linewidth": 1})
+
+            # Significance markers: * where CI excludes zero
+            for i in range(n):
+                # Electrode significance
+                if elec_ci_lo[i] > 0 or elec_ci_hi[i] < 0:
+                    y_pos_star = max(elec_g[i] + elec_err[1, i], 0) + 0.05
+                    ax1.annotate("*", xy=(x[i] - width / 2, y_pos_star),
+                                 fontsize=14, fontweight="bold", color="#4A90D9",
+                                 ha="center", va="bottom")
+                # Source significance
+                if src_ci_lo[i] > 0 or src_ci_hi[i] < 0:
+                    y_pos_star = max(src_g[i] + src_err[1, i], 0) + 0.05
+                    ax1.annotate("*", xy=(x[i] + width / 2, y_pos_star),
+                                 fontsize=14, fontweight="bold", color="#C0392B",
+                                 ha="center", va="bottom")
+
             ax1.set_xticks(x)
             ax1.set_xticklabels(bands, rotation=45, ha="right")
             ax1.set_ylabel("Hedges' g")
@@ -407,7 +445,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             # Scatter: electrode g vs source g
             ax2.scatter(elec_g, src_g, c="#444444", s=50, zorder=3)
             for i, band in enumerate(bands):
-                ax2.annotate(band, (elec_g[i], src_g[i]), fontsize=8,
+                ax2.annotate(str(band), (elec_g[i], src_g[i]), fontsize=8,
                              xytext=(5, 5), textcoords="offset points")
             lims = [
                 min(min(elec_g), min(src_g)) - 0.2,
@@ -425,61 +463,79 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             logger.info("Saved fig2_effect_sizes_%s.png", power_type)
 
     def _plot_regional_forest(self, regional_df: pd.DataFrame, fig_dir: Path) -> None:
-        """Forest plot: electrode global effect as reference line, regional source effects as dots."""
+        """Forest plot: electrode global effect as reference line, regional source effects as dots.
+
+        Manuscript-quality 2×3 grid with significance markers (*) for CIs
+        excluding zero, color-coded by whether region exceeds electrode effect.
+        """
         import matplotlib.pyplot as plt
 
         for power_type in ["relative", "dB"]:
-            pt_df = regional_df[regional_df["power_type"] == power_type]
+            pt_df = regional_df[regional_df["power_type"] == power_type].copy()
             if pt_df.empty:
                 continue
 
-            bands = pt_df["band"].unique()
-            ncols = min(3, len(bands))
-            nrows = (len(bands) + ncols - 1) // ncols
-            fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, max(5, len(pt_df["region"].unique()) * 0.4)),
-                                      squeeze=False)
+            # Sort bands by ascending Hz order
+            bands = [b for b in BAND_ORDER if b in pt_df["band"].values]
+            if not bands:
+                continue
+
+            # Determine significance (CI excludes zero)
+            pt_df["significant"] = (pt_df["region_ci_lo"] > 0) | (pt_df["region_ci_hi"] < 0)
+
+            fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+            axes_flat = axes.flatten()
 
             for idx, band in enumerate(bands):
-                ax = axes[idx // ncols, idx % ncols]
+                ax = axes_flat[idx]
                 bdata = pt_df[pt_df["band"] == band].copy()
-                bdata = bdata.sort_values("region_hedges_g")
+                bdata = bdata.sort_values("region_hedges_g", ascending=True)
 
+                electrode_g = bdata["electrode_hedges_g"].iloc[0]
                 regions = bdata["region"].values
+                g_vals = bdata["region_hedges_g"].values
+                ci_lo = bdata["region_ci_lo"].values
+                ci_hi = bdata["region_ci_hi"].values
+                sig = bdata["significant"].values
                 y_pos = np.arange(len(regions))
 
-                # Electrode reference line
-                elec_g = bdata["electrode_hedges_g"].values[0]
-                ax.axvline(x=elec_g, color="#7FB3D8", linewidth=2, linestyle="--",
-                           label=f"Electrode (g={elec_g:.2f})", zorder=1)
+                # Reference lines
+                ax.axvline(x=electrode_g, color="gray", linestyle="--", linewidth=1.5,
+                           alpha=0.7, label=f"Electrode g={electrode_g:.2f}")
+                ax.axvline(x=0, color="black", linestyle="-", linewidth=0.5, alpha=0.3)
 
-                # Regional dots with CIs
-                colors = ["#E74C3C" if exc else "#333333"
-                          for exc in bdata["exceeds_electrode"].values]
-                ax.scatter(bdata["region_hedges_g"], y_pos, c=colors, s=40, zorder=3)
-                ax.errorbar(
-                    bdata["region_hedges_g"], y_pos,
-                    xerr=[
-                        bdata["region_hedges_g"] - bdata["region_ci_lo"],
-                        bdata["region_ci_hi"] - bdata["region_hedges_g"],
-                    ],
-                    fmt="none", ecolor="grey", elinewidth=0.8, capsize=2, zorder=2,
-                )
+                for i, (y, g, lo, hi, s) in enumerate(zip(y_pos, g_vals, ci_lo, ci_hi, sig)):
+                    color = "#E74C3C" if g > electrode_g else "#3498DB"
+                    marker_size = 9 if s else 7
 
-                ax.set_yticks(y_pos)
-                ax.set_yticklabels(regions, fontsize=8)
-                ax.axvline(x=0, color="grey", linewidth=0.5, linestyle=":")
-                ax.set_xlabel("Hedges' g")
-                ax.set_title(band)
-                if idx == 0:
-                    ax.legend(fontsize=7, loc="lower right")
+                    # CI line
+                    ax.plot([lo, hi], [y, y], color=color,
+                            linewidth=2 if s else 1.5, alpha=0.9 if s else 0.6)
+                    # Point
+                    ax.plot(g, y, "o", color=color, markersize=marker_size, zorder=5)
 
-            for idx in range(len(bands), nrows * ncols):
-                axes[idx // ncols, idx % ncols].set_visible(False)
+                    # Significance star
+                    if s:
+                        ax.annotate("*", xy=(hi + 0.03, y), fontsize=16, fontweight="bold",
+                                    color=color, va="center", ha="left")
 
-            fig.suptitle(f"Regional Source Effect Sizes vs Electrode Reference ({power_type})",
-                         fontsize=13, y=1.02)
-            fig.tight_layout()
-            fig.savefig(fig_dir / f"fig3_regional_forest_{power_type}.png", dpi=300, bbox_inches="tight")
+                ax.set_yticks(list(y_pos))
+                ax.set_yticklabels(regions, fontsize=11)
+                ax.set_xlabel("Hedges' g", fontsize=12)
+                ax.set_title(band, fontsize=14, fontweight="bold")
+                ax.legend(fontsize=9, loc="lower right")
+
+            # Hide unused axes
+            for idx in range(len(bands), len(axes_flat)):
+                axes_flat[idx].set_visible(False)
+
+            fig.suptitle(
+                f"Regional Source Effect Sizes vs Electrode Reference ({power_type})",
+                fontsize=16, fontweight="bold", y=0.98,
+            )
+            plt.tight_layout(rect=[0, 0, 1, 0.96])
+            fig.savefig(fig_dir / f"fig3_regional_forest_{power_type}.png",
+                        dpi=300, bbox_inches="tight", facecolor="white")
             plt.close(fig)
             logger.info("Saved fig3_regional_forest_%s.png", power_type)
 
@@ -534,6 +590,119 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             fig.savefig(fig_dir / f"fig4_spatial_advantage_{power_type}.png", dpi=300, bbox_inches="tight")
             plt.close(fig)
             logger.info("Saved fig4_spatial_advantage_%s.png", power_type)
+
+    def _plot_roi_forest(self, fig_dir: Path) -> None:
+        """ROI-level forest plot from PSD posthoc results.
+
+        Two-panel plot (Low Gamma, High Gamma) showing per-ROI disease
+        effect sizes with three significance tiers: Holm-corrected (*),
+        uncorrected p<0.05 (dagger), and non-significant (gray).
+        """
+        import matplotlib.pyplot as plt
+
+        # Locate posthoc CSV from sibling PSD analysis
+        base_dir = self.config.output_dir
+        posthoc_csv = base_dir / "psd" / "tables" / "psd_posthoc_roi.csv"
+        if not posthoc_csv.exists():
+            logger.info("psd_posthoc_roi.csv not found — skipping ROI forest plot")
+            return
+
+        df = pd.read_csv(posthoc_csv)
+
+        # Filter to dB power, Low Gamma and High Gamma
+        df = df[df["power_type"] == "dB"].copy()
+        bands = ["Low Gamma", "High Gamma"]
+        df = df[df["band"].isin(bands)].copy()
+        if df.empty:
+            logger.info("No dB Low/High Gamma rows in posthoc — skipping ROI forest")
+            return
+
+        # Exclude Corpus Callosum ROIs
+        df = df[~df["roi"].isin(CC_ROIS)].copy()
+
+        # Compute approximate 95% CI for Hedges' g
+        # Infer group sizes from config contrasts
+        contrast = self.config.contrasts[0] if self.config.contrasts else None
+        if contrast and self._comparison_df is not None:
+            n1 = len(self._comparison_df[self._comparison_df["group"] == contrast.group_a]["subject"].unique())
+            n2 = len(self._comparison_df[self._comparison_df["group"] == contrast.group_b]["subject"].unique())
+        else:
+            # Fallback: estimate from unique subjects in posthoc
+            n1 = n2 = 14
+
+        df["se_g"] = np.sqrt(1 / n1 + 1 / n2 + df["hedges_g"] ** 2 / (2 * (n1 + n2)))
+        df["g_ci_lo"] = df["hedges_g"] - 1.96 * df["se_g"]
+        df["g_ci_hi"] = df["hedges_g"] + 1.96 * df["se_g"]
+
+        # Significance markers
+        df["uncorrected_sig"] = df["p_value"] < 0.05
+        df["holm_sig"] = df["significant"]  # already Holm-corrected
+
+        # Clean ROI names for display
+        df["roi_label"] = df["roi"].str.replace("_", " ").str.replace("Cortex ", "")
+
+        fig, axes = plt.subplots(1, 2, figsize=(16, 14))
+
+        for idx, band in enumerate(bands):
+            ax = axes[idx]
+            bdf = df[df["band"] == band].copy()
+            bdf = bdf.sort_values("hedges_g", ascending=True)
+
+            rois = bdf["roi_label"].values
+            g_vals = bdf["hedges_g"].values
+            ci_lo = bdf["g_ci_lo"].values
+            ci_hi = bdf["g_ci_hi"].values
+            uncorr = bdf["uncorrected_sig"].values
+            holm = bdf["holm_sig"].values
+            y_pos = np.arange(len(rois))
+
+            # Zero reference
+            ax.axvline(x=0, color="black", linestyle="-", linewidth=0.8, alpha=0.4)
+
+            for i, (y, g, lo, hi, u, h) in enumerate(
+                zip(y_pos, g_vals, ci_lo, ci_hi, uncorr, holm)
+            ):
+                if h:
+                    color, lw, ms, alpha = "#C0392B", 2.5, 10, 1.0
+                elif u:
+                    color, lw, ms, alpha = "#E67E22", 2.0, 8, 0.9
+                else:
+                    color, lw, ms, alpha = "#95A5A6", 1.2, 6, 0.5
+
+                ax.plot([lo, hi], [y, y], color=color, linewidth=lw, alpha=alpha)
+                ax.plot(g, y, "o", color=color, markersize=ms, zorder=5, alpha=alpha)
+
+                if h:
+                    ax.annotate("*", xy=(hi + 0.05, y), fontsize=18, fontweight="bold",
+                                color=color, va="center", ha="left")
+                elif u:
+                    ax.annotate("\u2020", xy=(hi + 0.05, y), fontsize=14,
+                                color=color, va="center", ha="left")
+
+            ax.set_yticks(list(y_pos))
+            ax.set_yticklabels(rois, fontsize=9)
+            ax.set_xlabel("Hedges' g (KO \u2212 WT)", fontsize=12)
+            ax.set_title(band, fontsize=14, fontweight="bold")
+
+            n_uncorr = int(uncorr.sum())
+            n_holm = int(holm.sum())
+            ax.text(
+                0.02, 0.98,
+                f"{n_uncorr} uncorrected p<0.05 (\u2020)\n{n_holm} Holm-corrected (*)",
+                transform=ax.transAxes, fontsize=9, va="top",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                          edgecolor="gray", alpha=0.8),
+            )
+
+        fig.suptitle(
+            "ROI-Level Disease Effect Sizes (dB Power)",
+            fontsize=16, fontweight="bold", y=0.98,
+        )
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.savefig(fig_dir / "fig5_roi_forest_dB.png",
+                    dpi=300, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        logger.info("Saved fig5_roi_forest_dB.png")
 
     def summary(self) -> None:
         """Call Rscript for formatted comparison report."""

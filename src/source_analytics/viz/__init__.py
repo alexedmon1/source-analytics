@@ -1,5 +1,14 @@
 """Visualization — R for ROI-level plots, Python for glass brain & connectivity."""
 
+from .constants import (
+    BAND_ORDER,
+    BAND_FREQ_RANGES,
+    BAND_COLORS,
+    CC_ROIS,
+    GROUP_COLORS,
+    GROUP_LABELS,
+    METRIC_LABELS,
+)
 from .glass_brain import (
     plot_glass_brain,
     plot_band_comparison,
@@ -16,6 +25,13 @@ from .connectivity_plots import (
 )
 
 __all__ = [
+    "BAND_ORDER",
+    "BAND_FREQ_RANGES",
+    "BAND_COLORS",
+    "CC_ROIS",
+    "GROUP_COLORS",
+    "GROUP_LABELS",
+    "METRIC_LABELS",
     "plot_glass_brain",
     "plot_band_comparison",
     "plot_wholebrain_summary",

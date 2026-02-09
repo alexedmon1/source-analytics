@@ -14,6 +14,7 @@ from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.connectivity import compute_connectivity_matrix
+from ..viz.constants import METRIC_LABELS
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -197,7 +198,7 @@ class ConnectivityAnalysis(BaseAnalysis):
                             out,
                             plot_type=plot_type,
                             group_labels=(label_a, label_b),
-                            title=f"{band} — {metric.replace('_', ' ').title()}",
+                            title=f"{band} — {METRIC_LABELS.get(metric, metric.replace('_', ' ').title())}",
                             threshold=thresh,
                         )
                         n_figs += 1
@@ -215,7 +216,7 @@ class ConnectivityAnalysis(BaseAnalysis):
                                 roi_labels, region_names, region_sizes,
                                 sig_mask, out,
                                 group_labels=(label_a, label_b),
-                                title=f"{band} — {metric.replace('_', ' ').title()} (uncorrected p < 0.05)",
+                                title=f"{band} — {METRIC_LABELS.get(metric, metric.replace('_', ' ').title())} (uncorrected p < 0.05)",
                             )
                             n_figs += 1
 
