@@ -183,6 +183,8 @@ class ConnectivityAnalysis(BaseAnalysis):
                     band_safe = band.replace(" ", "_").lower()
                     prefix = f"{contrast.name}_{metric}_{band_safe}"
 
+                    metric_label = METRIC_LABELS.get(metric, metric.replace('_', ' ').title())
+
                     for plot_type in ("circos", "heatmap"):
                         out = fig_dir / f"{plot_type}_{prefix}.png"
 
@@ -198,8 +200,10 @@ class ConnectivityAnalysis(BaseAnalysis):
                             out,
                             plot_type=plot_type,
                             group_labels=(label_a, label_b),
-                            title=f"{band} — {METRIC_LABELS.get(metric, metric.replace('_', ' ').title())}",
+                            title=f"{band} — {metric_label}",
                             threshold=thresh,
+                            # Circos: hide ROI labels for clean manuscript figure
+                            show_roi_labels=(plot_type != "circos"),
                         )
                         n_figs += 1
 

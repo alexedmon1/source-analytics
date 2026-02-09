@@ -289,6 +289,7 @@ def plot_circos(
     vmax: float | None = None,
     linewidth_range: tuple[float, float] = (0.3, 4.0),
     sig_mask: np.ndarray | None = None,
+    show_roi_labels: bool = True,
 ):
     """Draw a circos / chord diagram on *ax*.
 
@@ -319,6 +320,9 @@ def plot_circos(
         If provided, significant pairs (True) are drawn opaque and thick;
         non-significant pairs are drawn as faint background chords.
         Overrides the magnitude-based alpha scaling.
+    show_roi_labels : bool
+        If False, omit individual ROI name labels (keeps region labels).
+        Produces a cleaner figure for manuscript main text.
 
     Returns
     -------
@@ -366,8 +370,10 @@ def plot_circos(
     r_inner, r_outer = 0.88, 0.96
     r_region_outer = 1.0  # outer region band
 
-    ax.set_xlim(-1.7, 1.7)
-    ax.set_ylim(-1.7, 1.7)
+    # Tighter limits when ROI labels are hidden
+    lim = 1.7 if show_roi_labels else 1.35
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
     ax.set_aspect("equal")
     ax.axis("off")
 
@@ -388,8 +394,10 @@ def plot_circos(
 
         # Region label at midpoint of region arc
         mid_angle = np.radians((theta1 + theta2) / 2)
-        lx = 1.12 * np.cos(mid_angle)
-        ly = 1.12 * np.sin(mid_angle)
+        label_r = 1.12 if show_roi_labels else 1.08
+        label_fs = 9 if show_roi_labels else 10
+        lx = label_r * np.cos(mid_angle)
+        ly = label_r * np.sin(mid_angle)
         rotation = np.degrees(mid_angle)
         ha = "left"
         if 90 < rotation % 360 < 270:
@@ -398,7 +406,7 @@ def plot_circos(
         ax.text(
             lx, ly, region_names[ri],
             ha=ha, va="center",
-            fontsize=9, fontweight="bold",
+            fontsize=label_fs, fontweight="bold",
             rotation=rotation,
             rotation_mode="anchor",
             color=region_colors[ri],
@@ -420,23 +428,24 @@ def plot_circos(
         )
         ax.add_patch(wedge)
 
-        # ROI label
-        mid_angle = np.radians((theta1 + theta2) / 2)
-        lx = 1.35 * np.cos(mid_angle)
-        ly = 1.35 * np.sin(mid_angle)
-        rotation = np.degrees(mid_angle)
-        ha = "left"
-        if 90 < rotation % 360 < 270:
-            rotation += 180
-            ha = "right"
-        ax.text(
-            lx, ly, short_labels[i],
-            ha=ha, va="center",
-            fontsize=6,
-            rotation=rotation,
-            rotation_mode="anchor",
-            color="0.2",
-        )
+        # ROI label (skip when show_roi_labels=False for cleaner output)
+        if show_roi_labels:
+            mid_angle = np.radians((theta1 + theta2) / 2)
+            lx = 1.35 * np.cos(mid_angle)
+            ly = 1.35 * np.sin(mid_angle)
+            rotation = np.degrees(mid_angle)
+            ha = "left"
+            if 90 < rotation % 360 < 270:
+                rotation += 180
+                ha = "right"
+            ax.text(
+                lx, ly, short_labels[i],
+                ha=ha, va="center",
+                fontsize=6,
+                rotation=rotation,
+                rotation_mode="anchor",
+                color="0.2",
+            )
 
     # Collect upper-triangle values for colour scaling
     vals = []
@@ -650,6 +659,7 @@ def plot_connectivity_comparison(
     title: str = "",
     threshold: float = 0.0,
     dpi: int = 300,
+    show_roi_labels: bool = True,
 ) -> None:
     """Three-panel figure: Group A | Group B | Difference.
 
@@ -675,6 +685,9 @@ def plot_connectivity_comparison(
         For circos: omit chords below this value.
     dpi : int
         Output resolution.
+    show_roi_labels : bool
+        For circos: if False, omit individual ROI labels for a cleaner
+        manuscript figure.  Region group labels are always shown.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -699,7 +712,9 @@ def plot_connectivity_comparison(
         diff_ut = diff[np.triu_indices_from(diff, k=1)]
         diff_thresh = float(np.std(diff_ut))
 
-        fig, axes = plt.subplots(1, 3, figsize=(30, 12))
+        # Smaller figure when ROI labels hidden (circles fill the space)
+        figw, figh = (30, 12) if show_roi_labels else (24, 9)
+        fig, axes = plt.subplots(1, 3, figsize=(figw, figh))
         for ax_i, (mat, label, cm, lo, hi, thresh) in enumerate([
             (mat_a, group_labels[0], "YlOrRd", group_vmin, group_vmax, threshold),
             (mat_b, group_labels[1], "YlOrRd", group_vmin, group_vmax, threshold),
@@ -710,8 +725,9 @@ def plot_connectivity_comparison(
                 cmap=cm,
                 threshold=thresh,
                 vmin=lo, vmax=hi,
+                show_roi_labels=show_roi_labels,
             )
-            axes[ax_i].set_title(label, fontsize=14, fontweight="bold", pad=12)
+            axes[ax_i].set_title(label, fontsize=14, fontweight="bold", pad=8)
 
         # Colorbars below
         sm_grp = ScalarMappable(
@@ -752,7 +768,9 @@ def plot_connectivity_comparison(
         raise ValueError(f"Unknown plot_type: {plot_type!r}")
 
     if title:
-        fig.suptitle(title, fontsize=16, fontweight="bold", y=1.02)
+        # Place title closer to panels when ROI labels are hidden
+        suptitle_y = 1.02 if show_roi_labels else 1.0
+        fig.suptitle(title, fontsize=16, fontweight="bold", y=suptitle_y)
 
     if plot_type == "heatmap":
         fig.tight_layout()
