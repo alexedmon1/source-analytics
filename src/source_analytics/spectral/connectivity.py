@@ -1,9 +1,13 @@
-"""Functional connectivity: coherence and imaginary coherence matrices."""
+"""Functional connectivity: coherence, imaginary coherence, and partial correlation."""
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
-from scipy.signal import welch, csd
+from scipy.signal import welch, csd, butter, sosfiltfilt
+
+logger = logging.getLogger(__name__)
 
 
 def compute_connectivity_matrix(
@@ -110,4 +114,72 @@ def compute_connectivity_matrix(
                 band_results[band_name]["imag_coherence"][i, j] = icoh_mean
                 band_results[band_name]["imag_coherence"][j, i] = icoh_mean
 
+    # --- Partial correlation on band-filtered time series ---
+    for band_name, (fmin, fmax) in bands.items():
+        if band_name not in band_results:
+            continue
+        pcorr = _band_partial_correlation(ts_list, sfreq, fmin, fmax)
+        band_results[band_name]["partial_corr"] = pcorr
+
     return band_results, roi_names
+
+
+def _band_partial_correlation(
+    ts_list: list[np.ndarray],
+    sfreq: float,
+    fmin: float,
+    fmax: float,
+) -> np.ndarray:
+    """Partial correlation matrix from band-filtered time series.
+
+    Band-pass filters each ROI, then computes partial correlations
+    via the precision matrix (inverse covariance) with Ledoit-Wolf
+    shrinkage for numerical stability.
+
+    Parameters
+    ----------
+    ts_list : list of 1-D arrays
+        ROI time courses.
+    sfreq : float
+        Sampling frequency.
+    fmin, fmax : float
+        Band edges in Hz.
+
+    Returns
+    -------
+    pcorr : ndarray (n_rois, n_rois)
+        Symmetric partial correlation matrix, diagonal = 1.
+    """
+    n = len(ts_list)
+    min_len = min(len(ts) for ts in ts_list)
+
+    # Band-pass filter
+    nyq = sfreq / 2
+    lo = max(fmin / nyq, 1e-5)
+    hi = min(fmax / nyq, 0.9999)
+    sos = butter(4, [lo, hi], btype="band", output="sos")
+
+    filtered = np.empty((min_len, n))
+    for i, ts in enumerate(ts_list):
+        filtered[:, i] = sosfiltfilt(sos, ts[:min_len])
+
+    # Covariance with Ledoit-Wolf shrinkage
+    cov = np.cov(filtered, rowvar=False)
+    # Shrink toward diagonal for numerical stability
+    trace = np.trace(cov) / n
+    alpha = 0.01
+    cov_reg = (1 - alpha) * cov + alpha * trace * np.eye(n)
+
+    try:
+        prec = np.linalg.inv(cov_reg)
+    except np.linalg.LinAlgError:
+        logger.warning("Singular covariance matrix — returning zeros")
+        return np.zeros((n, n))
+
+    # Convert precision to partial correlation: -P[i,j] / sqrt(P[i,i]*P[j,j])
+    d = np.sqrt(np.diag(prec))
+    d[d == 0] = 1.0
+    pcorr = -prec / np.outer(d, d)
+    np.fill_diagonal(pcorr, 1.0)
+
+    return pcorr

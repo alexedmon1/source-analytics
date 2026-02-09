@@ -81,10 +81,11 @@ class ConnectivityAnalysis(BaseAnalysis):
         for band_name, metrics in band_results.items():
             coh_mat = metrics["coherence"]
             icoh_mat = metrics["imag_coherence"]
+            pcorr_mat = metrics.get("partial_corr")
 
             for i in range(n_rois):
                 for j in range(i + 1, n_rois):
-                    self._edge_rows.append({
+                    row = {
                         "subject": uid,
                         "group": subject.group,
                         "band": band_name,
@@ -92,7 +93,10 @@ class ConnectivityAnalysis(BaseAnalysis):
                         "roi2": roi_names[j],
                         "coherence": float(coh_mat[i, j]),
                         "imag_coherence": float(icoh_mat[i, j]),
-                    })
+                    }
+                    if pcorr_mat is not None:
+                        row["partial_corr"] = float(pcorr_mat[i, j])
+                    self._edge_rows.append(row)
 
     def aggregate(self) -> None:
         """Export edge-level CSV for R consumption."""
@@ -111,8 +115,111 @@ class ConnectivityAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Delegated to R."""
-        pass
+        """Generate circos and heatmap figures for ROI-level connectivity."""
+        from ..viz.connectivity_plots import (
+            build_roi_matrix,
+            build_significance_matrix,
+            plot_connectivity_comparison,
+            plot_significance_circos,
+        )
+
+        data_dir = self.output_dir / "data"
+        fig_dir = self.output_dir / "figures"
+        tables_dir = self.output_dir / "tables"
+
+        # Try both filenames (aggregate() writes roi_connectivity_edges.csv;
+        # older runs may have connectivity_edges.csv)
+        csv_path = data_dir / "roi_connectivity_edges.csv"
+        if not csv_path.exists():
+            csv_path = data_dir / "connectivity_edges.csv"
+        if not csv_path.exists():
+            logger.warning("No connectivity edge CSV found — skipping figures")
+            return
+
+        edges_df = pd.read_csv(csv_path)
+        roi_cats = self.config.roi_categories
+        if not roi_cats:
+            logger.warning("No roi_categories in config — skipping connectivity figures")
+            return
+
+        # Load posthoc p-values if available (for significance overlays)
+        posthoc_path = tables_dir / "connectivity_posthoc_region_pair.csv"
+        posthoc_df = None
+        if posthoc_path.exists():
+            posthoc_df = pd.read_csv(posthoc_path)
+            logger.info("Loaded posthoc results: %d rows", len(posthoc_df))
+
+        metrics = ["coherence", "imag_coherence"]
+        if "partial_corr" in edges_df.columns:
+            metrics.append("partial_corr")
+        bands = list(self.config.bands.keys())
+        contrasts = self.config.contrasts
+
+        if not contrasts:
+            logger.warning("No contrasts defined — skipping connectivity figures")
+            return
+
+        n_figs = 0
+        for contrast in contrasts:
+            ga, gb = contrast.group_a, contrast.group_b
+            label_a = self.config.get_group_label(ga)
+            label_b = self.config.get_group_label(gb)
+
+            for band in bands:
+                band_df = edges_df[edges_df["band"] == band]
+                if band_df.empty:
+                    continue
+
+                for metric in metrics:
+                    mat_a, roi_labels, region_names, region_sizes = build_roi_matrix(
+                        band_df, roi_cats, metric, group=ga,
+                    )
+                    mat_b, _, _, _ = build_roi_matrix(
+                        band_df, roi_cats, metric, group=gb,
+                    )
+
+                    # Sanitize band name for filenames
+                    band_safe = band.replace(" ", "_").lower()
+                    prefix = f"{contrast.name}_{metric}_{band_safe}"
+
+                    for plot_type in ("circos", "heatmap"):
+                        out = fig_dir / f"{plot_type}_{prefix}.png"
+
+                        # For circos, threshold at 90th percentile
+                        thresh = 0.0
+                        if plot_type == "circos":
+                            ut = mat_a[np.triu_indices_from(mat_a, k=1)]
+                            thresh = float(np.percentile(ut, 90))
+
+                        plot_connectivity_comparison(
+                            mat_a, mat_b,
+                            roi_labels, region_names, region_sizes,
+                            out,
+                            plot_type=plot_type,
+                            group_labels=(label_a, label_b),
+                            title=f"{band} — {metric.replace('_', ' ').title()}",
+                            threshold=thresh,
+                        )
+                        n_figs += 1
+
+                    # Significance circos (uncorrected p < 0.05)
+                    if posthoc_df is not None:
+                        sig_mask = build_significance_matrix(
+                            posthoc_df, roi_labels, region_names,
+                            region_sizes, band, metric,
+                        )
+                        if sig_mask is not None and sig_mask.any():
+                            out = fig_dir / f"circos_sig_{prefix}.png"
+                            plot_significance_circos(
+                                mat_a, mat_b,
+                                roi_labels, region_names, region_sizes,
+                                sig_mask, out,
+                                group_labels=(label_a, label_b),
+                                title=f"{band} — {metric.replace('_', ' ').title()} (uncorrected p < 0.05)",
+                            )
+                            n_figs += 1
+
+        logger.info("Generated %d connectivity figures", n_figs)
 
     def summary(self) -> None:
         """Call Rscript for statistics, figures, and summary report."""
