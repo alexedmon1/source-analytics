@@ -53,6 +53,7 @@ class NetworkAnalysis(BaseAnalysis):
         self._metrics_rows: list[dict] = []
         self._global_rows: list[dict] = []
         self._source_coords: np.ndarray | None = None
+        self._vertex_indices: np.ndarray | None = None
         self._sfreq: float | None = None
         self._subject_data: dict[str, dict] = {}
         self._subject_groups: dict[str, str] = {}
@@ -84,6 +85,7 @@ class NetworkAnalysis(BaseAnalysis):
         self._subject_groups.clear()
         self._conn_matrices.clear()
         self._source_coords = None
+        self._vertex_indices = None
         self._cluster_results.clear()
         self._nbs_results.clear()
 
@@ -97,8 +99,19 @@ class NetworkAnalysis(BaseAnalysis):
 
         if self._sfreq is None:
             self._sfreq = sfreq
-        if self._source_coords is None:
-            self._source_coords = coords
+
+        # Apply vertex filter (compute mask once from first subject)
+        if self._vertex_indices is None:
+            mask = self.config.get_vertex_mask(coords)
+            self._vertex_indices = np.where(mask)[0]
+            self._source_coords = coords[mask]
+            if self.config.has_vertex_filter:
+                logger.info(
+                    "Vertex filter: %d/%d vertices retained",
+                    len(self._vertex_indices), len(coords),
+                )
+
+        stc_data = stc_data[self._vertex_indices]
 
         self._subject_groups[uid] = subject.group
         subject_metrics = {}
@@ -167,7 +180,7 @@ class NetworkAnalysis(BaseAnalysis):
                 self._metrics_rows.append({
                     "subject": uid,
                     "group": subject.group,
-                    "vertex_idx": vi,
+                    "vertex_idx": int(self._vertex_indices[vi]),
                     "band": band_name,
                     "degree": int(gm.degree[vi]),
                     "clustering": float(gm.clustering[vi]),

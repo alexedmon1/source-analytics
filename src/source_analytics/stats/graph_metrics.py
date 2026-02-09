@@ -149,6 +149,83 @@ def compute_graph_metrics(
     )
 
 
+def _vectorized_welch_t(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """Vectorized Welch's t-test across all edges simultaneously.
+
+    Parameters
+    ----------
+    A : ndarray, shape (n_a, n, n)
+        Connectivity matrices for group A.
+    B : ndarray, shape (n_b, n, n)
+        Connectivity matrices for group B.
+
+    Returns
+    -------
+    t_matrix : ndarray, shape (n, n)
+        Welch's t-statistic for each edge.
+    """
+    n_a = A.shape[0]
+    n_b = B.shape[0]
+
+    mean_a = A.mean(axis=0)
+    mean_b = B.mean(axis=0)
+    var_a = A.var(axis=0, ddof=1)
+    var_b = B.var(axis=0, ddof=1)
+
+    se = np.sqrt(var_a / n_a + var_b / n_b)
+    se = np.maximum(se, np.finfo(float).eps)
+
+    t_matrix = (mean_a - mean_b) / se
+    # Only keep upper triangle (symmetric)
+    t_matrix = np.triu(t_matrix, k=1)
+    t_matrix = t_matrix + t_matrix.T
+
+    return t_matrix
+
+
+def _find_components(adj: np.ndarray) -> list[int]:
+    """Find connected components and count edges in each.
+
+    Parameters
+    ----------
+    adj : ndarray, shape (n, n)
+        Boolean adjacency matrix.
+
+    Returns
+    -------
+    component_edge_counts : list[int]
+        Number of edges in each component with >= 2 nodes.
+    """
+    n = adj.shape[0]
+    visited = np.zeros(n, dtype=bool)
+    components = []
+
+    for seed_node in range(n):
+        if visited[seed_node]:
+            continue
+        if not np.any(adj[seed_node]):
+            continue
+
+        comp = []
+        queue = deque([seed_node])
+        visited[seed_node] = True
+        while queue:
+            v = queue.popleft()
+            comp.append(v)
+            neighbors = np.where(adj[v] & ~visited)[0]
+            for nb in neighbors:
+                visited[nb] = True
+                queue.append(nb)
+
+        if len(comp) > 1:
+            comp_arr = np.array(comp)
+            sub = adj[np.ix_(comp_arr, comp_arr)]
+            edge_count = int(np.triu(sub, k=1).sum())
+            components.append(edge_count)
+
+    return components
+
+
 def nbs_permutation_test(
     matrices_a: list[np.ndarray],
     matrices_b: list[np.ndarray],
@@ -157,6 +234,9 @@ def nbs_permutation_test(
     seed: int | None = None,
 ) -> NBSResult:
     """Network-Based Statistic (Zalesky et al., 2010).
+
+    Uses vectorized Welch's t-tests for all edges simultaneously,
+    avoiding O(n^2) scipy.stats.ttest_ind calls per permutation.
 
     Parameters
     ----------
@@ -175,8 +255,6 @@ def nbs_permutation_test(
     -------
     NBSResult
     """
-    from scipy import stats
-
     rng = np.random.default_rng(seed)
 
     n_a = len(matrices_a)
@@ -187,47 +265,11 @@ def nbs_permutation_test(
     A = np.array(matrices_a)  # (n_a, n, n)
     B = np.array(matrices_b)  # (n_b, n, n)
 
-    # Edge-wise t-tests
-    t_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(i + 1, n):
-            t_val, _ = stats.ttest_ind(A[:, i, j], B[:, i, j], equal_var=False)
-            t_matrix[i, j] = t_val
-            t_matrix[j, i] = t_val
+    # Vectorized edge-wise t-tests
+    t_matrix = _vectorized_welch_t(A, B)
 
     # Find supra-threshold edges
     suprathresh = np.abs(t_matrix) > nbs_threshold
-
-    # Find connected components in supra-threshold network
-    def _find_components(adj):
-        n = adj.shape[0]
-        visited = np.zeros(n, dtype=bool)
-        components = []
-        for seed_node in range(n):
-            if visited[seed_node]:
-                continue
-            # Check if this node has any supra-threshold edges
-            if not np.any(adj[seed_node]):
-                continue
-            comp = []
-            queue = deque([seed_node])
-            visited[seed_node] = True
-            while queue:
-                v = queue.popleft()
-                comp.append(v)
-                for nb in range(n):
-                    if not visited[nb] and adj[v, nb]:
-                        visited[nb] = True
-                        queue.append(nb)
-            if len(comp) > 1:
-                # Count edges in component
-                edge_count = 0
-                for ci in comp:
-                    for cj in comp:
-                        if ci < cj and adj[ci, cj]:
-                            edge_count += 1
-                components.append(edge_count)
-        return components
 
     observed_components = _find_components(suprathresh)
 
@@ -247,8 +289,8 @@ def nbs_permutation_test(
         len(observed_components), observed_components, n_permutations,
     )
 
-    # Permutation test
-    combined = np.vstack([A, B])
+    # Permutation test with vectorized t-tests
+    combined = np.vstack([A, B])  # (n_a + n_b, n, n)
     null_max_component = np.zeros(n_permutations)
 
     for perm in range(n_permutations):
@@ -256,15 +298,7 @@ def nbs_permutation_test(
         perm_A = combined[perm_idx[:n_a]]
         perm_B = combined[perm_idx[n_a:]]
 
-        perm_t = np.zeros((n, n))
-        for i in range(n):
-            for j in range(i + 1, n):
-                t_val, _ = stats.ttest_ind(
-                    perm_A[:, i, j], perm_B[:, i, j], equal_var=False,
-                )
-                perm_t[i, j] = t_val
-                perm_t[j, i] = t_val
-
+        perm_t = _vectorized_welch_t(perm_A, perm_B)
         perm_supra = np.abs(perm_t) > nbs_threshold
         perm_comps = _find_components(perm_supra)
         null_max_component[perm] = max(perm_comps) if perm_comps else 0
@@ -277,7 +311,6 @@ def nbs_permutation_test(
 
     # Build significant edge mask
     sig_edges = np.zeros((n, n), dtype=bool)
-    # Mark edges from significant components
     n_sig = sum(1 for p in component_pvalues if p < 0.05)
 
     logger.info("NBS: %d/%d components significant (p<0.05)", n_sig, len(observed_components))

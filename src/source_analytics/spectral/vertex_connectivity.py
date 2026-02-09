@@ -1,8 +1,9 @@
 """Vertex-level functional connectivity: imaginary coherence and FCD.
 
 Computes all-to-all imaginary coherence between source vertices using
-CSD-based methods, then derives Functional Connectivity Density (FCD)
-maps showing how connected each vertex is to the rest of the brain.
+vectorized STFT + matrix multiply, then derives Functional Connectivity
+Density (FCD) maps showing how connected each vertex is to the rest of
+the brain.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from scipy.signal import csd, welch
+from scipy.signal import stft, get_window
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,9 @@ def compute_vertex_connectivity_matrix(
     window: str = "hann",
 ) -> np.ndarray:
     """Compute all-to-all connectivity matrix for source vertices.
+
+    Uses vectorized STFT + matrix multiply for O(n_seg) complexity instead
+    of O(n_vertices^2) individual CSD calls.
 
     Parameters
     ----------
@@ -45,6 +49,9 @@ def compute_vertex_connectivity_matrix(
     conn_matrix : ndarray, shape (n_vertices, n_vertices)
         Symmetric connectivity matrix.
     """
+    if metric != "imag_coherence":
+        raise ValueError(f"Unknown metric: {metric}")
+
     n_vertices, n_times = stc_data.shape
     fmin, fmax = band
 
@@ -53,37 +60,48 @@ def compute_vertex_connectivity_matrix(
     nperseg = min(nperseg, n_times)
     noverlap = nperseg // 2
 
-    # Compute auto-spectra for all vertices
-    freqs, pxx = welch(stc_data, fs=sfreq, window=window,
-                       nperseg=nperseg, noverlap=noverlap, axis=-1)
+    # Compute STFT for all vertices at once
+    # boundary=None, padded=False to match welch/csd segment boundaries
+    freqs, _, Zxx = stft(
+        stc_data, fs=sfreq, window=window,
+        nperseg=nperseg, noverlap=noverlap,
+        boundary=None, padded=False,
+    )
+    # Zxx: (n_vertices, n_freq, n_segments)
+
     band_mask = (freqs >= fmin) & (freqs <= fmax)
+    if not band_mask.any():
+        return np.zeros((n_vertices, n_vertices))
 
-    # Average auto-spectra in band
-    pxx_band = pxx[:, band_mask].mean(axis=1)  # (n_vertices,)
-    pxx_band = np.maximum(pxx_band, np.finfo(float).eps)
+    # Upcast to complex128 for numerical precision — float32 input yields
+    # complex64 STFT coefficients (~1e-10), and the imaginary part of the
+    # cross-spectrum is lost in complex64 matrix multiply.
+    Zxx_band = Zxx[:, band_mask, :].astype(np.complex128)
+    n_band_freq = Zxx_band.shape[1]
+    n_seg = Zxx_band.shape[2]
+    total = n_band_freq * n_seg
 
-    conn_matrix = np.zeros((n_vertices, n_vertices))
+    # Accumulate cross-spectra and auto-spectra via segment loop
+    # Memory: O(n_vertices * n_band_freq) per iteration
+    csd_sum = np.zeros((n_vertices, n_vertices), dtype=np.complex128)
+    auto_sum = np.zeros(n_vertices, dtype=np.float64)
 
-    for i in range(n_vertices):
-        for j in range(i + 1, n_vertices):
-            # Cross-spectral density
-            f_csd, pxy = csd(
-                stc_data[i], stc_data[j],
-                fs=sfreq, window=window,
-                nperseg=nperseg, noverlap=noverlap,
-            )
-            csd_mask = (f_csd >= fmin) & (f_csd <= fmax)
+    for seg_idx in range(n_seg):
+        Z_seg = Zxx_band[:, :, seg_idx]  # (n_vertices, n_band_freq)
+        # Cross-spectral matrix for this segment (summed over band freqs)
+        csd_sum += Z_seg @ np.conj(Z_seg).T
+        # Auto-spectra
+        auto_sum += np.sum(np.abs(Z_seg) ** 2, axis=1)
 
-            if metric == "imag_coherence":
-                # Imaginary coherence: |Im(Pxy / sqrt(Pxx * Pyy))|
-                norm = np.sqrt(pxx_band[i] * pxx_band[j])
-                coherency = pxy[csd_mask].mean() / norm
-                val = abs(coherency.imag)
-            else:
-                raise ValueError(f"Unknown metric: {metric}")
+    # Mean cross-spectrum and auto-spectrum over band freqs and segments
+    csd_mean = csd_sum / total
+    auto_mean = np.maximum(auto_sum / total, np.finfo(float).tiny)
 
-            conn_matrix[i, j] = val
-            conn_matrix[j, i] = val
+    # Normalize to coherency and extract imaginary coherence
+    norm = np.sqrt(np.outer(auto_mean, auto_mean))
+    coherency = csd_mean / norm
+    conn_matrix = np.abs(np.imag(coherency))
+    np.fill_diagonal(conn_matrix, 0.0)
 
     return conn_matrix
 
@@ -177,36 +195,8 @@ def compute_seed_connectivity(
     -------
     connectivity : ndarray, shape (n_vertices,)
     """
-    n_vertices, n_times = stc_data.shape
-    fmin, fmax = band
-
-    if nperseg is None:
-        nperseg = int(2 * sfreq)
-    nperseg = min(nperseg, n_times)
-    noverlap = nperseg // 2
-
-    # Seed auto-spectrum
-    freqs, pxx_seed = welch(stc_data[seed_idx], fs=sfreq, window="hann",
-                            nperseg=nperseg, noverlap=noverlap)
-    band_mask = (freqs >= fmin) & (freqs <= fmax)
-    pxx_seed_band = max(pxx_seed[band_mask].mean(), np.finfo(float).eps)
-
-    # All auto-spectra
-    _, pxx_all = welch(stc_data, fs=sfreq, window="hann",
-                       nperseg=nperseg, noverlap=noverlap, axis=-1)
-    pxx_all_band = np.maximum(pxx_all[:, band_mask].mean(axis=1), np.finfo(float).eps)
-
-    connectivity = np.zeros(n_vertices)
-    for j in range(n_vertices):
-        if j == seed_idx:
-            continue
-        f_csd, pxy = csd(
-            stc_data[seed_idx], stc_data[j],
-            fs=sfreq, window="hann", nperseg=nperseg, noverlap=noverlap,
-        )
-        csd_mask = (f_csd >= fmin) & (f_csd <= fmax)
-        norm = np.sqrt(pxx_seed_band * pxx_all_band[j])
-        coherency = pxy[csd_mask].mean() / norm
-        connectivity[j] = abs(coherency.imag)
-
-    return connectivity
+    # Use the full matrix computation (now vectorized and fast)
+    conn_mat = compute_vertex_connectivity_matrix(
+        stc_data, sfreq, band, metric=metric, nperseg=nperseg,
+    )
+    return conn_mat[seed_idx]
