@@ -36,6 +36,8 @@ METRIC_LABELS = {
     "imag_coherence": "Imaginary Coherence",
     "coherence": "Coherence",
     "pli": "Phase Lag Index",
+    "dwpli": "Debiased Weighted PLI",
+    "aec": "Orthogonalized AEC",
     "partial_corr": "Partial Correlation",
 }
 

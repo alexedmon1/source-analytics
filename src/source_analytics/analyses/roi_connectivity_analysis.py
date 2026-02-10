@@ -83,6 +83,8 @@ class ConnectivityAnalysis(BaseAnalysis):
             coh_mat = metrics["coherence"]
             icoh_mat = metrics["imag_coherence"]
             pli_mat = metrics.get("pli")
+            dwpli_mat = metrics.get("dwpli")
+            aec_mat = metrics.get("aec")
             pcorr_mat = metrics.get("partial_corr")
 
             for i in range(n_rois):
@@ -98,6 +100,10 @@ class ConnectivityAnalysis(BaseAnalysis):
                     }
                     if pli_mat is not None:
                         row["pli"] = float(pli_mat[i, j])
+                    if dwpli_mat is not None:
+                        row["dwpli"] = float(dwpli_mat[i, j])
+                    if aec_mat is not None:
+                        row["aec"] = float(aec_mat[i, j])
                     if pcorr_mat is not None:
                         row["partial_corr"] = float(pcorr_mat[i, j])
                     self._edge_rows.append(row)
@@ -156,6 +162,10 @@ class ConnectivityAnalysis(BaseAnalysis):
         metrics = ["coherence", "imag_coherence"]
         if "pli" in edges_df.columns:
             metrics.append("pli")
+        if "dwpli" in edges_df.columns:
+            metrics.append("dwpli")
+        if "aec" in edges_df.columns:
+            metrics.append("aec")
         if "partial_corr" in edges_df.columns:
             metrics.append("partial_corr")
         bands = list(self.config.bands.keys())

@@ -49,6 +49,8 @@ compute_global_connectivity <- function(edges) {
       mean_coherence = mean(coherence, na.rm = TRUE),
       mean_imag_coherence = mean(imag_coherence, na.rm = TRUE),
       mean_pli = if ("pli" %in% names(.)) mean(pli, na.rm = TRUE) else NA_real_,
+      mean_dwpli = if ("dwpli" %in% names(.)) mean(dwpli, na.rm = TRUE) else NA_real_,
+      mean_aec = if ("aec" %in% names(.)) mean(aec, na.rm = TRUE) else NA_real_,
       n_edges = n(),
       .groups = "drop"
     )
@@ -63,10 +65,18 @@ compute_global_connectivity <- function(edges) {
 run_global_ttests <- function(global_df, contrasts, bands) {
   metrics <- c("mean_coherence", "mean_imag_coherence")
   metric_labels <- c("coherence", "imag_coherence")
-  # Include PLI if present in data
+  # Include optional metrics if present in data
   if ("mean_pli" %in% names(global_df) && !all(is.na(global_df$mean_pli))) {
     metrics <- c(metrics, "mean_pli")
     metric_labels <- c(metric_labels, "pli")
+  }
+  if ("mean_dwpli" %in% names(global_df) && !all(is.na(global_df$mean_dwpli))) {
+    metrics <- c(metrics, "mean_dwpli")
+    metric_labels <- c(metric_labels, "dwpli")
+  }
+  if ("mean_aec" %in% names(global_df) && !all(is.na(global_df$mean_aec))) {
+    metrics <- c(metrics, "mean_aec")
+    metric_labels <- c(metric_labels, "aec")
   }
   results <- list()
 
@@ -184,6 +194,8 @@ aggregate_edges_to_region_pairs <- function(edges, roi_categories) {
       coherence = mean(coherence, na.rm = TRUE),
       imag_coherence = mean(imag_coherence, na.rm = TRUE),
       pli = if ("pli" %in% names(.)) mean(pli, na.rm = TRUE) else NA_real_,
+      dwpli = if ("dwpli" %in% names(.)) mean(dwpli, na.rm = TRUE) else NA_real_,
+      aec = if ("aec" %in% names(.)) mean(aec, na.rm = TRUE) else NA_real_,
       n_edges = n(),
       .groups = "drop"
     )
@@ -848,6 +860,12 @@ if (length(config$roi_categories) > 0 && has_lme4) {
   region_metrics <- c("coherence", "imag_coherence")
   if ("pli" %in% names(region_pair_df) && !all(is.na(region_pair_df$pli))) {
     region_metrics <- c(region_metrics, "pli")
+  }
+  if ("dwpli" %in% names(region_pair_df) && !all(is.na(region_pair_df$dwpli))) {
+    region_metrics <- c(region_metrics, "dwpli")
+  }
+  if ("aec" %in% names(region_pair_df) && !all(is.na(region_pair_df$aec))) {
+    region_metrics <- c(region_metrics, "aec")
   }
 
   for (metric in region_metrics) {

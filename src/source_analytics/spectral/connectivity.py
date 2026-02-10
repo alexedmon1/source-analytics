@@ -1,11 +1,11 @@
-"""Functional connectivity: coherence, imaginary coherence, PLI, and partial correlation."""
+"""Functional connectivity: coherence, imaginary coherence, PLI, dwPLI, AEC, and partial correlation."""
 
 from __future__ import annotations
 
 import logging
 
 import numpy as np
-from scipy.signal import welch, csd, butter, sosfiltfilt
+from scipy.signal import welch, csd, stft, hilbert, butter, sosfiltfilt
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +18,15 @@ def compute_connectivity_matrix(
     nperseg: int | None = None,
     window: str = "hann",
 ) -> tuple[dict[str, dict[str, np.ndarray]], list[str]]:
-    """Compute coherence, imaginary coherence, and PLI matrices for all ROI pairs.
+    """Compute connectivity matrices for all ROI pairs.
 
-    Uses Welch's method for auto-spectra and CSD to compute
-    magnitude-squared coherence, imaginary coherence, and phase lag index
-    per frequency band.
+    Metrics computed:
+    - **coherence**: magnitude-squared coherence (Welch CSD)
+    - **imag_coherence**: mean |Im(Cxy)| (volume-conduction resistant)
+    - **pli**: phase lag index |mean(sign(Im(Pxy)))| (Stam 2007)
+    - **dwpli**: debiased weighted PLI (Vinck 2011) — per-segment STFT
+    - **aec**: orthogonalized amplitude envelope correlation (Hipp 2012)
+    - **partial_corr**: partial correlation via precision matrix
 
     Parameters
     ----------
@@ -33,19 +37,14 @@ def compute_connectivity_matrix(
     bands : dict[str, tuple[float, float]]
         Frequency band definitions, e.g. ``{"alpha": (8, 13)}``.
     nperseg : int, optional
-        Segment length for Welch/CSD. Default: ``2 * sfreq`` (2-second windows).
+        Segment length for Welch/CSD/STFT. Default: ``2 * sfreq`` (2-second windows).
     window : str
         Window function (default: Hann).
 
     Returns
     -------
     band_results : dict[str, dict[str, ndarray]]
-        ``band_results[band_name]["coherence"]`` is an (n_rois, n_rois) symmetric
-        matrix of magnitude-squared coherence averaged within the band.
-        ``band_results[band_name]["imag_coherence"]`` is the mean absolute
-        imaginary coherence within the band.
-        ``band_results[band_name]["pli"]`` is the phase lag index
-        (mean |sign(Im(Pxy))|) within the band.
+        Each metric is an (n_rois, n_rois) symmetric matrix per band.
     roi_names : list[str]
         Ordered list of ROI names (rows/columns of matrices).
     """
@@ -123,6 +122,18 @@ def compute_connectivity_matrix(
                 band_results[band_name]["pli"][i, j] = pli_val
                 band_results[band_name]["pli"][j, i] = pli_val
 
+    # --- Debiased Weighted PLI (Vinck et al. 2011) via per-segment STFT ---
+    _compute_dwpli(ts_list, sfreq, n_rois, nperseg, noverlap, window,
+                   band_masks, band_results)
+
+    # --- Orthogonalized AEC (Hipp et al. 2012) ---
+    for band_name, (fmin, fmax) in bands.items():
+        if band_name not in band_results:
+            continue
+        band_results[band_name]["aec"] = _band_orthogonalized_aec(
+            ts_list, sfreq, fmin, fmax,
+        )
+
     # --- Partial correlation on band-filtered time series ---
     for band_name, (fmin, fmax) in bands.items():
         if band_name not in band_results:
@@ -131,6 +142,126 @@ def compute_connectivity_matrix(
         band_results[band_name]["partial_corr"] = pcorr
 
     return band_results, roi_names
+
+
+def _compute_dwpli(
+    ts_list: list[np.ndarray],
+    sfreq: float,
+    n_rois: int,
+    nperseg: int,
+    noverlap: int,
+    window: str,
+    band_masks: dict[str, np.ndarray],
+    band_results: dict[str, dict[str, np.ndarray]],
+) -> None:
+    """Compute debiased weighted PLI (Vinck et al. 2011) in-place.
+
+    Uses per-segment STFT cross-spectra. For each frequency bin within a band,
+    dwPLI is computed across segments, then averaged over the band.
+
+    dwPLI_f = (sum_t(Im)^2 - sum_t(Im^2)) / (sum_t(|Im|)^2 - sum_t(Im^2))
+    """
+    tiny = np.finfo(float).tiny
+
+    # Compute STFT for all ROIs: each is (n_freqs, n_segments) complex
+    stft_data: list[np.ndarray] = []
+    for ts in ts_list:
+        _, _, Zxx = stft(ts, fs=sfreq, window=window, nperseg=nperseg,
+                         noverlap=noverlap, boundary=None, padded=False)
+        stft_data.append(Zxx.astype(np.complex128))
+
+    # Initialize dwpli matrices
+    for band_name in band_masks:
+        band_results[band_name]["dwpli"] = np.zeros(
+            (n_rois, n_rois), dtype=np.float64,
+        )
+
+    for i in range(n_rois):
+        for j in range(i + 1, n_rois):
+            # Per-segment cross-spectrum: (n_freqs, n_segments)
+            csd_seg = stft_data[i] * np.conj(stft_data[j])
+
+            for band_name, mask in band_masks.items():
+                im_csd = np.imag(csd_seg[mask, :])  # (n_band_freqs, n_segments)
+
+                # dwPLI per frequency bin (across segments), then average over band
+                sum_im = np.sum(im_csd, axis=1)
+                sum_im_sq = np.sum(im_csd ** 2, axis=1)
+                sum_abs_im_sq = np.sum(np.abs(im_csd), axis=1) ** 2
+
+                numer = sum_im ** 2 - sum_im_sq
+                denom = sum_abs_im_sq - sum_im_sq
+
+                valid = np.abs(denom) > tiny
+                dwpli_freq = np.zeros(len(sum_im))
+                dwpli_freq[valid] = numer[valid] / denom[valid]
+                dwpli_freq = np.clip(dwpli_freq, 0.0, 1.0)
+
+                val = float(np.mean(dwpli_freq))
+                band_results[band_name]["dwpli"][i, j] = val
+                band_results[band_name]["dwpli"][j, i] = val
+
+
+def _band_orthogonalized_aec(
+    ts_list: list[np.ndarray],
+    sfreq: float,
+    fmin: float,
+    fmax: float,
+) -> np.ndarray:
+    """Orthogonalized amplitude envelope correlation (Hipp et al. 2012).
+
+    Band-pass filters each ROI, computes the analytic signal via Hilbert
+    transform, then for each pair orthogonalizes one signal w.r.t. the other
+    (regression in complex domain) to remove zero-lag volume conduction.
+    The AEC is the Pearson correlation of the envelopes, symmetrized over
+    both directions.
+
+    Returns
+    -------
+    aec : ndarray (n_rois, n_rois)
+        Symmetric orthogonalized AEC matrix, diagonal = 1.
+    """
+    tiny = np.finfo(float).tiny
+    n = len(ts_list)
+    min_len = min(len(ts) for ts in ts_list)
+
+    # Band-pass filter
+    nyq = sfreq / 2
+    lo = max(fmin / nyq, 1e-5)
+    hi = min(fmax / nyq, 0.9999)
+    sos = butter(4, [lo, hi], btype="band", output="sos")
+
+    # Filter and compute analytic signal for each ROI
+    analytic = np.empty((min_len, n), dtype=np.complex128)
+    for i, ts in enumerate(ts_list):
+        filtered = sosfiltfilt(sos, ts[:min_len])
+        analytic[:, i] = hilbert(filtered)
+
+    envelopes = np.abs(analytic)
+    aec = np.eye(n, dtype=np.float64)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            zi = analytic[:, i]
+            zj = analytic[:, j]
+
+            # Direction 1: orthogonalize j w.r.t. i
+            #   Remove component of zj in phase with zi (zero-lag coupling)
+            beta_ji = np.real(zj * np.conj(zi)) / (np.abs(zi) ** 2 + tiny)
+            zj_orth = zj - beta_ji * zi
+            r1 = np.corrcoef(envelopes[:, i], np.abs(zj_orth))[0, 1]
+
+            # Direction 2: orthogonalize i w.r.t. j
+            beta_ij = np.real(zi * np.conj(zj)) / (np.abs(zj) ** 2 + tiny)
+            zi_orth = zi - beta_ij * zj
+            r2 = np.corrcoef(envelopes[:, j], np.abs(zi_orth))[0, 1]
+
+            # Symmetrize
+            val = (r1 + r2) / 2.0
+            aec[i, j] = val
+            aec[j, i] = val
+
+    return aec
 
 
 def _band_partial_correlation(
