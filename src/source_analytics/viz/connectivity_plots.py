@@ -718,7 +718,7 @@ def plot_connectivity_comparison(
         for ax_i, (mat, label, cm, lo, hi, thresh) in enumerate([
             (mat_a, group_labels[0], "YlOrRd", group_vmin, group_vmax, threshold),
             (mat_b, group_labels[1], "YlOrRd", group_vmin, group_vmax, threshold),
-            (diff, "Difference", "RdBu_r", -diff_vmax, diff_vmax, diff_thresh),
+            (diff, f"{group_labels[0]} \u2212 {group_labels[1]}", "RdBu_r", -diff_vmax, diff_vmax, diff_thresh),
         ]):
             plot_circos(
                 mat, roi_labels, region_names, region_sizes, axes[ax_i],
@@ -748,7 +748,10 @@ def plot_connectivity_comparison(
             sm_diff, ax=axes[2], orientation="horizontal",
             fraction=0.04, pad=0.06, shrink=0.6,
         )
-        cbar_diff.set_label("Difference", fontsize=11)
+        cbar_diff.set_label(
+            f"{group_labels[0]} \u2212 {group_labels[1]}",
+            fontsize=11,
+        )
 
     elif plot_type == "heatmap":
         fig, axes = plt.subplots(1, 3, figsize=(30, 9))
