@@ -48,6 +48,7 @@ compute_global_connectivity <- function(edges) {
     summarise(
       mean_coherence = mean(coherence, na.rm = TRUE),
       mean_imag_coherence = mean(imag_coherence, na.rm = TRUE),
+      mean_pli = if ("pli" %in% names(.)) mean(pli, na.rm = TRUE) else NA_real_,
       n_edges = n(),
       .groups = "drop"
     )
@@ -62,6 +63,11 @@ compute_global_connectivity <- function(edges) {
 run_global_ttests <- function(global_df, contrasts, bands) {
   metrics <- c("mean_coherence", "mean_imag_coherence")
   metric_labels <- c("coherence", "imag_coherence")
+  # Include PLI if present in data
+  if ("mean_pli" %in% names(global_df) && !all(is.na(global_df$mean_pli))) {
+    metrics <- c(metrics, "mean_pli")
+    metric_labels <- c(metric_labels, "pli")
+  }
   results <- list()
 
   for (contrast in contrasts) {
@@ -177,6 +183,7 @@ aggregate_edges_to_region_pairs <- function(edges, roi_categories) {
     summarise(
       coherence = mean(coherence, na.rm = TRUE),
       imag_coherence = mean(imag_coherence, na.rm = TRUE),
+      pli = if ("pli" %in% names(.)) mean(pli, na.rm = TRUE) else NA_real_,
       n_edges = n(),
       .groups = "drop"
     )
@@ -838,7 +845,12 @@ if (length(config$roi_categories) > 0 && has_lme4) {
   all_omnibus <- list()
   all_posthoc <- list()
 
-  for (metric in c("coherence", "imag_coherence")) {
+  region_metrics <- c("coherence", "imag_coherence")
+  if ("pli" %in% names(region_pair_df) && !all(is.na(region_pair_df$pli))) {
+    region_metrics <- c(region_metrics, "pli")
+  }
+
+  for (metric in region_metrics) {
     message("\n  --- Metric: ", metric, " ---")
 
     omnibus <- run_omnibus_lmm_region_pair(region_pair_df, config$contrasts,

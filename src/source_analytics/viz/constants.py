@@ -35,6 +35,7 @@ CC_ROIS = [
 METRIC_LABELS = {
     "imag_coherence": "Imaginary Coherence",
     "coherence": "Coherence",
+    "pli": "Phase Lag Index",
     "partial_corr": "Partial Correlation",
 }
 

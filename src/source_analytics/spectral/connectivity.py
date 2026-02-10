@@ -1,4 +1,4 @@
-"""Functional connectivity: coherence, imaginary coherence, and partial correlation."""
+"""Functional connectivity: coherence, imaginary coherence, PLI, and partial correlation."""
 
 from __future__ import annotations
 
@@ -18,10 +18,11 @@ def compute_connectivity_matrix(
     nperseg: int | None = None,
     window: str = "hann",
 ) -> tuple[dict[str, dict[str, np.ndarray]], list[str]]:
-    """Compute coherence and imaginary coherence matrices for all ROI pairs.
+    """Compute coherence, imaginary coherence, and PLI matrices for all ROI pairs.
 
     Uses Welch's method for auto-spectra and CSD to compute
-    magnitude-squared coherence and imaginary coherence per frequency band.
+    magnitude-squared coherence, imaginary coherence, and phase lag index
+    per frequency band.
 
     Parameters
     ----------
@@ -43,6 +44,8 @@ def compute_connectivity_matrix(
         matrix of magnitude-squared coherence averaged within the band.
         ``band_results[band_name]["imag_coherence"]`` is the mean absolute
         imaginary coherence within the band.
+        ``band_results[band_name]["pli"]`` is the phase lag index
+        (mean |sign(Im(Pxy))|) within the band.
     roi_names : list[str]
         Ordered list of ROI names (rows/columns of matrices).
     """
@@ -83,6 +86,7 @@ def compute_connectivity_matrix(
         band_results[band_name] = {
             "coherence": np.eye(n_rois, dtype=np.float64),
             "imag_coherence": np.zeros((n_rois, n_rois), dtype=np.float64),
+            "pli": np.zeros((n_rois, n_rois), dtype=np.float64),
         }
 
     # Compute CSD for each unique pair and derive coherence
@@ -109,10 +113,15 @@ def compute_connectivity_matrix(
                 icoh_freq = np.abs(np.imag(csd_band / norm))
                 icoh_mean = float(np.mean(icoh_freq))
 
+                # Phase Lag Index: |mean(sign(Im(Pxy)))|
+                pli_val = float(np.abs(np.mean(np.sign(np.imag(csd_band)))))
+
                 band_results[band_name]["coherence"][i, j] = coh_mean
                 band_results[band_name]["coherence"][j, i] = coh_mean
                 band_results[band_name]["imag_coherence"][i, j] = icoh_mean
                 band_results[band_name]["imag_coherence"][j, i] = icoh_mean
+                band_results[band_name]["pli"][i, j] = pli_val
+                band_results[band_name]["pli"][j, i] = pli_val
 
     # --- Partial correlation on band-filtered time series ---
     for band_name, (fmin, fmax) in bands.items():

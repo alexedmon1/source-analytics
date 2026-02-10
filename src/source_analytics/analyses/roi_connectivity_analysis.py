@@ -82,6 +82,7 @@ class ConnectivityAnalysis(BaseAnalysis):
         for band_name, metrics in band_results.items():
             coh_mat = metrics["coherence"]
             icoh_mat = metrics["imag_coherence"]
+            pli_mat = metrics.get("pli")
             pcorr_mat = metrics.get("partial_corr")
 
             for i in range(n_rois):
@@ -95,6 +96,8 @@ class ConnectivityAnalysis(BaseAnalysis):
                         "coherence": float(coh_mat[i, j]),
                         "imag_coherence": float(icoh_mat[i, j]),
                     }
+                    if pli_mat is not None:
+                        row["pli"] = float(pli_mat[i, j])
                     if pcorr_mat is not None:
                         row["partial_corr"] = float(pcorr_mat[i, j])
                     self._edge_rows.append(row)
@@ -151,6 +154,8 @@ class ConnectivityAnalysis(BaseAnalysis):
             logger.info("Loaded posthoc results: %d rows", len(posthoc_df))
 
         metrics = ["coherence", "imag_coherence"]
+        if "pli" in edges_df.columns:
+            metrics.append("pli")
         if "partial_corr" in edges_df.columns:
             metrics.append("partial_corr")
         bands = list(self.config.bands.keys())
