@@ -70,10 +70,11 @@ def compute_transfer_entropy(
         hi = min(fmax / nyq, 0.9999)
         sos = butter(4, [lo, hi], btype="band", output="sos")
 
-        # Band-pass filter all ROIs
-        filtered: list[np.ndarray] = []
+        # Band-pass filter all ROIs once, then pre-discretize
+        discretized: list[np.ndarray] = []
         for ts in ts_list:
-            filtered.append(sosfiltfilt(sos, ts[:min_len]))
+            filt = sosfiltfilt(sos, ts[:min_len])
+            discretized.append(_discretize(filt, n_bins))
 
         te_mat = np.zeros((n_rois, n_rois), dtype=np.float64)
 
@@ -81,8 +82,8 @@ def compute_transfer_entropy(
             for j in range(n_rois):
                 if i == j:
                     continue
-                te_mat[i, j] = _transfer_entropy_pair(
-                    filtered[i], filtered[j], lag=lag, n_bins=n_bins,
+                te_mat[i, j] = _te_from_discretized(
+                    discretized[i], discretized[j], lag=lag, n_bins=n_bins,
                 )
 
         net_te = te_mat - te_mat.T
@@ -93,6 +94,45 @@ def compute_transfer_entropy(
         }
 
     return band_results, roi_names
+
+
+def _te_from_discretized(
+    x_d: np.ndarray,
+    y_d: np.ndarray,
+    lag: int = 1,
+    n_bins: int = 5,
+) -> float:
+    """Compute TE(X → Y) from pre-discretized signals.
+
+    Parameters
+    ----------
+    x_d, y_d : 1-D int arrays
+        Pre-discretized bin indices in [0, n_bins-1].
+    lag : int
+        Lag in samples.
+    n_bins : int
+        Number of bins used in discretization.
+
+    Returns
+    -------
+    te : float
+        Transfer entropy in nats (clipped to >= 0).
+    """
+    n = len(x_d)
+    if n <= lag:
+        return 0.0
+
+    y_future = y_d[lag:]
+    y_past = y_d[:n - lag]
+    x_past = x_d[:n - lag]
+
+    h_yf_yp = _joint_entropy_2(y_future, y_past, n_bins)
+    h_yp_xp = _joint_entropy_2(y_past, x_past, n_bins)
+    h_yp = _entropy_1d(y_past, n_bins)
+    h_yf_yp_xp = _joint_entropy_3(y_future, y_past, x_past, n_bins)
+
+    te = h_yf_yp + h_yp_xp - h_yp - h_yf_yp_xp
+    return max(te, 0.0)
 
 
 def _transfer_entropy_pair(
