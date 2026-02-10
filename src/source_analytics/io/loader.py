@@ -40,7 +40,7 @@ class SubjectLoader:
             raise FileNotFoundError(f"File not found: {path}")
         return np.load(path)
 
-    def load_roi_timeseries(self, signed: bool = False) -> dict[str, np.ndarray]:
+    def load_roi_timeseries(self, signed: bool = True) -> dict[str, np.ndarray]:
         """Load ROI time series (magnitude or signed).
 
         Returns
@@ -116,13 +116,13 @@ class SubjectLoader:
     def has_file(self, filename: str) -> bool:
         return (self.data_dir / filename).exists()
 
-    def load_source_timecourses(self, magnitude: bool = True) -> np.ndarray:
+    def load_source_timecourses(self, magnitude: bool = False) -> np.ndarray:
         """Load full source time courses from step5_stc.pkl.
 
         Parameters
         ----------
         magnitude : bool
-            If True, return absolute values (default). If False, return
+            If True, return absolute values. If False (default), return
             signed source amplitudes.
 
         Returns

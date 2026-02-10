@@ -55,7 +55,7 @@ class AperiodicAnalysis(BaseAnalysis):
     def process_subject(self, subject: SubjectInfo) -> None:
         loader = SubjectLoader(subject.data_dir)
 
-        roi_ts = loader.load_roi_timeseries(signed=False)
+        roi_ts = loader.load_roi_timeseries(signed=True)
         sfreq = loader.load_sfreq()
 
         if self._sfreq is None:

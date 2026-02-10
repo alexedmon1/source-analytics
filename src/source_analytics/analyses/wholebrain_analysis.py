@@ -118,7 +118,7 @@ class WholebrainAnalysis(BaseAnalysis):
         uid = f"{subject.group}_{subject.subject_id}"
 
         # Load source time courses: (n_vertices, n_times)
-        stc_data = loader.load_source_timecourses(magnitude=True)
+        stc_data = loader.load_source_timecourses()
         sfreq = loader.load_sfreq()
         coords = loader.load_source_coords()
 

@@ -55,6 +55,14 @@ message("Loading data...")
 band_df <- read_csv(file.path(data_dir, "band_power.csv"), show_col_types = FALSE)
 message("  band_power.csv: ", nrow(band_df), " rows")
 
+# Exclude Corpus Callosum (white matter) ROIs from all analyses
+cc_rois <- c("Corpus_Callosum_Genu_L", "Corpus_Callosum_Genu_R",
+             "Corpus_Callosum_Body_L", "Corpus_Callosum_Body_R",
+             "Corpus_Callosum_Splenium_L", "Corpus_Callosum_Splenium_R")
+n_before <- nrow(band_df)
+band_df <- band_df %>% filter(!roi %in% cc_rois)
+message("  Excluded ", length(cc_rois), " CC ROIs: ", n_before, " -> ", nrow(band_df), " rows")
+
 psd_file <- file.path(data_dir, "psd_curves.csv")
 has_psd_curves <- file.exists(psd_file)
 if (has_psd_curves) {

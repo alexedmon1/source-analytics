@@ -93,7 +93,7 @@ class NetworkAnalysis(BaseAnalysis):
         loader = SubjectLoader(subject.data_dir)
         uid = f"{subject.group}_{subject.subject_id}"
 
-        stc_data = loader.load_source_timecourses(magnitude=False)
+        stc_data = loader.load_source_timecourses()
         sfreq = loader.load_sfreq()
         coords = loader.load_source_coords()
 
