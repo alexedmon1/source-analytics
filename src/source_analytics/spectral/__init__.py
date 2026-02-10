@@ -14,6 +14,7 @@ from .vertex import (
 )
 from .epoch_sampler import sample_epochs, get_epoch_config
 from .vertex_aperiodic import fit_aperiodic_vertices
+from .transfer_entropy import compute_transfer_entropy
 from .vertex_connectivity import (
     compute_vertex_connectivity_matrix,
     compute_vertex_connectivity_matrix_epochs,
@@ -38,6 +39,7 @@ __all__ = [
     "sample_epochs",
     "get_epoch_config",
     "fit_aperiodic_vertices",
+    "compute_transfer_entropy",
     "compute_vertex_connectivity_matrix",
     "compute_vertex_connectivity_matrix_epochs",
     "compute_fcd",

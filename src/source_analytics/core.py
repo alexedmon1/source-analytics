@@ -20,6 +20,7 @@ from .analyses.specparam_vertex_analysis import SpecparamVertexAnalysis
 from .analyses.mvpa_analysis import MVPAAnalysis
 from .analyses.network_analysis import NetworkAnalysis
 from .analyses.spatial_lmm_analysis import SpatialLMMAnalysis
+from .analyses.transfer_entropy_analysis import TransferEntropyAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "mvpa": MVPAAnalysis,
     "network": NetworkAnalysis,
     "spatial_lmm": SpatialLMMAnalysis,
+    "transfer_entropy": TransferEntropyAnalysis,
 }
 
 
