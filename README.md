@@ -1,8 +1,14 @@
 # source-analytics
 
-Statistical analysis toolkit for source-localized EEG data. Reads pipeline output from the [source_localization](https://github.com/alexedmon1/AlexProjects) package and runs group-level analyses with publication-quality statistics and figures. Supports both ROI-level analyses (PSD, aperiodic, roi_connectivity, PAC) and whole-brain vertex-level analysis with cluster-based permutation testing.
+Statistical analysis toolkit for source-localized EEG data. Reads pipeline output from the [source_localization](https://github.com/alexedmon1/AlexProjects) package and runs group-level analyses with publication-quality statistics and figures.
 
-**Python** handles orchestration, signal processing, and data I/O. **R** handles statistics (linear mixed models via lme4) and visualization (ggplot2). The wholebrain module uses Python for statistics (cluster permutation) and visualization (glass brain plots), with R for report generation.
+13 analysis modules spanning spectral power, connectivity, cross-frequency coupling, graph theory, machine learning, and spatial modeling -- organized across three data levels:
+
+- **ROI-level** (46 ROIs): PSD, aperiodic, ROI connectivity (6 metrics), transfer entropy, PAC
+- **Vertex-level** (154 vertices): wholebrain spectral, vertex connectivity (FCD), specparam vertex, MVPA, network (graph theory + NBS), spatial LMM
+- **Electrode-level** (validation): electrode PSD, electrode vs source comparison
+
+**Python** handles orchestration, signal processing, and data I/O. **R** handles statistics (linear mixed models via lme4) and visualization (ggplot2). Vertex-level modules use Python for statistics (cluster permutation) and visualization (glass brain plots), with R for report generation.
 
 ## Installation
 
@@ -84,7 +90,7 @@ discovery:
 
 source-analytics reads output files produced by the source_localization pipeline. Each subject directory contains:
 
-**ROI-level analyses** (psd, aperiodic, roi_connectivity, pac) — default discovery:
+**ROI-level analyses** (psd, aperiodic, roi_connectivity, transfer_entropy, pac) -- default discovery:
 
 | File | Format | Contents |
 |------|--------|----------|
@@ -92,12 +98,18 @@ source-analytics reads output files produced by the source_localization pipeline
 | `step6_roi_timeseries_signed.pkl` | Python pickle | Dict[str, ndarray] -- ROI timeseries (signed, for connectivity) |
 | `roi_timeseries_magnitude.set` | EEGLAB .set | Same data + metadata (sfreq) |
 
-**Wholebrain analysis** — uses `discovery.required_files` in config:
+**Vertex-level analyses** (wholebrain, vertex_connectivity, specparam_vertex, mvpa, network, spatial_lmm) -- uses `discovery.required_files` in config:
 
 | File | Format | Contents |
 |------|--------|----------|
 | `step5_stc.pkl` | Python pickle | MNE SourceEstimate (n_vertices, n_times) |
 | `step3_source_coords_mm.npy` | NumPy array | Source coordinates (n_vertices, 3) in mm |
+
+**Electrode-level analyses** (electrode, electrode_comparison) -- uses `electrode.subject_roster` in config:
+
+| File | Format | Contents |
+|------|--------|----------|
+| `*.set / *.fdt` | EEGLAB | Raw scalp EEG (channels x timepoints) |
 
 Expected directory layout:
 
@@ -129,7 +141,11 @@ Python calls `Rscript` automatically -- no manual R interaction needed.
 
 ## Analysis Modules
 
-### PSD (Power Spectral Density) -- Implemented
+### ROI-Level Analyses
+
+These analyses operate on 46 source-localized ROI timeseries (`step6_roi_timeseries_*.pkl`). They use the standard `analysis.yaml` config pointing to the `roi_based_ellipsoid/` pipeline output.
+
+#### PSD (Power Spectral Density)
 
 Computes power spectral density via Welch's method and extracts band power across ROIs.
 
@@ -169,7 +185,7 @@ output_dir/psd/
     roi_significance_heatmap_*.png  # ROI x band heatmap (Hedges' g)
 ```
 
-### Aperiodic (1/f Spectral Decomposition) -- Implemented
+#### Aperiodic (1/f Spectral Decomposition)
 
 Decomposes PSD into periodic and aperiodic (1/f) components using specparam (FOOOF) with linear regression fallback.
 
@@ -204,17 +220,26 @@ output_dir/aperiodic/
     aperiodic_roi_forest_*.png
 ```
 
-### ROI Connectivity (Functional Connectivity) -- Implemented
+#### ROI Connectivity (Functional Connectivity)
 
-ROI-to-ROI coherence and imaginary coherence using **signed** (phase-preserving) source timeseries.
+ROI-to-ROI functional connectivity using **signed** (phase-preserving) source timeseries. Computes six complementary connectivity metrics for all 1,035 unique ROI pairs (46 ROIs):
+
+| Metric | Description | Volume conduction resistant |
+|--------|-------------|:--:|
+| **Coherence** | Magnitude-squared coherence (Welch CSD) | No |
+| **Imaginary Coherence** | mean \|Im(Cxy)\| -- zero-lag immune (Nolte 2004) | Yes |
+| **PLI** | Phase Lag Index \|mean(sign(Im(Pxy)))\| (Stam 2007) | Yes |
+| **dwPLI** | Debiased Weighted PLI -- per-segment STFT-based (Vinck 2011) | Yes |
+| **AEC** | Orthogonalized Amplitude Envelope Correlation (Hipp 2012) | Yes |
+| **Partial Correlation** | Conditional independence via precision matrix (Ledoit-Wolf shrinkage) | Yes |
 
 **Python side:**
 - Cross-spectral density via `scipy.signal.csd` (Welch, 2s Hann, 50% overlap)
-- Magnitude-squared coherence and absolute imaginary coherence for all 1035 unique ROI pairs
-- Exports `roi_connectivity_edges.csv` (subject x edge x band)
+- All 6 metrics computed simultaneously per subject
+- Exports `roi_connectivity_edges.csv` (subject x edge x band x metric)
 
 **R side:**
-- **Global analysis:** Mean connectivity across all edges per subject x band; Welch t-test per band, BH FDR across bands
+- **Global analysis:** Mean connectivity across all edges per subject x band; Welch t-test per band x metric, BH FDR across bands
 - **Region-pair analysis:** Edges mapped to region pairs via roi_categories, averaged within; LMM `dv ~ group * region_pair + (1|subject)`, post-hoc emmeans per region pair, Holm correction
 - Connectivity matrix heatmaps, global bar charts, region-pair forest plots
 - Markdown summary
@@ -225,7 +250,7 @@ ROI-to-ROI coherence and imaginary coherence using **signed** (phase-preserving)
 output_dir/roi_connectivity/
   ANALYSIS_SUMMARY.md
   data/
-    roi_connectivity_edges.csv      # subject x roi_pair x band (full edge data)
+    roi_connectivity_edges.csv      # subject x roi_pair x band (all 6 metrics)
     study_config.yaml
   tables/
     roi_connectivity_global.csv     # global t-tests per band x metric
@@ -238,7 +263,42 @@ output_dir/roi_connectivity/
     roi_connectivity_region_pair_forest_*.png
 ```
 
-### PAC (Phase-Amplitude Coupling) -- Implemented
+#### Transfer Entropy (Directed Information-Theoretic Connectivity)
+
+Directed transfer entropy between all ROI pairs, quantifying how much past activity in one ROI reduces uncertainty about future activity in another. Uses **signed** (phase-preserving) ROI timeseries.
+
+**Python side:**
+- Bandpass filtering per frequency band, quantile-based discretization (5 bins)
+- TE(X→Y) = H(Y_future, Y_past) + H(Y_past, X_past) − H(Y_past) − H(Y_future, Y_past, X_past)
+- All n×(n-1) directed pairs (46 ROIs → 2,070 directed pairs per band)
+- Net TE: TE(X→Y) − TE(Y→X) for directional asymmetry
+- Exports `transfer_entropy_edges.csv` (subject × directed pair × band)
+
+**R side:**
+- **Global analysis:** Mean TE across all directed edges per subject × band; Welch t-test per band, BH FDR across bands
+- **Directional analysis:** Paired t-test on TE(X→Y) vs TE(Y→X) within groups (test for net directionality)
+- **Region-pair analysis:** Directed edges mapped to region pairs via roi_categories; LMM per band, post-hoc emmeans
+- Markdown summary
+
+**Output:**
+
+```
+output_dir/transfer_entropy/
+  ANALYSIS_SUMMARY.md
+  data/
+    transfer_entropy_edges.csv    # subject x directed roi_pair x band (TE + net TE)
+    study_config.yaml
+  tables/
+    transfer_entropy_global.csv   # global t-tests per band
+    transfer_entropy_directional.csv  # paired t-tests on directionality
+    transfer_entropy_omnibus_region_pair.csv   # LMM results (if roi_categories)
+    transfer_entropy_posthoc_region_pair.csv   # post-hoc per region pair
+  figures/
+    transfer_entropy_global_bar.png
+    transfer_entropy_region_pair_forest_*.png
+```
+
+#### PAC (Phase-Amplitude Coupling)
 
 Cross-frequency phase-amplitude coupling via the Modulation Index (Tort et al., 2010) with surrogate-based z-scoring. Uses **signed** (phase-preserving) ROI timeseries.
 
@@ -276,11 +336,13 @@ output_dir/pac/
     pac_region_forest_*.png
 ```
 
-### Wholebrain (Vertex-Level Spectral Analysis) -- Implemented
+### Vertex-Level Analyses
 
-Vertex-level spectral analysis on shell_ellipsoid source data (154 vertices) with cluster-based permutation testing (Maris & Oostenveld, 2007). All metrics derived from a single PSD computation per subject.
+These analyses operate on 154-vertex source estimates from the `shell_ellipsoid/` pipeline. They **require a separate study config** with `discovery.required_files` pointing to `step5_stc.pkl` and `step3_source_coords_mm.npy`.
 
-**Requires a separate study config** pointing to `shell_ellipsoid/` pipeline output (not the default `roi_based_ellipsoid/`). Discovery uses `required_files` to locate `step5_stc.pkl` and `step3_source_coords_mm.npy`.
+#### Wholebrain (Vertex-Level Spectral Analysis)
+
+Vertex-level spectral analysis with cluster-based permutation testing (Maris & Oostenveld, 2007). All metrics derived from a single PSD computation per subject.
 
 **Python side (signal processing + statistics + visualization):**
 - PSD via `scipy.signal.welch` with axis=-1 broadcasting on (n_vertices, n_times) arrays
@@ -346,11 +408,11 @@ output_dir/wholebrain/
     wholebrain_summary.png
 ```
 
-#### TFCE Correction Option
+##### TFCE Correction Option
 
 The wholebrain analysis supports TFCE (Smith & Nichols, 2009) as an alternative to cluster-based permutation testing. Set `correction_method: tfce` in the wholebrain config section. TFCE eliminates the arbitrary cluster-forming threshold by integrating cluster extent and height across all thresholds: `TFCE(v) = sum_h { e(h)^E * h^H * dh }`. When using TFCE, additional output includes `tfce_scores_*.png` glass brains and per-vertex corrected p-values in `voxelwise_stats.csv`.
 
-### Vertex Connectivity (Functional Connectivity Density) -- Implemented
+#### Vertex Connectivity (Functional Connectivity Density)
 
 All-to-all imaginary coherence between 154 vertices, deriving Functional Connectivity Density (FCD) maps showing how connected each vertex is to the rest of the brain.
 
@@ -381,7 +443,7 @@ output_dir/vertex_connectivity/
   figures/fcd_*.png
 ```
 
-### Specparam Vertex (Vertex-Level Spectral Parameterization) -- Implemented
+#### Specparam Vertex (Vertex-Level Spectral Parameterization)
 
 Determines whether gamma elevation is a true oscillatory peak vs. broadband shift by fitting aperiodic (1/f) models at each vertex using specparam (FOOOF) or linear regression fallback.
 
@@ -413,7 +475,7 @@ output_dir/specparam_vertex/
   figures/specparam_*.png, gamma_peak_presence.png
 ```
 
-### MVPA (Multivariate Pattern Analysis) -- Implemented
+#### MVPA (Multivariate Pattern Analysis)
 
 Single omnibus test per band: can the whole-brain spatial pattern classify KO vs WT? Uses linear SVM + Leave-One-Out Cross-Validation with permutation testing.
 
@@ -446,7 +508,7 @@ output_dir/mvpa/
   figures/mvpa_importance_*.png, mvpa_null_*.png, mvpa_confusion_*.png
 ```
 
-### Network (Graph-Theoretic Analysis + NBS) -- Implemented
+#### Network (Graph-Theoretic Analysis + NBS)
 
 Graph-theoretic metrics from thresholded connectivity matrices and Network-Based Statistic (Zalesky et al., 2010) for subnetwork identification.
 
@@ -479,7 +541,7 @@ output_dir/network/
   figures/network_*.png
 ```
 
-### Spatial LMM (Spatial Mixed Effects Models) -- Implemented
+#### Spatial LMM (Spatial Mixed Effects Models)
 
 Single model per band accounting for spatial correlation, avoiding the multiple comparison problem entirely. Primary computation in R using `nlme::gls` with exponential spatial correlation.
 
@@ -511,9 +573,9 @@ output_dir/spatial_lmm/
   figures/variogram_*.png, spatial_residuals_*.png
 ```
 
-### Cross-Cutting: Random Epoch Sampling
+##### Cross-Cutting: Random Epoch Sampling
 
-All wholebrain-based analyses support optional random epoch sampling. Instead of computing PSD/connectivity on full continuous recordings, randomly sample non-overlapping epochs of fixed duration. Enable in the wholebrain config section:
+All vertex-level analyses support optional random epoch sampling. Instead of computing PSD/connectivity on full continuous recordings, randomly sample non-overlapping epochs of fixed duration. Enable in the wholebrain config section:
 
 ```yaml
 wholebrain:
@@ -525,6 +587,82 @@ wholebrain:
 ```
 
 When enabled, PSD is computed per-epoch then averaged (more robust spectral estimate). Connectivity is computed per-epoch then averaged (standard approach in connectivity literature).
+
+### Electrode-Level Analyses
+
+These analyses operate on raw scalp EEG channels (pre-source-localization) for validation purposes. They require a `subject_roster.csv` mapping subjects to their raw `.set/.fdt` files.
+
+#### Electrode (Electrode-Level PSD)
+
+Mirrors the PSD analysis but operates on raw scalp EEG channels instead of source-localized ROI timeseries.
+
+**Python side:**
+- Per-channel Welch PSD and band power extraction (absolute, relative, dB)
+- Exports `electrode_band_power.csv` and `electrode_psd_curves.csv`
+
+**R side:**
+- Omnibus LMM: `relative ~ group * channel + (1|subject)` (reuses stats_utils infrastructure)
+- Post-hoc emmeans per channel, FDR/Holm correction
+- PSD curve plots, band power boxplots, heatmaps
+- Markdown summary
+
+**Config:**
+```yaml
+electrode:
+  subject_roster: /path/to/subject_roster.csv  # columns: subject_id, group, eeg_filename, eeg_dir
+```
+
+**Output:**
+
+```
+output_dir/electrode/
+  ANALYSIS_SUMMARY.md
+  data/
+    electrode_band_power.csv      # subject x channel x band (absolute, relative, dB)
+    electrode_psd_curves.csv      # subject x channel x freq_hz x psd
+    study_config.yaml
+  tables/
+    electrode_omnibus.csv
+    electrode_posthoc.csv
+  figures/
+    electrode_psd_by_channel.png
+    electrode_band_power_*.png
+```
+
+#### Electrode Comparison (Electrode vs Source Validation)
+
+Compares electrode-level and source-localized analysis results to validate that source localization provides spatial specificity beyond scalp-level recordings. Requires both `electrode` and `psd` analyses to be run first.
+
+**Python side:**
+- Merges per-subject mean power from electrode and source analyses
+- Pearson correlations between electrode and source power per band
+- Hedges' g effect sizes at both levels (with 95% CIs)
+- Regional source effect sizes vs global electrode baseline
+- Publication-quality matplotlib figures: correlation scatters, effect size comparisons, regional forest plots, spatial advantage heatmaps, ROI-level forest plots
+
+**R side:**
+- Formatted comparison report with methods and interpretation
+- ANALYSIS_SUMMARY.md
+
+**Output:**
+
+```
+output_dir/electrode_comparison/
+  ANALYSIS_SUMMARY.md
+  data/
+    comparison_data.csv           # subject x band (electrode + source power)
+    regional_source_power.csv     # subject x band x region (if roi_categories)
+    study_config.yaml
+  tables/
+    comparison_stats.csv          # correlations + effect sizes per band
+    regional_effect_sizes.csv     # per-region source vs electrode Hedges' g
+  figures/
+    fig1_correlation_*.png        # electrode vs source scatter per band
+    fig2_effect_sizes_*.png       # side-by-side Hedges' g comparison
+    fig3_regional_forest_*.png    # regional source effects vs electrode reference
+    fig4_spatial_advantage_*.png  # heatmap: |region g| - |electrode g|
+    fig5_roi_forest_dB.png        # per-ROI disease effects (Low/High Gamma)
+```
 
 ### Atlas Integration
 
