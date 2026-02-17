@@ -63,10 +63,25 @@ class StudyConfig:
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> StudyConfig:
-        """Load a study config from a YAML file."""
-        path = Path(path)
+        """Load a study config from a YAML file.
+
+        Path defaults (when keys are absent from the YAML):
+        - ``output_dir`` → directory containing the YAML file
+        - ``discovery.root_dir`` → ``../derivatives`` relative to the YAML file
+        """
+        path = Path(path).resolve()
+        config_dir = path.parent
+
         with open(path) as f:
             data = yaml.safe_load(f)
+
+        # Resolve output_dir: explicit or default to config file's directory
+        output_dir = Path(data["output_dir"]) if "output_dir" in data else config_dir
+
+        # Resolve discovery.root_dir: explicit or default to sibling derivatives/
+        discovery = data.get("discovery", {})
+        if "root_dir" not in discovery:
+            discovery["root_dir"] = str(config_dir.parent / "derivatives")
 
         contrasts = [
             Contrast(name=c["name"], group_a=c["group_a"], group_b=c["group_b"])
@@ -79,14 +94,14 @@ class StudyConfig:
 
         return cls(
             name=data["name"],
-            output_dir=Path(data["output_dir"]),
+            output_dir=output_dir,
             groups=data.get("groups", {}),
             group_order=data.get("group_order", list(data.get("groups", {}).keys())),
             group_colors=data.get("group_colors", {}),
             contrasts=contrasts,
             bands=bands,
             roi_categories=data.get("roi_categories", {}),
-            discovery=data.get("discovery", {}),
+            discovery=discovery,
             vertex_filter=data.get("vertex_filter", {}),
             wholebrain=data.get("wholebrain", {}),
             electrode=data.get("electrode", {}),

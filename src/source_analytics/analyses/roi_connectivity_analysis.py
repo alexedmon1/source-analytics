@@ -14,7 +14,7 @@ from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.connectivity import compute_connectivity_matrix
-from ..viz.constants import METRIC_LABELS
+from ..viz.constants import CC_ROIS, METRIC_LABELS
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,8 @@ class ConnectivityAnalysis(BaseAnalysis):
     """Functional connectivity analysis using coherence and imaginary coherence.
 
     Uses **signed** (phase-preserving) ROI timeseries to compute coherence
-    and imaginary coherence for all 1035 unique ROI pairs (46 ROIs).
+    and imaginary coherence for all 780 unique ROI pairs (40 brain ROIs;
+    6 corpus callosum white matter tracts excluded).
 
     Python computes connectivity matrices and exports edge-level CSV.
     R (lme4, ggplot2) handles global t-tests, region-pair LMM, figures,
@@ -60,6 +61,8 @@ class ConnectivityAnalysis(BaseAnalysis):
 
         # Use signed timeseries to preserve oscillatory phase
         roi_ts = loader.load_roi_timeseries(signed=True)
+        # Exclude corpus callosum white matter tracts
+        roi_ts = {k: v for k, v in roi_ts.items() if k not in CC_ROIS}
         sfreq = loader.load_sfreq()
 
         if self._sfreq is None:

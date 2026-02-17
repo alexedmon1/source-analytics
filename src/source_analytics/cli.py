@@ -7,6 +7,8 @@ import logging
 import sys
 from pathlib import Path
 
+import yaml
+
 from .config import StudyConfig
 from .core import StudyAnalyzer, ANALYSIS_REGISTRY
 
@@ -86,6 +88,105 @@ def cmd_list(args):
         print(f"  {name}: {cls.__doc__.strip().splitlines()[0] if cls.__doc__ else 'No description'}")
 
 
+def cmd_init(args):
+    """Scaffold a source-analytics YAML config from a paradigm directory."""
+    paradigm_dir = Path(args.paradigm_dir).resolve()
+    derivatives_dir = paradigm_dir / "derivatives"
+
+    if not derivatives_dir.is_dir():
+        print(f"ERROR: derivatives directory not found: {derivatives_dir}")
+        sys.exit(1)
+
+    # Discover sub-* directories
+    subject_dirs = sorted(
+        d.name for d in derivatives_dir.iterdir()
+        if d.is_dir() and d.name.startswith("sub-")
+    )
+    if not subject_dirs:
+        print(f"ERROR: no sub-* directories found in {derivatives_dir}")
+        sys.exit(1)
+
+    # Build subject_groups mapping
+    subject_groups = {}
+    if args.groups_from:
+        groups_path = Path(args.groups_from).resolve()
+        with open(groups_path) as f:
+            src_config = yaml.safe_load(f)
+        # source-localization study_config has subjects[].id and subjects[].group
+        id_to_group = {}
+        for s in src_config.get("subjects", []):
+            sid = s.get("id", "")
+            group = s.get("group")
+            if sid and group:
+                id_to_group[f"sub-{sid}"] = group
+        for subj in subject_dirs:
+            if subj in id_to_group:
+                subject_groups[subj] = id_to_group[subj]
+            else:
+                subject_groups[subj] = "UNKNOWN"
+    else:
+        for subj in subject_dirs:
+            subject_groups[subj] = "UNKNOWN"
+
+    # Determine unique groups (excluding UNKNOWN)
+    unique_groups = sorted(set(
+        g for g in subject_groups.values() if g != "UNKNOWN"
+    ))
+
+    # Build YAML structure
+    config_name = args.name or paradigm_dir.name
+    config = {
+        "name": config_name,
+        "groups": {g: g for g in unique_groups} if unique_groups else {"Group1": "Group 1"},
+        "group_order": unique_groups if unique_groups else ["Group1"],
+        "group_colors": {},
+        "contrasts": [],
+        "bands": {
+            "delta": [2, 3.5],
+            "theta": [3.5, 7.5],
+            "alpha_1": [8, 10],
+            "alpha_2": [10.5, 12.5],
+            "beta": [13, 30],
+            "gamma_1": [30, 55],
+            "gamma_2": [65, 80],
+            "epsilon": [81, 120],
+        },
+        "roi_categories": {},
+        "discovery": {
+            "data_subdir": "pipeline/data",
+            "subject_groups": subject_groups,
+        },
+    }
+
+    # Generate pairwise contrasts
+    if len(unique_groups) >= 2:
+        for i, ga in enumerate(unique_groups):
+            for gb in unique_groups[i + 1:]:
+                config["contrasts"].append({
+                    "name": f"{ga}_vs_{gb}",
+                    "group_a": ga,
+                    "group_b": gb,
+                })
+
+    # Write config
+    analysis_dir = paradigm_dir / "analysis"
+    analysis_dir.mkdir(exist_ok=True)
+    out_path = analysis_dir / f"{config_name}.yaml"
+
+    with open(out_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+    print(f"Config written: {out_path}")
+    print(f"Subjects: {len(subject_dirs)}")
+    if unique_groups:
+        for g in unique_groups:
+            n = sum(1 for v in subject_groups.values() if v == g)
+            print(f"  {g}: n={n}")
+    n_unknown = sum(1 for v in subject_groups.values() if v == "UNKNOWN")
+    if n_unknown:
+        print(f"  UNKNOWN: n={n_unknown} (edit config to assign groups)")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="source-analytics",
@@ -108,6 +209,13 @@ def main():
     # list
     p_list = subparsers.add_parser("list", help="List available analyses")
     p_list.set_defaults(func=cmd_list)
+
+    # init
+    p_init = subparsers.add_parser("init", help="Scaffold analysis config from paradigm directory")
+    p_init.add_argument("paradigm_dir", type=Path, help="Paradigm directory (contains derivatives/)")
+    p_init.add_argument("--name", help="Study name (default: directory name)")
+    p_init.add_argument("--groups-from", type=Path, help="source-localization study_config.yaml for group mappings")
+    p_init.set_defaults(func=cmd_init)
 
     args = parser.parse_args()
     setup_logging(args.verbose)

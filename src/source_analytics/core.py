@@ -68,10 +68,14 @@ class StudyAnalyzer:
 
         group_mapping = self.config.discovery.get("group_mapping", {})
         required_files = self.config.discovery.get("required_files")
+        data_subdir = self.config.discovery.get("data_subdir", "data")
+        subject_groups = self.config.discovery.get("subject_groups")
         return discover_subjects(
             root_dir,
             group_mapping=group_mapping,
             required_files=required_files,
+            data_subdir=data_subdir,
+            subject_groups=subject_groups,
         )
 
     def get_subjects_for_groups(self, groups: list[str]) -> list[SubjectInfo]:

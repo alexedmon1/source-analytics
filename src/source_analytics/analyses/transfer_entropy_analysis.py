@@ -14,6 +14,7 @@ from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.transfer_entropy import compute_transfer_entropy
+from ..viz.constants import CC_ROIS
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -37,8 +38,8 @@ class TransferEntropyAnalysis(BaseAnalysis):
     """Directed transfer entropy analysis between ROI pairs.
 
     Uses **signed** (phase-preserving) ROI timeseries to compute binned
-    transfer entropy for all n*(n-1) directed ROI pairs (46 ROIs → 2,070
-    directed pairs).
+    transfer entropy for all n*(n-1) directed ROI pairs (40 brain ROIs →
+    1,560 directed pairs; 6 corpus callosum white matter tracts excluded).
 
     Python computes TE matrices and exports directed edge-level CSV.
     R (lme4, ggplot2) handles global t-tests, directional paired t-tests,
@@ -60,6 +61,8 @@ class TransferEntropyAnalysis(BaseAnalysis):
 
         # Use signed timeseries to preserve oscillatory phase
         roi_ts = loader.load_roi_timeseries(signed=True)
+        # Exclude corpus callosum white matter tracts
+        roi_ts = {k: v for k, v in roi_ts.items() if k not in CC_ROIS}
         sfreq = loader.load_sfreq()
 
         if self._sfreq is None:
