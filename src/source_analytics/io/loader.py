@@ -116,6 +116,44 @@ class SubjectLoader:
     def has_file(self, filename: str) -> bool:
         return (self.data_dir / filename).exists()
 
+    def load_roi_epochs(
+        self, epoch_samples: int, signed: bool = True
+    ) -> dict[str, np.ndarray]:
+        """Load ROI time series reshaped into epochs.
+
+        Source-localization concatenates epochs into continuous 1-D arrays.
+        This method recovers epoch structure by reshaping based on
+        ``epoch_samples`` (samples per epoch).
+
+        Parameters
+        ----------
+        epoch_samples : int
+            Number of samples per epoch.
+        signed : bool
+            If True, load signed timeseries; otherwise magnitude.
+
+        Returns
+        -------
+        dict[str, ndarray]
+            Mapping of ROI name -> array of shape (n_epochs, epoch_samples).
+
+        Raises
+        ------
+        ValueError
+            If total samples is not evenly divisible by epoch_samples.
+        """
+        roi_ts = self.load_roi_timeseries(signed=signed)
+        roi_epochs = {}
+        for roi_name, ts in roi_ts.items():
+            n_total = len(ts)
+            if n_total % epoch_samples != 0:
+                raise ValueError(
+                    f"ROI '{roi_name}': total samples ({n_total}) not divisible "
+                    f"by epoch_samples ({epoch_samples}). Cannot recover epochs."
+                )
+            roi_epochs[roi_name] = ts.reshape(-1, epoch_samples)
+        return roi_epochs
+
     def load_source_timecourses(self, magnitude: bool = False) -> np.ndarray:
         """Load full source time courses from step5_stc.pkl.
 

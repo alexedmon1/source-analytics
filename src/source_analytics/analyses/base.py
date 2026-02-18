@@ -12,6 +12,24 @@ from ..io.discovery import SubjectInfo
 logger = logging.getLogger(__name__)
 
 
+def find_r_script_dir() -> Path:
+    """Locate the R/ directory relative to this package.
+
+    Searches upward from the analyses/ directory to find the R/ scripts
+    directory that lives at the package root (sibling to src/).
+    """
+    pkg_root = Path(__file__).resolve().parent.parent.parent.parent  # src/../..
+    r_dir = pkg_root / "R"
+    if r_dir.is_dir():
+        return r_dir
+    for candidate in [Path.cwd() / "R", Path(__file__).parent.parent.parent / "R"]:
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError(
+        "Cannot find R/ scripts directory. Expected at: " + str(pkg_root / "R")
+    )
+
+
 class BaseAnalysis(ABC):
     """Abstract base for analysis modules.
 

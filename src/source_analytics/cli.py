@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from .config import StudyConfig
-from .core import StudyAnalyzer, ANALYSIS_REGISTRY
+from .core import StudyAnalyzer, ANALYSIS_REGISTRY, ANALYSIS_METADATA
 
 
 def setup_logging(verbose: bool = False):
@@ -82,10 +82,43 @@ def cmd_validate(args):
 
 def cmd_list(args):
     """List available analyses."""
-    print("Available analyses:")
+    # Group analyses by category and level
+    groups: dict[str, list[tuple[str, str]]] = {}
     for name in sorted(ANALYSIS_REGISTRY.keys()):
-        cls = ANALYSIS_REGISTRY[name]
-        print(f"  {name}: {cls.__doc__.strip().splitlines()[0] if cls.__doc__ else 'No description'}")
+        meta = ANALYSIS_METADATA.get(name, {})
+        category = meta.get("category", "other")
+        level = meta.get("level", "")
+        desc = meta.get("description", "")
+        if not desc:
+            cls = ANALYSIS_REGISTRY[name]
+            desc = cls.__doc__.strip().splitlines()[0] if cls.__doc__ else "No description"
+        key = f"{category}|{level}"
+        groups.setdefault(key, []).append((name, desc))
+
+    # Display headers
+    category_labels = {
+        "resting|roi": "Resting State (ROI level)",
+        "resting|wholebrain": "Resting State (Wholebrain level)",
+        "resting|electrode": "Resting State (Electrode level)",
+        "evoked|roi": "Evoked Response",
+    }
+
+    print("Available analyses:\n")
+    for key, label in category_labels.items():
+        if key in groups:
+            print(f"  {label}:")
+            for name, desc in groups[key]:
+                print(f"    {name:<24s} {desc}")
+            print()
+
+    # Any uncategorized
+    shown_keys = set(category_labels.keys())
+    for key, items in groups.items():
+        if key not in shown_keys:
+            print(f"  Other:")
+            for name, desc in items:
+                print(f"    {name:<24s} {desc}")
+            print()
 
 
 def cmd_init(args):

@@ -59,6 +59,7 @@ class StudyConfig:
     vertex_filter: dict[str, Any] = field(default_factory=dict)
     wholebrain: dict[str, Any] = field(default_factory=dict)
     electrode: dict[str, Any] = field(default_factory=dict)
+    evoked: dict[str, Any] = field(default_factory=dict)
     raw: dict = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -105,6 +106,7 @@ class StudyConfig:
             vertex_filter=data.get("vertex_filter", {}),
             wholebrain=data.get("wholebrain", {}),
             electrode=data.get("electrode", {}),
+            evoked=data.get("evoked", {}),
             raw=data,
         )
 

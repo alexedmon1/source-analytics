@@ -1,4 +1,4 @@
-"""Spectral analysis: PSD, band power extraction, aperiodic fitting, connectivity, and PAC."""
+"""Spectral analysis: PSD, band power extraction, aperiodic fitting, connectivity, PAC, and TFR."""
 
 from .psd import compute_psd
 from .band_power import extract_band_power
@@ -21,6 +21,7 @@ from .vertex_connectivity import (
     compute_fcd,
     compute_seed_connectivity,
 )
+from .tfr import morlet_tfr, compute_itc, compute_ersp, compute_stp, extract_measure_in_band
 
 __all__ = [
     "compute_psd",
@@ -44,4 +45,9 @@ __all__ = [
     "compute_vertex_connectivity_matrix_epochs",
     "compute_fcd",
     "compute_seed_connectivity",
+    "morlet_tfr",
+    "compute_itc",
+    "compute_ersp",
+    "compute_stp",
+    "extract_measure_in_band",
 ]

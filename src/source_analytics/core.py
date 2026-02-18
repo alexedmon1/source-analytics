@@ -21,6 +21,7 @@ from .analyses.mvpa_analysis import MVPAAnalysis
 from .analyses.network_analysis import NetworkAnalysis
 from .analyses.spatial_lmm_analysis import SpatialLMMAnalysis
 from .analyses.transfer_entropy_analysis import TransferEntropyAnalysis
+from .analyses.evoked_analysis import EvokedAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,25 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "network": NetworkAnalysis,
     "spatial_lmm": SpatialLMMAnalysis,
     "transfer_entropy": TransferEntropyAnalysis,
+    "evoked": EvokedAnalysis,
+}
+
+# Metadata for grouping and display
+ANALYSIS_METADATA: dict[str, dict[str, str]] = {
+    "psd":                  {"category": "resting", "level": "roi",        "description": "Power spectral density"},
+    "aperiodic":            {"category": "resting", "level": "roi",        "description": "1/f aperiodic decomposition"},
+    "roi_connectivity":     {"category": "resting", "level": "roi",        "description": "ROI pairwise connectivity"},
+    "pac":                  {"category": "resting", "level": "roi",        "description": "Phase-amplitude coupling"},
+    "network":              {"category": "resting", "level": "roi",        "description": "Graph theory network metrics"},
+    "transfer_entropy":     {"category": "resting", "level": "roi",        "description": "Directed information flow"},
+    "mvpa":                 {"category": "resting", "level": "wholebrain", "description": "SVM pattern classification"},
+    "wholebrain":           {"category": "resting", "level": "wholebrain", "description": "Vertex-level cluster permutation"},
+    "spatial_lmm":          {"category": "resting", "level": "wholebrain", "description": "Vertex-level LMM statistics"},
+    "specparam_vertex":     {"category": "resting", "level": "wholebrain", "description": "Vertex-level spectral parameterization"},
+    "vertex_connectivity":  {"category": "resting", "level": "wholebrain", "description": "Vertex pairwise connectivity"},
+    "electrode":            {"category": "resting", "level": "electrode",  "description": "Sensor-level PSD analysis"},
+    "electrode_comparison": {"category": "resting", "level": "electrode",  "description": "Source vs electrode comparison"},
+    "evoked":               {"category": "evoked",  "level": "roi",        "description": "ITC, ERSP, STP for trial-based paradigms"},
 }
 
 

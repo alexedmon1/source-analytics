@@ -1,6 +1,6 @@
 """Analysis modules: pluggable analysis pipelines."""
 
-from .base import BaseAnalysis
+from .base import BaseAnalysis, find_r_script_dir
 from .psd_analysis import PSDAnalysis
 from .aperiodic_analysis import AperiodicAnalysis
 from .roi_connectivity_analysis import ConnectivityAnalysis
@@ -13,9 +13,11 @@ from .specparam_vertex_analysis import SpecparamVertexAnalysis
 from .mvpa_analysis import MVPAAnalysis
 from .network_analysis import NetworkAnalysis
 from .spatial_lmm_analysis import SpatialLMMAnalysis
+from .evoked_analysis import EvokedAnalysis
 
 __all__ = [
     "BaseAnalysis",
+    "find_r_script_dir",
     "PSDAnalysis",
     "AperiodicAnalysis",
     "ConnectivityAnalysis",
@@ -28,4 +30,5 @@ __all__ = [
     "MVPAAnalysis",
     "NetworkAnalysis",
     "SpatialLMMAnalysis",
+    "EvokedAnalysis",
 ]
