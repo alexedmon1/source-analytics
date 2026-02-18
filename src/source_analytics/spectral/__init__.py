@@ -21,7 +21,14 @@ from .vertex_connectivity import (
     compute_fcd,
     compute_seed_connectivity,
 )
-from .tfr import morlet_tfr, compute_itc, compute_ersp, compute_stp, extract_measure_in_band
+from .tfr import (
+    morlet_tfr,
+    morlet_tfr_avg_power_itc,
+    compute_itc,
+    compute_ersp,
+    compute_stp,
+    extract_measure_in_band,
+)
 
 __all__ = [
     "compute_psd",
@@ -46,6 +53,7 @@ __all__ = [
     "compute_fcd",
     "compute_seed_connectivity",
     "morlet_tfr",
+    "morlet_tfr_avg_power_itc",
     "compute_itc",
     "compute_ersp",
     "compute_stp",

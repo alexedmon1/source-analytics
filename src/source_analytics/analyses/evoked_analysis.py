@@ -14,10 +14,8 @@ from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.tfr import (
-    morlet_tfr,
-    compute_itc,
+    morlet_tfr_avg_power_itc,
     compute_ersp,
-    compute_stp,
     extract_measure_in_band,
 )
 from .base import BaseAnalysis, find_r_script_dir
@@ -108,13 +106,17 @@ class EvokedAnalysis(BaseAnalysis):
                 uid, roi_name, n_epochs, epoch_samples,
             )
 
-            # Compute Morlet TFR
-            tfr = morlet_tfr(epochs, sfreq, freqs, n_cycles)
+            # Compute avg power and ITC in a single memory-efficient pass
+            # (MNE never materializes the full n_epochs x n_freqs x n_times array)
+            avg_power, itc_map = morlet_tfr_avg_power_itc(
+                epochs, sfreq, freqs, n_cycles,
+            )
 
-            # Compute all three TF maps
-            itc_map = compute_itc(tfr)
-            ersp_map = compute_ersp(tfr, sfreq, baseline, xmin=xmin)
-            stp_map = compute_stp(tfr)
+            # STP is identical to avg_power (mean |TFR|^2 across trials)
+            stp_map = avg_power
+
+            # ERSP is baseline-corrected avg power in dB
+            ersp_map = compute_ersp(avg_power, sfreq, baseline, xmin=xmin)
 
             # Extract scalar measures
             measure_maps = {"itc": itc_map, "ersp": ersp_map, "stp": stp_map}
@@ -165,8 +167,8 @@ class EvokedAnalysis(BaseAnalysis):
                             "stp": float(stp_map[fi, ti]),
                         })
 
-            # Free TFR memory before next ROI
-            del tfr, itc_map, ersp_map, stp_map
+            # Free memory before next ROI
+            del avg_power, itc_map, ersp_map, stp_map
 
     def aggregate(self) -> None:
         """Export CSVs for R consumption."""

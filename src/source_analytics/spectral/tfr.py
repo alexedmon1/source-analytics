@@ -1,39 +1,77 @@
-"""Time-frequency analysis: Morlet wavelet TFR, ITC, ERSP, STP."""
+"""Time-frequency analysis: Morlet wavelet TFR, ITC, ERSP, STP.
+
+Uses MNE-Python's validated tfr_array_morlet() for the core wavelet
+decomposition (±5σ wavelets, Tallon-Baudry 1997 normalization, pre-cached
+FFTs, generator-based memory management for averaged output modes).
+"""
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
-from scipy.signal import fftconvolve
+from mne.time_frequency import tfr_array_morlet
+
+logger = logging.getLogger(__name__)
 
 
-def _morlet_wavelet(sfreq: float, freq: float, n_cycles: float) -> np.ndarray:
-    """Create a Morlet wavelet for a given frequency.
+def _safe_n_cycles(
+    freqs: np.ndarray,
+    n_cycles: float | np.ndarray,
+    sfreq: float,
+    n_times: int,
+) -> np.ndarray:
+    """Cap n_cycles per frequency so wavelets fit within the epoch.
+
+    MNE's Morlet wavelets extend ±5σ (10σ total) where σ = n_cycles/(2π·f).
+    Wavelet length in samples ≈ 10 · n_cycles · sfreq / (2π · f).
+    We require this to be < n_times.
 
     Parameters
     ----------
+    freqs : ndarray
+        Frequencies in Hz.
+    n_cycles : float or ndarray
+        Requested n_cycles (scalar or per-frequency).
     sfreq : float
-        Sampling frequency in Hz.
-    freq : float
-        Center frequency in Hz.
-    n_cycles : float
-        Number of wavelet cycles (controls time-frequency trade-off).
+        Sampling frequency.
+    n_times : int
+        Epoch length in samples.
 
     Returns
     -------
-    ndarray, shape (n_wavelet,)
-        Complex Morlet wavelet, normalized to unit energy.
+    ndarray
+        Per-frequency n_cycles, capped where necessary.
     """
-    sigma_t = n_cycles / (2.0 * np.pi * freq)
-    # Wavelet duration: +/- 3 standard deviations
-    n_samples = int(np.ceil(6.0 * sigma_t * sfreq))
-    # Ensure odd length for symmetry
-    if n_samples % 2 == 0:
-        n_samples += 1
-    t = np.arange(-n_samples // 2, n_samples // 2 + 1) / sfreq
-    wavelet = np.exp(2j * np.pi * freq * t) * np.exp(-t**2 / (2.0 * sigma_t**2))
-    # Normalize to unit energy
-    wavelet /= np.sqrt(np.sum(np.abs(wavelet) ** 2))
-    return wavelet
+    freqs = np.asarray(freqs, dtype=float)
+    if np.isscalar(n_cycles):
+        cycles = np.full(len(freqs), float(n_cycles))
+    else:
+        cycles = np.asarray(n_cycles, dtype=float).copy()
+
+    # Maximum n_cycles for each frequency: wavelet_len < n_times
+    # wavelet_len = 10 * sigma_t * sfreq = 10 * nc / (2π * f) * sfreq
+    # Require: 10 * nc * sfreq / (2π * f) < n_times
+    # => nc < n_times * 2π * f / (10 * sfreq)
+    # Use 0.95 safety margin to avoid edge-case rounding issues
+    max_cycles = 0.95 * n_times * 2.0 * np.pi * freqs / (10.0 * sfreq)
+
+    capped = cycles > max_cycles
+    if np.any(capped):
+        n_capped = int(np.sum(capped))
+        freq_lo = freqs[capped].min()
+        freq_hi = freqs[capped].max()
+        logger.info(
+            "Capping n_cycles for %d frequencies (%.1f-%.1f Hz) to fit "
+            "within %d-sample epoch (sfreq=%.0f Hz)",
+            n_capped, freq_lo, freq_hi, n_times, sfreq,
+        )
+        cycles[capped] = max_cycles[capped]
+
+    # Enforce minimum of 1 cycle
+    cycles = np.maximum(cycles, 1.0)
+
+    return cycles
 
 
 def morlet_tfr(
@@ -41,8 +79,10 @@ def morlet_tfr(
     sfreq: float,
     freqs: np.ndarray,
     n_cycles: float | np.ndarray = 7.0,
+    decim: int = 1,
+    n_jobs: int = 1,
 ) -> np.ndarray:
-    """Morlet wavelet time-frequency decomposition.
+    """Morlet wavelet time-frequency decomposition via MNE.
 
     Parameters
     ----------
@@ -55,30 +95,100 @@ def morlet_tfr(
     n_cycles : float or ndarray
         Number of wavelet cycles. If scalar, same for all frequencies.
         If array, must match len(freqs).
+    decim : int
+        Decimation factor applied after TFR (default 1 = no decimation).
+    n_jobs : int
+        Number of parallel jobs (across channels).
 
     Returns
     -------
     ndarray, shape (n_epochs, n_freqs, n_times), complex
         Complex-valued time-frequency representation.
     """
-    n_epochs, n_times = epochs.shape
-    n_freqs = len(freqs)
+    n_times = epochs.shape[1]
+    cycles = _safe_n_cycles(freqs, n_cycles, sfreq, n_times)
 
-    if np.isscalar(n_cycles):
-        cycles = np.full(n_freqs, n_cycles)
-    else:
-        cycles = np.asarray(n_cycles)
+    # MNE expects (n_epochs, n_channels, n_times) — add channel dim
+    data = epochs[:, np.newaxis, :]
 
-    tfr = np.zeros((n_epochs, n_freqs, n_times), dtype=np.complex128)
+    result = tfr_array_morlet(
+        data,
+        sfreq=sfreq,
+        freqs=freqs,
+        n_cycles=cycles,
+        zero_mean=True,
+        use_fft=True,
+        decim=decim,
+        output="complex",
+        n_jobs=n_jobs,
+        verbose=False,
+    )
 
-    for fi, (freq, nc) in enumerate(zip(freqs, cycles)):
-        wavelet = _morlet_wavelet(sfreq, freq, nc)
-        for ei in range(n_epochs):
-            # FFT-based convolution for speed
-            conv = fftconvolve(epochs[ei], wavelet, mode="same")
-            tfr[ei, fi, :] = conv
+    # Remove channel dim: (n_epochs, 1, n_freqs, n_times) -> (n_epochs, n_freqs, n_times)
+    return result[:, 0, :, :]
 
-    return tfr
+
+def morlet_tfr_avg_power_itc(
+    epochs: np.ndarray,
+    sfreq: float,
+    freqs: np.ndarray,
+    n_cycles: float | np.ndarray = 7.0,
+    decim: int = 1,
+    n_jobs: int = 1,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute average power and ITC in a single pass via MNE.
+
+    This is more memory-efficient than computing full complex TFR
+    and then deriving power and ITC separately, because MNE uses
+    generator-based accumulation (never materializes the full
+    (n_epochs, n_freqs, n_times) complex array).
+
+    Parameters
+    ----------
+    epochs : ndarray, shape (n_epochs, n_times)
+        Epoched time series for a single ROI.
+    sfreq : float
+        Sampling frequency in Hz.
+    freqs : ndarray, shape (n_freqs,)
+        Frequencies of interest in Hz.
+    n_cycles : float or ndarray
+        Number of wavelet cycles.
+    decim : int
+        Decimation factor applied after TFR.
+    n_jobs : int
+        Number of parallel jobs.
+
+    Returns
+    -------
+    avg_power : ndarray, shape (n_freqs, n_times)
+        Average power across trials.
+    itc : ndarray, shape (n_freqs, n_times)
+        Inter-trial coherence, values in [0, 1].
+    """
+    n_times = epochs.shape[1]
+    cycles = _safe_n_cycles(freqs, n_cycles, sfreq, n_times)
+
+    data = epochs[:, np.newaxis, :]
+
+    result = tfr_array_morlet(
+        data,
+        sfreq=sfreq,
+        freqs=freqs,
+        n_cycles=cycles,
+        zero_mean=True,
+        use_fft=True,
+        decim=decim,
+        output="avg_power_itc",
+        n_jobs=n_jobs,
+        verbose=False,
+    )
+
+    # result is complex: real = avg_power, imag = ITC
+    # Shape: (1, n_freqs, n_times) — remove channel dim
+    avg_power = result.real[0, :, :]
+    itc = result.imag[0, :, :]
+
+    return avg_power, itc
 
 
 def compute_itc(tfr_complex: np.ndarray) -> np.ndarray:
@@ -96,28 +206,27 @@ def compute_itc(tfr_complex: np.ndarray) -> np.ndarray:
     ndarray, shape (n_freqs, n_times)
         ITC values in [0, 1].
     """
-    # Normalize to unit magnitude (extract phase)
     phase = tfr_complex / np.abs(tfr_complex)
-    # Handle any zeros
     phase = np.nan_to_num(phase, nan=0.0)
     itc = np.abs(np.mean(phase, axis=0))
     return itc
 
 
 def compute_ersp(
-    tfr_complex: np.ndarray,
+    avg_power: np.ndarray,
     sfreq: float,
     baseline: tuple[float, float],
     xmin: float = 0.0,
 ) -> np.ndarray:
     """Event-related spectral perturbation.
 
-    ERSP = 10 * log10(mean_power / baseline_power).
+    ERSP = 10 * log10(power / baseline_power).
 
     Parameters
     ----------
-    tfr_complex : ndarray, shape (n_epochs, n_freqs, n_times)
-        Complex-valued TFR.
+    avg_power : ndarray, shape (n_freqs, n_times)
+        Average power across trials (from morlet_tfr_avg_power_itc or
+        manual computation).
     sfreq : float
         Sampling frequency in Hz.
     baseline : tuple (tmin, tmax)
@@ -130,19 +239,16 @@ def compute_ersp(
     ndarray, shape (n_freqs, n_times)
         ERSP in dB.
     """
-    power = np.mean(np.abs(tfr_complex) ** 2, axis=0)  # (n_freqs, n_times)
-    n_times = power.shape[1]
+    n_times = avg_power.shape[1]
 
-    # Convert baseline times to sample indices
     bl_start = int(round((baseline[0] - xmin) * sfreq))
     bl_end = int(round((baseline[1] - xmin) * sfreq))
     bl_start = max(0, bl_start)
     bl_end = min(n_times, bl_end)
 
-    baseline_power = np.mean(power[:, bl_start:bl_end], axis=1, keepdims=True)
-    # Avoid log of zero
+    baseline_power = np.mean(avg_power[:, bl_start:bl_end], axis=1, keepdims=True)
     baseline_power = np.maximum(baseline_power, np.finfo(float).eps)
-    ersp = 10.0 * np.log10(power / baseline_power)
+    ersp = 10.0 * np.log10(avg_power / baseline_power)
     return ersp
 
 
@@ -159,7 +265,7 @@ def compute_stp(tfr_complex: np.ndarray) -> np.ndarray:
     ndarray, shape (n_freqs, n_times)
         Mean power across trials.
     """
-    return np.mean(np.abs(tfr_complex) ** 2, axis=0)
+    return np.mean((tfr_complex * np.conj(tfr_complex)).real, axis=0)
 
 
 def extract_measure_in_band(
@@ -194,10 +300,8 @@ def extract_measure_in_band(
     """
     n_times = measure_2d.shape[1]
 
-    # Frequency mask
     freq_mask = (freqs >= band[0]) & (freqs <= band[1])
 
-    # Time mask
     t_start = int(round((time_window[0] - xmin) * sfreq))
     t_end = int(round((time_window[1] - xmin) * sfreq))
     t_start = max(0, t_start)

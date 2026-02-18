@@ -84,6 +84,23 @@ def _fit_specparam(
     r_squared = float(metrics.get("gof_rsquared", float("nan")))
     error = float(metrics.get("error_mae", float("nan")))
 
+    # Extract periodic (peak) parameters: (n_peaks, 3) -> [CF, PW, BW]
+    peaks_list: list[dict] = []
+    if n_peaks > 0:
+        try:
+            peak_params = sm.get_params("peak")  # (n_peaks, 3)
+            if peak_params.ndim == 1:
+                # Single peak returned as 1-D array
+                peak_params = peak_params.reshape(1, -1)
+            for row in peak_params:
+                peaks_list.append({
+                    "center_frequency": float(row[0]),
+                    "power": float(row[1]),
+                    "bandwidth": float(row[2]),
+                })
+        except Exception as e:
+            logger.debug("Could not extract peak params: %s", e)
+
     return {
         "exponent": float(ap[1]),
         "offset": float(ap[0]),
@@ -91,6 +108,7 @@ def _fit_specparam(
         "n_peaks": n_peaks,
         "error": error,
         "method": "specparam",
+        "peaks": peaks_list,
     }
 
 
@@ -109,6 +127,7 @@ def _fit_linreg_fallback(
             "n_peaks": 0,
             "error": float("nan"),
             "method": "linreg",
+            "peaks": [],
         }
 
     log_f = np.log10(freqs[mask])
@@ -131,6 +150,7 @@ def _fit_linreg_fallback(
         "n_peaks": 0,
         "error": float(np.sqrt(ss_res / mask.sum())),
         "method": "linreg",
+        "peaks": [],
     }
 
 
@@ -168,5 +188,6 @@ def fit_aperiodic_multiroi(
                 "n_peaks": 0,
                 "error": float("nan"),
                 "method": "failed",
+                "peaks": [],
             }
     return results
