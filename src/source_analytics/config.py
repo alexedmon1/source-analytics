@@ -45,6 +45,10 @@ class StudyConfig:
         Subject discovery configuration (root_dir, group_mapping, etc.).
     raw : dict
         The raw parsed YAML for extension.
+    paradigms : dict[str, dict]
+        Per-paradigm configuration sections (multi-paradigm mode).
+    paradigm_name : str or None
+        Name of the active paradigm (set by ``for_paradigm()``).
     """
 
     name: str
@@ -60,6 +64,8 @@ class StudyConfig:
     wholebrain: dict[str, Any] = field(default_factory=dict)
     electrode: dict[str, Any] = field(default_factory=dict)
     evoked: dict[str, Any] = field(default_factory=dict)
+    paradigms: dict[str, dict] = field(default_factory=dict, repr=False)
+    paradigm_name: str | None = None
     raw: dict = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -93,6 +99,14 @@ class StudyConfig:
             name: tuple(limits) for name, limits in data.get("bands", {}).items()
         }
 
+        # Resolve paradigm data_dir paths relative to config file
+        paradigms = {}
+        for pname, pdata in data.get("paradigms", {}).items():
+            pcopy = dict(pdata)
+            if "data_dir" in pcopy:
+                pcopy["data_dir"] = str((config_dir / pcopy["data_dir"]).resolve())
+            paradigms[pname] = pcopy
+
         return cls(
             name=data["name"],
             output_dir=output_dir,
@@ -107,7 +121,67 @@ class StudyConfig:
             wholebrain=data.get("wholebrain", {}),
             electrode=data.get("electrode", {}),
             evoked=data.get("evoked", {}),
+            paradigms=paradigms,
             raw=data,
+        )
+
+    @property
+    def has_paradigms(self) -> bool:
+        """True if this config defines multiple paradigms."""
+        return bool(self.paradigms)
+
+    def get_paradigm_analyses(self, name: str) -> list[str] | None:
+        """Return the analyses list for a paradigm, or None."""
+        pdata = self.paradigms.get(name)
+        if pdata is None:
+            return None
+        return pdata.get("analyses")
+
+    def for_paradigm(self, name: str) -> StudyConfig:
+        """Return a paradigm-scoped config suitable for StudyAnalyzer.
+
+        Merges paradigm-specific fields (discovery, evoked, wholebrain,
+        output_dir) over the shared top-level fields.  The returned config
+        has ``paradigms={}`` so downstream code sees a plain single-paradigm
+        config.
+        """
+        if name not in self.paradigms:
+            available = ", ".join(self.paradigms.keys())
+            raise ValueError(
+                f"Unknown paradigm '{name}'. Available: {available}"
+            )
+
+        pdata = self.paradigms[name]
+
+        # Build discovery from paradigm fields
+        discovery: dict[str, Any] = {}
+        if "data_dir" in pdata:
+            discovery["root_dir"] = pdata["data_dir"]
+        if "data_subdir" in pdata:
+            discovery["data_subdir"] = pdata["data_subdir"]
+        elif "data_subdir" in self.discovery:
+            discovery["data_subdir"] = self.discovery["data_subdir"]
+        if "subjects" in pdata:
+            discovery["subject_groups"] = pdata["subjects"]
+        if "required_files" in pdata:
+            discovery["required_files"] = pdata["required_files"]
+
+        return StudyConfig(
+            name=f"{self.name} — {name}",
+            output_dir=self.output_dir / name,
+            groups=self.groups,
+            group_order=self.group_order,
+            group_colors=self.group_colors,
+            contrasts=self.contrasts,
+            bands=self.bands,
+            roi_categories=self.roi_categories,
+            discovery=discovery,
+            vertex_filter=pdata.get("vertex_filter", self.vertex_filter),
+            wholebrain=pdata.get("wholebrain", self.wholebrain),
+            electrode=pdata.get("electrode", self.electrode),
+            evoked=pdata.get("evoked", self.evoked),
+            paradigm_name=name,
+            raw=self.raw,
         )
 
     def get_group_label(self, group_id: str) -> str:

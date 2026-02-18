@@ -22,67 +22,210 @@ def setup_logging(verbose: bool = False):
     )
 
 
-def cmd_run(args):
-    """Run an analysis module."""
-    config = StudyConfig.from_yaml(args.study)
-    analyzer = StudyAnalyzer(config)
-
+def _print_study_summary(config: StudyConfig, analyzer: StudyAnalyzer):
+    """Print study name, subject counts, and group breakdown."""
     print(f"Study: {config.name}")
     print(f"Subjects discovered: {len(analyzer.subjects)}")
     groups = {}
     for s in analyzer.subjects:
         groups.setdefault(s.group, []).append(s.subject_id)
-    for g, subs in groups.items():
-        print(f"  {config.get_group_label(g)} ({g}): n={len(subs)}")
+    for g in config.group_order:
+        if g in groups:
+            print(f"  {config.get_group_label(g)} ({g}): n={len(groups[g])}")
     print()
 
-    analyzer.run_analysis(args.analysis)
-    print(f"\nDone. Output: {config.output_dir / args.analysis}")
+
+def _run_single(config: StudyConfig, analysis_name: str):
+    """Run one analysis on a (possibly paradigm-scoped) config."""
+    analyzer = StudyAnalyzer(config)
+    _print_study_summary(config, analyzer)
+    analyzer.run_analysis(analysis_name)
+    print(f"\nDone. Output: {config.output_dir / analysis_name}")
+
+
+def cmd_run(args):
+    """Run an analysis module."""
+    config = StudyConfig.from_yaml(args.study)
+
+    if config.has_paradigms:
+        # Multi-paradigm config
+        if args.paradigm:
+            # Scope to one paradigm
+            pconfig = config.for_paradigm(args.paradigm)
+            if args.analysis:
+                _run_single(pconfig, args.analysis)
+            else:
+                # Run all analyses listed for this paradigm
+                analyses = config.get_paradigm_analyses(args.paradigm)
+                if not analyses:
+                    print(f"No analyses listed for paradigm '{args.paradigm}'")
+                    sys.exit(1)
+                for analysis_name in analyses:
+                    print(f"{'='*60}")
+                    print(f"Paradigm: {args.paradigm}  |  Analysis: {analysis_name}")
+                    print(f"{'='*60}")
+                    _run_single(pconfig, analysis_name)
+                    print()
+        else:
+            if args.analysis:
+                print("ERROR: --analysis without --paradigm is ambiguous in multi-paradigm mode.")
+                print("Specify --paradigm or omit --analysis to run everything.")
+                sys.exit(1)
+            # Run all paradigms, all their analyses
+            for pname, pdata in config.paradigms.items():
+                analyses = pdata.get("analyses", [])
+                if not analyses:
+                    print(f"Skipping paradigm '{pname}' (no analyses listed)")
+                    continue
+                pconfig = config.for_paradigm(pname)
+                for analysis_name in analyses:
+                    print(f"{'='*60}")
+                    print(f"Paradigm: {pname}  |  Analysis: {analysis_name}")
+                    print(f"{'='*60}")
+                    _run_single(pconfig, analysis_name)
+                    print()
+    else:
+        # Legacy single-paradigm config
+        if not args.analysis:
+            print("ERROR: --analysis is required for single-paradigm configs.")
+            sys.exit(1)
+        analyzer = StudyAnalyzer(config)
+        _print_study_summary(config, analyzer)
+        analyzer.run_analysis(args.analysis)
+        print(f"\nDone. Output: {config.output_dir / args.analysis}")
+
+
+def _validate_single(config: StudyConfig, paradigm_name: str | None = None):
+    """Validate one config and print results. Returns list of issues."""
+    try:
+        analyzer = StudyAnalyzer(config)
+    except Exception as e:
+        prefix = f"[{paradigm_name}] " if paradigm_name else ""
+        print(f"{prefix}ERROR: Failed to initialize: {e}")
+        return [str(e)]
+
+    issues = analyzer.validate()
+
+    print(f"Study: {config.name}")
+    print(f"Subjects discovered: {len(analyzer.subjects)}")
+
+    groups = {}
+    for s in analyzer.subjects:
+        groups.setdefault(s.group, []).append(s.subject_id)
+    for g in config.group_order:
+        if g in groups:
+            label = config.get_group_label(g)
+            print(f"  {label} ({g}): n={len(groups[g])}")
+
+    if issues:
+        print(f"\n  Warnings ({len(issues)}):")
+        for issue in issues:
+            print(f"    - {issue}")
+
+    return issues
 
 
 def cmd_validate(args):
     """Validate a study configuration."""
     config = StudyConfig.from_yaml(args.study)
 
-    try:
-        analyzer = StudyAnalyzer(config)
-    except Exception as e:
-        print(f"ERROR: Failed to initialize: {e}")
-        sys.exit(1)
+    if config.has_paradigms:
+        paradigm_names = [args.paradigm] if args.paradigm else list(config.paradigms.keys())
+        all_issues = []
 
-    issues = analyzer.validate()
+        print(f"Study: {config.name}")
+        print(f"Config: {args.study}")
+        print(f"Paradigms: {len(config.paradigms)}")
+        print()
 
-    print(f"Study: {config.name}")
-    print(f"Config: {args.study}")
-    print(f"Subjects discovered: {len(analyzer.subjects)}")
+        # Shared validation
+        print("Shared configuration:")
+        print(f"  Groups: {len(config.groups)}")
+        for gid, label in config.groups.items():
+            print(f"    {gid}: {label}")
+        print(f"  Contrasts: {len(config.contrasts)}")
+        for c in config.contrasts:
+            print(f"    {c.name}: {c.group_a} vs {c.group_b}")
+        print(f"  Bands: {len(config.bands)}")
+        for name, (lo, hi) in config.bands.items():
+            print(f"    {name}: {lo}-{hi} Hz")
+        print()
 
-    groups = {}
-    for s in analyzer.subjects:
-        groups.setdefault(s.group, []).append(s.subject_id)
-    for g, subs in sorted(groups.items()):
-        label = config.get_group_label(g)
-        print(f"  {label} ({g}): n={len(subs)}")
+        for pname in paradigm_names:
+            print(f"--- Paradigm: {pname} ---")
+            analyses = config.get_paradigm_analyses(pname) or []
+            print(f"  Analyses: {', '.join(analyses) if analyses else '(none)'}")
+            pconfig = config.for_paradigm(pname)
+            issues = _validate_single(pconfig, pname)
+            all_issues.extend(issues)
+            print()
 
-    print(f"\nContrasts: {len(config.contrasts)}")
-    for c in config.contrasts:
-        print(f"  {c.name}: {c.group_a} vs {c.group_b}")
-
-    print(f"\nBands: {len(config.bands)}")
-    for name, (lo, hi) in config.bands.items():
-        print(f"  {name}: {lo}-{hi} Hz")
-
-    if issues:
-        print(f"\nWarnings ({len(issues)}):")
-        for issue in issues:
-            print(f"  - {issue}")
-        sys.exit(1)
+        if all_issues:
+            print(f"Total warnings: {len(all_issues)}")
+            sys.exit(1)
+        else:
+            print("Validation passed (all paradigms).")
     else:
-        print("\nValidation passed.")
+        # Legacy single-paradigm validation
+        config_issues = config.validate()
+
+        try:
+            analyzer = StudyAnalyzer(config)
+        except Exception as e:
+            print(f"ERROR: Failed to initialize: {e}")
+            sys.exit(1)
+
+        issues = analyzer.validate()
+
+        print(f"Study: {config.name}")
+        print(f"Config: {args.study}")
+        print(f"Subjects discovered: {len(analyzer.subjects)}")
+
+        groups = {}
+        for s in analyzer.subjects:
+            groups.setdefault(s.group, []).append(s.subject_id)
+        for g, subs in sorted(groups.items()):
+            label = config.get_group_label(g)
+            print(f"  {label} ({g}): n={len(subs)}")
+
+        print(f"\nContrasts: {len(config.contrasts)}")
+        for c in config.contrasts:
+            print(f"  {c.name}: {c.group_a} vs {c.group_b}")
+
+        print(f"\nBands: {len(config.bands)}")
+        for name, (lo, hi) in config.bands.items():
+            print(f"  {name}: {lo}-{hi} Hz")
+
+        if issues:
+            print(f"\nWarnings ({len(issues)}):")
+            for issue in issues:
+                print(f"  - {issue}")
+            sys.exit(1)
+        else:
+            print("\nValidation passed.")
 
 
 def cmd_list(args):
     """List available analyses."""
-    # Group analyses by category and level
+    # If --study provided with paradigms, show paradigm-aware listing
+    if hasattr(args, "study") and args.study:
+        config = StudyConfig.from_yaml(args.study)
+        if config.has_paradigms:
+            print(f"Study: {config.name}\n")
+            for pname, pdata in config.paradigms.items():
+                analyses = pdata.get("analyses", [])
+                print(f"  {pname}:")
+                for aname in analyses:
+                    meta = ANALYSIS_METADATA.get(aname, {})
+                    desc = meta.get("description", "")
+                    if not desc:
+                        cls = ANALYSIS_REGISTRY.get(aname)
+                        desc = cls.__doc__.strip().splitlines()[0] if cls and cls.__doc__ else ""
+                    print(f"    {aname:<24s} {desc}")
+                print()
+            return
+
+    # Default: group analyses by category and level
     groups: dict[str, list[tuple[str, str]]] = {}
     for name in sorted(ANALYSIS_REGISTRY.keys()):
         meta = ANALYSIS_METADATA.get(name, {})
@@ -231,16 +374,19 @@ def main():
     # run
     p_run = subparsers.add_parser("run", help="Run an analysis")
     p_run.add_argument("--study", required=True, type=Path, help="Path to study YAML config")
-    p_run.add_argument("--analysis", required=True, choices=list(ANALYSIS_REGISTRY.keys()), help="Analysis to run")
+    p_run.add_argument("--paradigm", help="Paradigm name (multi-paradigm configs)")
+    p_run.add_argument("--analysis", choices=list(ANALYSIS_REGISTRY.keys()), help="Analysis to run")
     p_run.set_defaults(func=cmd_run)
 
     # validate
     p_val = subparsers.add_parser("validate", help="Validate study config")
     p_val.add_argument("--study", required=True, type=Path, help="Path to study YAML config")
+    p_val.add_argument("--paradigm", help="Validate a specific paradigm only")
     p_val.set_defaults(func=cmd_validate)
 
     # list
     p_list = subparsers.add_parser("list", help="List available analyses")
+    p_list.add_argument("--study", type=Path, help="Study YAML (shows paradigm-aware listing)")
     p_list.set_defaults(func=cmd_list)
 
     # init
