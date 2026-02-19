@@ -111,22 +111,26 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
   band_order <- unique(band_df$band)
   subj_means$band <- factor(subj_means$band, levels = band_order)
 
+  show_jitter <- power_type == "dB"
   p <- ggplot(subj_means, aes(x = group_label, y = value, fill = group_label)) +
-    geom_boxplot(width = 0.5, outlier.shape = NA, alpha = 0.7) +
-    geom_jitter(width = 0.15, size = 1.5, alpha = 0.6,
-                aes(color = group_label), show.legend = FALSE) +
+    geom_boxplot(width = 0.5, outlier.shape = if (show_jitter) NA else 16,
+                 alpha = 0.7) +
+    { if (show_jitter) geom_jitter(width = 0.15, size = 1.5, alpha = 0.6,
+                aes(color = group_label), show.legend = FALSE) } +
     scale_fill_manual(values = color_vals, name = NULL) +
     scale_color_manual(values = color_vals, name = NULL) +
-    facet_wrap(~ band, scales = "free_y", nrow = 1) +
-    labs(x = NULL, y = paste0(tools::toTitleCase(power_type), " Power"),
-         title = paste0("Band Power (", tools::toTitleCase(power_type), ") by Group")) +
+    facet_wrap(~ band, scales = "free_y", nrow = 2) +
+    labs(x = NULL,
+         y = if (power_type == "dB") "Absolute Power (dB)" else paste0(tools::toTitleCase(power_type), " Power"),
+         title = if (power_type == "dB") "Absolute Band Power (dB) by Group" else paste0("Band Power (", tools::toTitleCase(power_type), ") by Group")) +
     theme_pub() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           legend.position = "none")
 
+  n_cols <- ceiling(length(band_order) / 2)
   fname <- paste0("band_power_", power_type, ".png")
   ggsave(file.path(output_dir, fname), p,
-         width = 3.5 * length(band_order), height = 5, dpi = 300)
+         width = 3.5 * n_cols, height = 9, dpi = 300)
   message("  Saved: ", fname)
 }
 

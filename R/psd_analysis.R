@@ -229,8 +229,8 @@ if (nrow(posthoc_region_nested_df) > 0) {
 # --- Figures ---
 message("\nGenerating figures...")
 
-# Band power boxplots (3 power types)
-for (ptype in c("relative", "absolute", "dB")) {
+# Band power boxplots
+for (ptype in c("relative", "dB")) {
   plot_band_power_box(band_df, group_colors, group_labels, group_order,
                       fig_dir, power_type = ptype)
 }

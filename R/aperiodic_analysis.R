@@ -470,6 +470,25 @@ plot_aperiodic_by_region <- function(ap_df, roi_categories, group_colors,
     stringsAsFactors = FALSE
   )
 
+  # Anatomical super-groups for faceting
+  area_map <- c(
+    Frontal_Association = "Frontal / Prefrontal",
+    Motor              = "Frontal / Prefrontal",
+    Prelimbic          = "Frontal / Prefrontal",
+    Orbital            = "Frontal / Prefrontal",
+    Somatosensory      = "Sensory",
+    Auditory           = "Sensory",
+    Visual             = "Sensory",
+    Cingulate          = "Association",
+    Retrosplenial      = "Association",
+    Parietal_Association = "Association",
+    Piriform           = "Limbic / Temporal",
+    Rhinal             = "Limbic / Temporal",
+    Hippocampus        = "Subcortical",
+    Thalamus           = "Subcortical",
+    Striatum           = "Subcortical"
+  )
+
   # Region-level subject means
   region_data <- ap_df %>%
     filter(group %in% group_order) %>%
@@ -478,7 +497,11 @@ plot_aperiodic_by_region <- function(ap_df, roi_categories, group_colors,
     summarise(exponent = mean(exponent, na.rm = TRUE), .groups = "drop") %>%
     mutate(
       group = factor(group, levels = group_order),
-      group_label = group_labels[as.character(group)]
+      group_label = group_labels[as.character(group)],
+      area = area_map[category],
+      area = factor(area, levels = c("Frontal / Prefrontal", "Sensory",
+                                     "Association", "Limbic / Temporal",
+                                     "Subcortical"))
     )
 
   if (nrow(region_data) == 0) return(invisible(NULL))
@@ -493,13 +516,15 @@ plot_aperiodic_by_region <- function(ap_df, roi_categories, group_colors,
                size = 1.2, alpha = 0.5, aes(color = group_label), show.legend = FALSE) +
     scale_fill_manual(values = color_vals, name = NULL) +
     scale_color_manual(values = color_vals, name = NULL) +
-    labs(x = "Brain Region", y = "Aperiodic Exponent",
+    facet_wrap(~ area, scales = "free_x", nrow = 2) +
+    labs(x = NULL, y = "Aperiodic Exponent",
          title = "Aperiodic Exponent by Region and Group") +
     theme_pub() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          strip.text = element_text(face = "bold", size = 11))
 
   ggsave(file.path(output_dir, "aperiodic_by_region.png"), p,
-         width = max(7, length(roi_categories) * 1.5 + 2), height = 6, dpi = 300)
+         width = 14, height = 10, dpi = 300)
   message("  Saved: aperiodic_by_region.png")
 }
 
