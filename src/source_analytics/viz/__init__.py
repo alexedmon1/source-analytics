@@ -23,6 +23,8 @@ from .connectivity_plots import (
     plot_connectivity_comparison,
     plot_significance_circos,
 )
+from .brain_roi import plot_brain_roi, plot_brain_roi_mosaic
+from .radar import plot_radar
 
 __all__ = [
     "BAND_ORDER",
@@ -42,4 +44,7 @@ __all__ = [
     "plot_connectivity_heatmap",
     "plot_connectivity_comparison",
     "plot_significance_circos",
+    "plot_brain_roi",
+    "plot_brain_roi_mosaic",
+    "plot_radar",
 ]
