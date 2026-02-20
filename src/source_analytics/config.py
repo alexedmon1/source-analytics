@@ -181,7 +181,7 @@ class StudyConfig:
             electrode=pdata.get("electrode", self.electrode),
             evoked=pdata.get("evoked", self.evoked),
             paradigm_name=name,
-            raw=self.raw,
+            raw={**self.raw, **pdata},
         )
 
     def get_group_label(self, group_id: str) -> str:
