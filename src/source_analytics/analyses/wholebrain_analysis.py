@@ -496,8 +496,34 @@ class WholebrainAnalysis(BaseAnalysis):
             pickle.dump(results_pkl, f)
         logger.info("Saved wholebrain_results.pkl")
 
+    def _load_state_from_disk(self) -> bool:
+        """Load saved state from pickle for --steps figures/summary support."""
+        pkl_path = self.output_dir / "data" / "wholebrain_results.pkl"
+        if not pkl_path.exists():
+            logger.warning("No saved state at %s; skipping figures", pkl_path)
+            return False
+        with open(pkl_path, "rb") as f:
+            saved = pickle.load(f)
+        self._band_cluster_results = saved.get("band_cluster_results", {})
+        self._feature_cluster_results = saved.get("feature_cluster_results", {})
+        self._source_coords = saved.get("source_coords")
+        # Restore contrast labels from config (pickle doesn't store them directly)
+        if self.config.contrasts:
+            c = self.config.contrasts[0]
+            self._contrast_labels = (
+                self.config.get_group_label(c.group_a),
+                self.config.get_group_label(c.group_b),
+            )
+        logger.info("Loaded wholebrain state from %s", pkl_path)
+        return True
+
     def figures(self) -> None:
         """Generate glass brain figures."""
+        # Load from disk if in-memory state is missing (--steps support)
+        if self._source_coords is None or not getattr(self, "_band_cluster_results", {}):
+            if not self._load_state_from_disk():
+                return
+
         if self._source_coords is None:
             logger.warning("No source coordinates — skipping figures")
             return

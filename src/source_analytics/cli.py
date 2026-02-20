@@ -11,6 +11,7 @@ import yaml
 
 from .config import StudyConfig
 from .core import StudyAnalyzer, ANALYSIS_REGISTRY, ANALYSIS_METADATA
+from .analyses.base import VALID_STEPS
 
 
 def setup_logging(verbose: bool = False):
@@ -35,11 +36,11 @@ def _print_study_summary(config: StudyConfig, analyzer: StudyAnalyzer):
     print()
 
 
-def _run_single(config: StudyConfig, analysis_name: str):
+def _run_single(config: StudyConfig, analysis_name: str, steps: set[str] | None = None):
     """Run one analysis on a (possibly paradigm-scoped) config."""
     analyzer = StudyAnalyzer(config)
     _print_study_summary(config, analyzer)
-    analyzer.run_analysis(analysis_name)
+    analyzer.run_analysis(analysis_name, steps=steps)
     print(f"\nDone. Output: {config.output_dir / analysis_name}")
 
 
@@ -47,13 +48,23 @@ def cmd_run(args):
     """Run an analysis module."""
     config = StudyConfig.from_yaml(args.study)
 
+    # Parse --steps
+    steps = None
+    if args.steps:
+        steps = {s.strip() for s in args.steps.split(",")}
+        invalid = steps - VALID_STEPS
+        if invalid:
+            print(f"ERROR: Invalid step(s): {', '.join(sorted(invalid))}")
+            print(f"Valid steps: {', '.join(sorted(VALID_STEPS))}")
+            sys.exit(1)
+
     if config.has_paradigms:
         # Multi-paradigm config
         if args.paradigm:
             if args.analysis:
                 # Scope to one paradigm + one analysis
                 aconfig = config.for_paradigm_analysis(args.paradigm, args.analysis)
-                _run_single(aconfig, args.analysis)
+                _run_single(aconfig, args.analysis, steps=steps)
             else:
                 # Run all analyses listed for this paradigm
                 analyses = config.get_paradigm_analyses(args.paradigm)
@@ -65,7 +76,7 @@ def cmd_run(args):
                     print(f"Paradigm: {args.paradigm}  |  Analysis: {analysis_name}")
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(args.paradigm, analysis_name)
-                    _run_single(aconfig, analysis_name)
+                    _run_single(aconfig, analysis_name, steps=steps)
                     print()
         else:
             if args.analysis:
@@ -83,7 +94,7 @@ def cmd_run(args):
                     print(f"Paradigm: {pname}  |  Analysis: {analysis_name}")
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(pname, analysis_name)
-                    _run_single(aconfig, analysis_name)
+                    _run_single(aconfig, analysis_name, steps=steps)
                     print()
     else:
         # Legacy single-paradigm config
@@ -92,7 +103,7 @@ def cmd_run(args):
             sys.exit(1)
         analyzer = StudyAnalyzer(config)
         _print_study_summary(config, analyzer)
-        analyzer.run_analysis(args.analysis)
+        analyzer.run_analysis(args.analysis, steps=steps)
         print(f"\nDone. Output: {config.output_dir / args.analysis}")
 
 
@@ -366,6 +377,21 @@ def cmd_init(args):
         print(f"  UNKNOWN: n={n_unknown} (edit config to assign groups)")
 
 
+def cmd_render(args):
+    """Render a report file (.md or .qmd) to PDF or HTML."""
+    from .render import render_report
+
+    input_path = Path(args.input).resolve()
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else None
+
+    try:
+        out = render_report(input_path, output_format=args.format, output_dir=output_dir)
+        print(f"Rendered: {out}")
+    except Exception as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="source-analytics",
@@ -379,6 +405,11 @@ def main():
     p_run.add_argument("--study", required=True, type=Path, help="Path to study YAML config")
     p_run.add_argument("--paradigm", help="Paradigm name (multi-paradigm configs)")
     p_run.add_argument("--analysis", choices=list(ANALYSIS_REGISTRY.keys()), help="Analysis to run")
+    p_run.add_argument(
+        "--steps",
+        help="Comma-separated lifecycle steps to run (default: all). "
+        f"Valid: {', '.join(sorted(VALID_STEPS))}",
+    )
     p_run.set_defaults(func=cmd_run)
 
     # validate
@@ -398,6 +429,19 @@ def main():
     p_init.add_argument("--name", help="Study name (default: directory name)")
     p_init.add_argument("--groups-from", type=Path, help="source-localization study_config.yaml for group mappings")
     p_init.set_defaults(func=cmd_init)
+
+    # render
+    p_render = subparsers.add_parser("render", help="Render a report (.md/.qmd) to PDF or HTML")
+    p_render.add_argument("input", type=Path, help="Input .md or .qmd file")
+    p_render.add_argument(
+        "-f", "--format", choices=["pdf", "html"], default="pdf",
+        help="Output format (default: pdf)",
+    )
+    p_render.add_argument(
+        "-o", "--output-dir", type=Path,
+        help="Output directory (default: same as input file)",
+    )
+    p_render.set_defaults(func=cmd_render)
 
     args = parser.parse_args()
     setup_logging(args.verbose)

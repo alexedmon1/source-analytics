@@ -105,8 +105,16 @@ class StudyAnalyzer:
         """Filter subjects to only those in the specified groups."""
         return [s for s in self.subjects if s.group in groups]
 
-    def run_analysis(self, analysis_name: str) -> None:
-        """Run a single named analysis."""
+    def run_analysis(self, analysis_name: str, steps: set[str] | None = None) -> None:
+        """Run a single named analysis.
+
+        Parameters
+        ----------
+        analysis_name : str
+            Name of the analysis to run (must be in ANALYSIS_REGISTRY).
+        steps : set[str] | None
+            If provided, only run these lifecycle steps.
+        """
         if analysis_name not in ANALYSIS_REGISTRY:
             available = ", ".join(ANALYSIS_REGISTRY.keys())
             raise ValueError(f"Unknown analysis '{analysis_name}'. Available: {available}")
@@ -130,7 +138,7 @@ class StudyAnalyzer:
             "Running '%s' on %d subjects (%d groups)",
             analysis_name, len(subjects), len(set(s.group for s in subjects)),
         )
-        analysis.run(subjects)
+        analysis.run(subjects, steps=steps)
 
     def validate(self) -> list[str]:
         """Validate the study configuration and subject discovery."""

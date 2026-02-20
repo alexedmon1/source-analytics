@@ -128,11 +128,15 @@ class ConnectivityAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Generate circos and heatmap figures for ROI-level connectivity."""
+        """Generate circos and heatmap figures for ROI-level connectivity.
+
+        Produces one multi-row figure per metric × band × plot_type, with
+        all contrasts combined as rows (Group A | Group B | Difference per row).
+        """
         from ..viz.connectivity_plots import (
             build_roi_matrix,
             build_significance_matrix,
-            plot_connectivity_comparison,
+            plot_connectivity_multicontrast,
             plot_significance_circos,
         )
 
@@ -179,66 +183,71 @@ class ConnectivityAnalysis(BaseAnalysis):
             return
 
         n_figs = 0
-        for contrast in contrasts:
-            ga, gb = contrast.group_a, contrast.group_b
-            label_a = self.config.get_group_label(ga)
-            label_b = self.config.get_group_label(gb)
+        for band in bands:
+            band_df = edges_df[edges_df["band"] == band]
+            if band_df.empty:
+                continue
+            band_safe = band.replace(" ", "_").lower()
 
-            for band in bands:
-                band_df = edges_df[edges_df["band"] == band]
-                if band_df.empty:
-                    continue
+            for metric in metrics:
+                metric_label = METRIC_LABELS.get(metric, metric.replace('_', ' ').title())
 
-                for metric in metrics:
+                # Build matrices for all contrasts
+                contrast_data = []
+                roi_labels = region_names = region_sizes = None
+                for contrast in contrasts:
+                    ga, gb = contrast.group_a, contrast.group_b
+                    label_a = self.config.get_group_label(ga)
+                    label_b = self.config.get_group_label(gb)
+
                     mat_a, roi_labels, region_names, region_sizes = build_roi_matrix(
                         band_df, roi_cats, metric, group=ga,
                     )
                     mat_b, _, _, _ = build_roi_matrix(
                         band_df, roi_cats, metric, group=gb,
                     )
+                    contrast_data.append((mat_a, mat_b, f"{label_a} vs {label_b}"))
 
-                    # Sanitize band name for filenames
-                    band_safe = band.replace(" ", "_").lower()
-                    prefix = f"{contrast.name}_{metric}_{band_safe}"
+                if not contrast_data or roi_labels is None:
+                    continue
 
-                    metric_label = METRIC_LABELS.get(metric, metric.replace('_', ' ').title())
+                for plot_type in ("circos", "heatmap"):
+                    out = fig_dir / f"{plot_type}_{metric}_{band_safe}.png"
+                    plot_connectivity_multicontrast(
+                        contrast_data,
+                        roi_labels, region_names, region_sizes,
+                        out,
+                        plot_type=plot_type,
+                        title=f"{band} — {metric_label}",
+                        show_roi_labels=(plot_type != "circos"),
+                    )
+                    n_figs += 1
 
-                    for plot_type in ("circos", "heatmap"):
-                        out = fig_dir / f"{plot_type}_{prefix}.png"
+                # Significance circos per contrast (these stay per-contrast
+                # since they depend on specific posthoc results)
+                if posthoc_df is not None:
+                    for contrast in contrasts:
+                        ga, gb = contrast.group_a, contrast.group_b
+                        label_a = self.config.get_group_label(ga)
+                        label_b = self.config.get_group_label(gb)
 
-                        # For circos, threshold at 90th percentile
-                        thresh = 0.0
-                        if plot_type == "circos":
-                            ut = mat_a[np.triu_indices_from(mat_a, k=1)]
-                            thresh = float(np.percentile(ut, 90))
-
-                        plot_connectivity_comparison(
-                            mat_a, mat_b,
-                            roi_labels, region_names, region_sizes,
-                            out,
-                            plot_type=plot_type,
-                            group_labels=(label_a, label_b),
-                            title=f"{band} — {metric_label}",
-                            threshold=thresh,
-                            # Circos: hide ROI labels for clean manuscript figure
-                            show_roi_labels=(plot_type != "circos"),
+                        mat_a, rl, rn, rs = build_roi_matrix(
+                            band_df, roi_cats, metric, group=ga,
                         )
-                        n_figs += 1
+                        mat_b, _, _, _ = build_roi_matrix(
+                            band_df, roi_cats, metric, group=gb,
+                        )
 
-                    # Significance circos (uncorrected p < 0.05)
-                    if posthoc_df is not None:
                         sig_mask = build_significance_matrix(
-                            posthoc_df, roi_labels, region_names,
-                            region_sizes, band, metric,
+                            posthoc_df, rl, rn, rs, band, metric,
                         )
                         if sig_mask is not None and sig_mask.any():
-                            out = fig_dir / f"circos_sig_{prefix}.png"
+                            out = fig_dir / f"circos_sig_{contrast.name}_{metric}_{band_safe}.png"
                             plot_significance_circos(
                                 mat_a, mat_b,
-                                roi_labels, region_names, region_sizes,
-                                sig_mask, out,
+                                rl, rn, rs, sig_mask, out,
                                 group_labels=(label_a, label_b),
-                                title=f"{band} — {METRIC_LABELS.get(metric, metric.replace('_', ' ').title())} (uncorrected p < 0.05)",
+                                title=f"{band} — {metric_label} (uncorrected p < 0.05)",
                             )
                             n_figs += 1
 

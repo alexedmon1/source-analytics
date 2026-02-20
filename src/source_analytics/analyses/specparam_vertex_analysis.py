@@ -9,6 +9,7 @@ presence using cluster permutation and chi-squared tests.
 from __future__ import annotations
 
 import logging
+import pickle
 import subprocess
 from pathlib import Path
 
@@ -257,7 +258,74 @@ class SpecparamVertexAnalysis(BaseAnalysis):
             stats_df.to_csv(tbl_dir / "specparam_vertex_stats.csv", index=False)
             logger.info("Exported specparam_vertex_stats.csv (%d rows)", len(stats_df))
 
+        # Save cluster results for --steps figures support
+        if self._cluster_results:
+            data_dir = self.output_dir / "data"
+            pkl_data = {}
+            for key, info in self._cluster_results.items():
+                result = info["result"]
+                pkl_data[key] = {
+                    "t_map": result.t_map,
+                    "p_map": result.p_map,
+                    "cluster_labels": result.cluster_labels,
+                    "cluster_pvalues": result.cluster_pvalues,
+                    "cluster_stats": result.cluster_stats,
+                    "n_clusters": result.n_clusters,
+                    "n_permutations": result.n_permutations,
+                    "mean_a": info["mean_a"],
+                    "mean_b": info["mean_b"],
+                    "group_labels": info["group_labels"],
+                    "param": info["param"],
+                }
+            with open(data_dir / "specparam_cluster_results.pkl", "wb") as f:
+                pickle.dump(pkl_data, f)
+            logger.info("Saved specparam_cluster_results.pkl")
+
+    def _load_state_from_disk(self) -> bool:
+        """Load saved state from pickle for --steps figures support."""
+        from ..stats.cluster_permutation import ClusterResult
+
+        data_dir = self.output_dir / "data"
+        pkl_path = data_dir / "specparam_cluster_results.pkl"
+        if not pkl_path.exists():
+            logger.warning("No saved state at %s; skipping figures", pkl_path)
+            return False
+
+        with open(pkl_path, "rb") as f:
+            saved = pickle.load(f)
+
+        for key, d in saved.items():
+            self._cluster_results[key] = {
+                "result": ClusterResult(
+                    t_map=d["t_map"],
+                    p_map=d["p_map"],
+                    cluster_labels=d["cluster_labels"],
+                    cluster_pvalues=d["cluster_pvalues"],
+                    cluster_stats=d["cluster_stats"],
+                    n_clusters=d.get("n_clusters", 0),
+                    n_permutations=d.get("n_permutations", 0),
+                ),
+                "mean_a": d["mean_a"],
+                "mean_b": d["mean_b"],
+                "group_labels": d["group_labels"],
+                "param": d["param"],
+            }
+
+        # Load source coords
+        coords_csv = data_dir / "source_coords.csv"
+        if coords_csv.exists():
+            coords_df = pd.read_csv(coords_csv)
+            self._source_coords = coords_df[["x", "y", "z"]].values
+
+        logger.info("Loaded specparam_vertex state from %s", pkl_path)
+        return True
+
     def figures(self) -> None:
+        # Load from disk if in-memory state is missing (--steps support)
+        if not self._cluster_results or self._source_coords is None:
+            if not self._load_state_from_disk():
+                return
+
         if self._source_coords is None:
             return
 
@@ -281,20 +349,30 @@ class SpecparamVertexAnalysis(BaseAnalysis):
                 output_path=fig_dir / f"specparam_{param}.png",
             )
 
-        # Gamma peak presence map (average across all subjects)
+        # Gamma peak presence map — load from CSV if _subject_data is empty
         if self._subject_data:
             all_gamma = np.array([
                 d["has_gamma_peak"].astype(float) for d in self._subject_data.values()
             ])
             mean_gamma_rate = all_gamma.mean(axis=0)
-            plot_glass_brain(
-                coords=coords,
-                values=mean_gamma_rate,
-                title="Gamma Peak Presence Rate",
-                output_path=fig_dir / "gamma_peak_presence.png",
-                cmap="YlOrRd",
-                vlim=(0, 1),
-            )
+        else:
+            # Recompute from specparam_vertex.csv
+            data_dir = self.output_dir / "data"
+            csv_path = data_dir / "specparam_vertex.csv"
+            if not csv_path.exists():
+                logger.info("No specparam_vertex.csv; skipping gamma peak map")
+                return
+            df = pd.read_csv(csv_path)
+            mean_gamma_rate = df.groupby("vertex_idx")["has_gamma_peak"].mean().values
+
+        plot_glass_brain(
+            coords=coords,
+            values=mean_gamma_rate,
+            title="Gamma Peak Presence Rate",
+            output_path=fig_dir / "gamma_peak_presence.png",
+            cmap="YlOrRd",
+            vlim=(0, 1),
+        )
 
     def summary(self) -> None:
         data_dir = self.output_dir / "data"

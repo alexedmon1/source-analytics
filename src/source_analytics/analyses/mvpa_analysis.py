@@ -8,6 +8,7 @@ spatial pattern of activity distinguish KO from WT?
 from __future__ import annotations
 
 import logging
+import pickle
 import subprocess
 from pathlib import Path
 
@@ -204,7 +205,71 @@ class MVPAAnalysis(BaseAnalysis):
             results_df.to_csv(tbl_dir / "mvpa_results.csv", index=False)
             logger.info("Exported mvpa_results.csv")
 
+        # Save full results for --steps figures support
+        if self._mvpa_results:
+            data_dir = self.output_dir / "data"
+            pkl_data = {}
+            for key, result in self._mvpa_results.items():
+                pkl_data[key] = {
+                    "feature_weights": result.feature_weights,
+                    "null_distribution": result.null_distribution,
+                    "predictions": result.predictions,
+                    "true_labels": result.true_labels,
+                    "accuracy": result.accuracy,
+                    "p_value": result.p_value,
+                    "sensitivity": result.sensitivity,
+                    "specificity": result.specificity,
+                    "auc": result.auc,
+                    "accuracy_ci": result.accuracy_ci,
+                    "n_permutations": result.n_permutations,
+                }
+            with open(data_dir / "mvpa_results.pkl", "wb") as f:
+                pickle.dump(pkl_data, f)
+            logger.info("Saved mvpa_results.pkl")
+
+    def _load_state_from_disk(self) -> bool:
+        """Load saved MVPA state from pickle for --steps figures support."""
+        from ..stats.mvpa import MVPAResult
+
+        data_dir = self.output_dir / "data"
+        pkl_path = data_dir / "mvpa_results.pkl"
+        if not pkl_path.exists():
+            logger.warning("No saved MVPA state at %s; skipping figures", pkl_path)
+            return False
+
+        with open(pkl_path, "rb") as f:
+            saved = pickle.load(f)
+
+        for key, d in saved.items():
+            self._mvpa_results[key] = MVPAResult(
+                accuracy=d["accuracy"],
+                p_value=d["p_value"],
+                sensitivity=d["sensitivity"],
+                specificity=d["specificity"],
+                auc=d["auc"],
+                accuracy_ci=tuple(d["accuracy_ci"]),
+                feature_weights=d["feature_weights"],
+                null_distribution=d["null_distribution"],
+                predictions=d["predictions"],
+                true_labels=d["true_labels"],
+                n_permutations=d["n_permutations"],
+            )
+
+        # Load source coords
+        coords_csv = data_dir / "source_coords.csv"
+        if coords_csv.exists():
+            coords_df = pd.read_csv(coords_csv)
+            self._source_coords = coords_df[["x", "y", "z"]].values
+
+        logger.info("Loaded MVPA state from %s", pkl_path)
+        return True
+
     def figures(self) -> None:
+        # Load from disk if in-memory state is missing (--steps support)
+        if not self._mvpa_results or self._source_coords is None:
+            if not self._load_state_from_disk():
+                return
+
         if self._source_coords is None:
             return
 

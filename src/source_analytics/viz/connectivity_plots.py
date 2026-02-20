@@ -646,6 +646,176 @@ def plot_connectivity_heatmap(
 # 3-panel comparison figure
 # ---------------------------------------------------------------------------
 
+def plot_connectivity_multicontrast(
+    contrast_data: list[tuple[np.ndarray, np.ndarray, str]],
+    roi_labels: list[str],
+    region_names: list[str],
+    region_sizes: list[int],
+    output_path: str | Path,
+    *,
+    plot_type: str = "circos",
+    title: str = "",
+    threshold: float = 0.0,
+    dpi: int = 300,
+    show_roi_labels: bool = True,
+) -> None:
+    """Multi-row comparison figure: one row per contrast.
+
+    Each row shows Group A | Group B | Difference, following the layout
+    from the FORGE manuscript (208_regenerate_connectivity_figure.py).
+
+    Parameters
+    ----------
+    contrast_data : list of (mat_a, mat_b, row_label)
+        One entry per contrast. *row_label* is e.g. "Vehicle vs AUT00206".
+    roi_labels, region_names, region_sizes
+        From :func:`build_roi_matrix`.
+    output_path : Path
+    plot_type : {"circos", "heatmap"}
+    title : str
+        Figure suptitle.
+    threshold : float
+        For circos: omit chords below this value in group panels.
+    dpi : int
+    show_roi_labels : bool
+        For circos: if False, omit individual ROI labels.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    n_rows = len(contrast_data)
+    if n_rows == 0:
+        return
+
+    if plot_type == "circos":
+        col_w = 8 if show_roi_labels else 8
+        row_h = 9 if show_roi_labels else 9
+        fig, axes = plt.subplots(n_rows, 3, figsize=(col_w * 3, row_h * n_rows))
+        if n_rows == 1:
+            axes = axes[np.newaxis, :]  # ensure 2D
+
+        for row_idx, (mat_a, mat_b, row_label) in enumerate(contrast_data):
+            diff = mat_a - mat_b
+
+            group_vmax = max(np.nanmax(np.abs(mat_a)), np.nanmax(np.abs(mat_b)))
+            group_vmin = 0.0
+            diff_vmax = np.nanmax(np.abs(diff))
+            if diff_vmax == 0:
+                diff_vmax = 1.0
+
+            ut_a = mat_a[np.triu_indices_from(mat_a, k=1)]
+            thresh_group = float(np.percentile(ut_a, 90)) if threshold <= 0 else threshold
+            diff_ut = diff[np.triu_indices_from(diff, k=1)]
+            thresh_diff = float(np.std(diff_ut))
+
+            # Parse contrast label to get group names for column headers
+            parts = row_label.split(" vs ")
+            label_a = parts[0] if len(parts) == 2 else "Group A"
+            label_b = parts[1] if len(parts) == 2 else "Group B"
+
+            panels = [
+                (mat_a, label_a, "YlOrRd", group_vmin, group_vmax, thresh_group),
+                (mat_b, label_b, "YlOrRd", group_vmin, group_vmax, thresh_group),
+                (diff, f"{label_a} \u2212 {label_b}", "RdBu_r", -diff_vmax, diff_vmax, thresh_diff),
+            ]
+
+            for col_idx, (mat, col_label, cm, lo, hi, thresh) in enumerate(panels):
+                ax = axes[row_idx, col_idx]
+                plot_circos(
+                    mat, roi_labels, region_names, region_sizes, ax,
+                    cmap=cm, threshold=thresh, vmin=lo, vmax=hi,
+                    show_roi_labels=show_roi_labels,
+                )
+                ax.set_title(col_label, fontsize=14, fontweight="bold", pad=10)
+
+            # Row label on the left
+            axes[row_idx, 0].text(
+                -1.55, 0, row_label,
+                fontsize=14, fontweight="bold",
+                ha="right", va="center", rotation=90,
+            )
+
+            # Colorbars for this row
+            sm_grp = ScalarMappable(
+                cmap="YlOrRd", norm=Normalize(vmin=group_vmin, vmax=group_vmax),
+            )
+            sm_grp.set_array([])
+            cbar_grp = fig.colorbar(
+                sm_grp, ax=[axes[row_idx, 0], axes[row_idx, 1]],
+                orientation="horizontal",
+                fraction=0.035, pad=0.04, shrink=0.5,
+            )
+            cbar_grp.set_label("Mean connectivity", fontsize=10)
+            cbar_grp.ax.tick_params(labelsize=8)
+
+            sm_diff = ScalarMappable(
+                cmap="RdBu_r", norm=Normalize(vmin=-diff_vmax, vmax=diff_vmax),
+            )
+            sm_diff.set_array([])
+            cbar_diff = fig.colorbar(
+                sm_diff, ax=axes[row_idx, 2],
+                orientation="horizontal",
+                fraction=0.035, pad=0.04, shrink=0.5,
+            )
+            cbar_diff.set_label(f"{label_a} \u2212 {label_b}", fontsize=10)
+            cbar_diff.ax.tick_params(labelsize=8)
+
+        plt.subplots_adjust(hspace=0.15, wspace=0.05)
+
+    elif plot_type == "heatmap":
+        fig, axes = plt.subplots(n_rows, 3, figsize=(30, 9 * n_rows))
+        if n_rows == 1:
+            axes = axes[np.newaxis, :]
+
+        for row_idx, (mat_a, mat_b, row_label) in enumerate(contrast_data):
+            diff = mat_a - mat_b
+
+            group_vmax = max(np.nanmax(np.abs(mat_a)), np.nanmax(np.abs(mat_b)))
+            group_vmin = 0.0
+            diff_vmax = np.nanmax(np.abs(diff))
+            if diff_vmax == 0:
+                diff_vmax = 1.0
+
+            parts = row_label.split(" vs ")
+            label_a = parts[0] if len(parts) == 2 else "Group A"
+            label_b = parts[1] if len(parts) == 2 else "Group B"
+
+            for col_idx, (mat, col_label, cm, lo, hi) in enumerate([
+                (mat_a, label_a, "YlOrRd", group_vmin, group_vmax),
+                (mat_b, label_b, "YlOrRd", group_vmin, group_vmax),
+                (diff, f"{label_a} \u2212 {label_b}", "RdBu_r", -diff_vmax, diff_vmax),
+            ]):
+                ax = axes[row_idx, col_idx]
+                _, im = plot_connectivity_heatmap(
+                    mat, roi_labels, region_names, region_sizes, ax,
+                    cmap=cm, vmin=lo, vmax=hi, mask_diagonal=True,
+                )
+                ax.set_title(col_label, fontsize=12, fontweight="bold")
+                fig.colorbar(im, ax=ax, shrink=0.75)
+
+            # Row label
+            axes[row_idx, 0].set_ylabel(
+                row_label, fontsize=12, fontweight="bold", labelpad=10,
+            )
+
+        fig.tight_layout()
+    else:
+        raise ValueError(f"Unknown plot_type: {plot_type!r}")
+
+    if title:
+        suptitle_y = 1.02 if show_roi_labels else 1.0
+        fig.suptitle(title, fontsize=16, fontweight="bold", y=suptitle_y)
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    logger.info("Saved multi-contrast %s: %s", plot_type, output_path)
+
+
 def plot_connectivity_comparison(
     mat_a: np.ndarray,
     mat_b: np.ndarray,

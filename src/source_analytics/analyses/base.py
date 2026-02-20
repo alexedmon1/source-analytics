@@ -11,6 +11,8 @@ from ..io.discovery import SubjectInfo
 
 logger = logging.getLogger(__name__)
 
+VALID_STEPS = {"setup", "process", "aggregate", "statistics", "figures", "summary"}
+
 
 def find_r_script_dir() -> Path:
     """Locate the R/ directory relative to this package.
@@ -89,31 +91,60 @@ class BaseAnalysis(ABC):
         """Write markdown summary report."""
         ...
 
-    def run(self, subjects: list[SubjectInfo]) -> None:
-        """Execute the full analysis lifecycle."""
+    def run(self, subjects: list[SubjectInfo], steps: set[str] | None = None) -> None:
+        """Execute the analysis lifecycle.
+
+        Parameters
+        ----------
+        subjects : list[SubjectInfo]
+            Subjects to process.
+        steps : set[str] | None
+            If provided, only run these steps (from VALID_STEPS).
+            ``setup`` always runs. If None, run all steps.
+        """
         logger.info("=== %s Analysis ===", self.name)
+        if steps is not None:
+            logger.info("Running steps: %s", ", ".join(sorted(steps)))
+
+        def _should_run(step: str) -> bool:
+            return steps is None or step in steps
 
         logger.info("Step 1/6: Setup")
         self.setup()
 
-        logger.info("Step 2/6: Processing %d subjects", len(subjects))
-        for i, subject in enumerate(subjects, 1):
-            logger.info("  [%d/%d] %s (%s)", i, len(subjects), subject.subject_id, subject.group)
-            try:
-                self.process_subject(subject)
-            except Exception as e:
-                logger.error("  Failed to process %s: %s", subject.subject_id, e)
+        if _should_run("process"):
+            logger.info("Step 2/6: Processing %d subjects", len(subjects))
+            for i, subject in enumerate(subjects, 1):
+                logger.info("  [%d/%d] %s (%s)", i, len(subjects), subject.subject_id, subject.group)
+                try:
+                    self.process_subject(subject)
+                except Exception as e:
+                    logger.error("  Failed to process %s: %s", subject.subject_id, e)
+        else:
+            logger.info("Step 2/6: Processing — skipped")
 
-        logger.info("Step 3/6: Aggregating")
-        self.aggregate()
+        if _should_run("aggregate"):
+            logger.info("Step 3/6: Aggregating")
+            self.aggregate()
+        else:
+            logger.info("Step 3/6: Aggregating — skipped")
 
-        logger.info("Step 4/6: Statistics")
-        self.statistics()
+        if _should_run("statistics"):
+            logger.info("Step 4/6: Statistics")
+            self.statistics()
+        else:
+            logger.info("Step 4/6: Statistics — skipped")
 
-        logger.info("Step 5/6: Figures")
-        self.figures()
+        if _should_run("figures"):
+            logger.info("Step 5/6: Figures")
+            self.figures()
+        else:
+            logger.info("Step 5/6: Figures — skipped")
 
-        logger.info("Step 6/6: Summary")
-        self.summary()
+        if _should_run("summary"):
+            logger.info("Step 6/6: Summary")
+            self.summary()
+        else:
+            logger.info("Step 6/6: Summary — skipped")
 
         logger.info("=== %s complete ===", self.name)
