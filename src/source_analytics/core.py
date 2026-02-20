@@ -18,7 +18,8 @@ from .analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
 from .analyses.vertex_connectivity_analysis import VertexConnectivityAnalysis
 from .analyses.specparam_vertex_analysis import SpecparamVertexAnalysis
 from .analyses.mvpa_analysis import MVPAAnalysis
-from .analyses.network_analysis import NetworkAnalysis
+from .analyses.roi_network_analysis import ROINetworkAnalysis
+from .analyses.vertex_network_analysis import VertexNetworkAnalysis
 from .analyses.spatial_lmm_analysis import SpatialLMMAnalysis
 from .analyses.transfer_entropy_analysis import TransferEntropyAnalysis
 from .analyses.evoked_analysis import EvokedAnalysis
@@ -37,7 +38,8 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "vertex_connectivity": VertexConnectivityAnalysis,
     "specparam_vertex": SpecparamVertexAnalysis,
     "mvpa": MVPAAnalysis,
-    "network": NetworkAnalysis,
+    "roi_network": ROINetworkAnalysis,
+    "vertex_network": VertexNetworkAnalysis,
     "spatial_lmm": SpatialLMMAnalysis,
     "transfer_entropy": TransferEntropyAnalysis,
     "evoked": EvokedAnalysis,
@@ -49,7 +51,8 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
     "aperiodic":            {"category": "resting", "level": "roi",        "description": "1/f aperiodic decomposition"},
     "roi_connectivity":     {"category": "resting", "level": "roi",        "description": "ROI pairwise connectivity"},
     "pac":                  {"category": "resting", "level": "roi",        "description": "Phase-amplitude coupling"},
-    "network":              {"category": "resting", "level": "roi",        "description": "Graph theory network metrics"},
+    "roi_network":          {"category": "resting", "level": "roi",        "description": "ROI-level graph theory network metrics"},
+    "vertex_network":       {"category": "resting", "level": "wholebrain", "description": "Vertex-level graph theory network metrics"},
     "transfer_entropy":     {"category": "resting", "level": "roi",        "description": "Directed information flow"},
     "mvpa":                 {"category": "resting", "level": "wholebrain", "description": "SVM pattern classification"},
     "wholebrain":           {"category": "resting", "level": "wholebrain", "description": "Vertex-level cluster permutation"},

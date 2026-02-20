@@ -1,9 +1,17 @@
-"""Vertex-level functional connectivity: imaginary coherence and FCD.
+"""Vertex-level functional connectivity: multiple metrics and FCD.
 
-Computes all-to-all imaginary coherence between source vertices using
+Computes all-to-all connectivity between source vertices using
 vectorized STFT + matrix multiply, then derives Functional Connectivity
 Density (FCD) maps showing how connected each vertex is to the rest of
 the brain.
+
+Supported metrics:
+- coherence: magnitude-squared coherence |CSD|^2 / (PSD_i * PSD_j)
+- imag_coherence: |Im(coherency)| — volume-conduction resistant
+- pli: Phase Lag Index |mean(sign(Im(CSD)))| (Stam 2007)
+- dwpli: Debiased weighted PLI (Vinck 2011)
+- aec: Orthogonalized amplitude envelope correlation (Hipp 2012)
+- partial_corr: Partial correlation via precision matrix
 """
 
 from __future__ import annotations
@@ -11,9 +19,231 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from scipy.signal import stft, get_window
+from scipy.signal import stft, hilbert, butter, sosfiltfilt
 
 logger = logging.getLogger(__name__)
+
+_SPECTRAL_METRICS = {"coherence", "imag_coherence", "pli", "dwpli"}
+_ALL_METRICS = _SPECTRAL_METRICS | {"aec", "partial_corr"}
+
+
+def _stft_cross_spectra(
+    stc_data: np.ndarray,
+    sfreq: float,
+    band: tuple[float, float],
+    nperseg: int | None = None,
+    window: str = "hann",
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Compute STFT and accumulate cross/auto spectra over band.
+
+    Returns
+    -------
+    csd_sum : (n_vertices, n_vertices) complex128
+    auto_sum : (n_vertices,) float64
+    Zxx_band : (n_vertices, n_band_freq, n_seg) complex128
+    total : int — n_band_freq * n_seg
+    """
+    n_vertices, n_times = stc_data.shape
+    fmin, fmax = band
+
+    if nperseg is None:
+        nperseg = int(2 * sfreq)
+    nperseg = min(nperseg, n_times)
+    noverlap = nperseg // 2
+
+    freqs, _, Zxx = stft(
+        stc_data, fs=sfreq, window=window,
+        nperseg=nperseg, noverlap=noverlap,
+        boundary=None, padded=False,
+    )
+
+    band_mask = (freqs >= fmin) & (freqs <= fmax)
+    if not band_mask.any():
+        return (
+            np.zeros((n_vertices, n_vertices), dtype=np.complex128),
+            np.zeros(n_vertices, dtype=np.float64),
+            np.zeros((n_vertices, 0, 0), dtype=np.complex128),
+            0,
+        )
+
+    Zxx_band = Zxx[:, band_mask, :].astype(np.complex128)
+    n_band_freq = Zxx_band.shape[1]
+    n_seg = Zxx_band.shape[2]
+    total = n_band_freq * n_seg
+
+    csd_sum = np.zeros((n_vertices, n_vertices), dtype=np.complex128)
+    auto_sum = np.zeros(n_vertices, dtype=np.float64)
+
+    for seg_idx in range(n_seg):
+        Z_seg = Zxx_band[:, :, seg_idx]
+        csd_sum += Z_seg @ np.conj(Z_seg).T
+        auto_sum += np.sum(np.abs(Z_seg) ** 2, axis=1)
+
+    return csd_sum, auto_sum, Zxx_band, total
+
+
+def _compute_coherence(csd_sum, auto_sum, total, n_vertices):
+    """Magnitude-squared coherence from accumulated cross-spectra."""
+    csd_mean = csd_sum / max(total, 1)
+    auto_mean = np.maximum(auto_sum / max(total, 1), np.finfo(float).tiny)
+    norm = np.outer(auto_mean, auto_mean)
+    coh = np.abs(csd_mean) ** 2 / norm
+    np.fill_diagonal(coh, 0.0)
+    return coh
+
+
+def _compute_imag_coherence(csd_sum, auto_sum, total, n_vertices):
+    """Imaginary coherence |Im(coherency)|."""
+    csd_mean = csd_sum / max(total, 1)
+    auto_mean = np.maximum(auto_sum / max(total, 1), np.finfo(float).tiny)
+    norm = np.sqrt(np.outer(auto_mean, auto_mean))
+    coherency = csd_mean / norm
+    conn = np.abs(np.imag(coherency))
+    np.fill_diagonal(conn, 0.0)
+    return conn
+
+
+def _compute_pli(Zxx_band, n_vertices):
+    """Phase Lag Index: |mean_segments(sign(Im(CSD)))| per freq, averaged over band.
+
+    Uses vectorized matrix operations per segment.
+    """
+    n_band_freq = Zxx_band.shape[1]
+    n_seg = Zxx_band.shape[2]
+    if n_seg == 0 or n_band_freq == 0:
+        return np.zeros((n_vertices, n_vertices))
+
+    # Accumulate sign(Im(CSD)) across segments per freq
+    # For each freq bin, compute sign of Im of cross-spectrum matrix
+    sign_sum = np.zeros((n_vertices, n_vertices, n_band_freq), dtype=np.float64)
+
+    for seg_idx in range(n_seg):
+        Z_seg = Zxx_band[:, :, seg_idx]  # (n_vertices, n_band_freq)
+        for fi in range(n_band_freq):
+            z = Z_seg[:, fi]  # (n_vertices,)
+            csd_mat = np.outer(z, np.conj(z))
+            sign_sum[:, :, fi] += np.sign(np.imag(csd_mat))
+
+    # PLI: |mean over segments| per freq, then mean over band
+    pli_per_freq = np.abs(sign_sum / n_seg)  # (n_v, n_v, n_band_freq)
+    pli = np.mean(pli_per_freq, axis=2)
+    np.fill_diagonal(pli, 0.0)
+    return pli
+
+
+def _compute_dwpli(Zxx_band, n_vertices):
+    """Debiased weighted PLI (Vinck 2011), vectorized.
+
+    dwPLI_f = (sum_t(Im)^2 - sum_t(Im^2)) / (sum_t(|Im|)^2 - sum_t(Im^2))
+    per frequency, then averaged over band.
+    """
+    tiny = np.finfo(float).tiny
+    n_band_freq = Zxx_band.shape[1]
+    n_seg = Zxx_band.shape[2]
+    if n_seg == 0 or n_band_freq == 0:
+        return np.zeros((n_vertices, n_vertices))
+
+    # Accumulate per-freq statistics across segments
+    sum_im = np.zeros((n_vertices, n_vertices, n_band_freq), dtype=np.float64)
+    sum_im_sq = np.zeros_like(sum_im)
+    sum_abs_im = np.zeros_like(sum_im)
+
+    for seg_idx in range(n_seg):
+        Z_seg = Zxx_band[:, :, seg_idx]  # (n_vertices, n_band_freq)
+        for fi in range(n_band_freq):
+            z = Z_seg[:, fi]
+            im_csd = np.imag(np.outer(z, np.conj(z)))
+            sum_im[:, :, fi] += im_csd
+            sum_im_sq[:, :, fi] += im_csd ** 2
+            sum_abs_im[:, :, fi] += np.abs(im_csd)
+
+    numer = sum_im ** 2 - sum_im_sq
+    denom = sum_abs_im ** 2 - sum_im_sq
+    valid = np.abs(denom) > tiny
+
+    dwpli_per_freq = np.zeros_like(numer)
+    dwpli_per_freq[valid] = numer[valid] / denom[valid]
+    dwpli_per_freq = np.clip(dwpli_per_freq, 0.0, 1.0)
+
+    dwpli = np.mean(dwpli_per_freq, axis=2)
+    np.fill_diagonal(dwpli, 0.0)
+    return dwpli
+
+
+def _compute_aec(stc_data, sfreq, band, n_vertices):
+    """Orthogonalized amplitude envelope correlation (Hipp et al. 2012).
+
+    Band-filter, Hilbert, orthogonalize, correlate envelopes.
+    """
+    tiny = np.finfo(float).tiny
+    fmin, fmax = band
+    nyq = sfreq / 2
+    lo = max(fmin / nyq, 1e-5)
+    hi = min(fmax / nyq, 0.9999)
+    sos = butter(4, [lo, hi], btype="band", output="sos")
+
+    # Filter and compute analytic signal for each vertex
+    n_times = stc_data.shape[1]
+    analytic = np.empty((n_times, n_vertices), dtype=np.complex128)
+    for i in range(n_vertices):
+        filtered = sosfiltfilt(sos, stc_data[i])
+        analytic[:, i] = hilbert(filtered)
+
+    envelopes = np.abs(analytic)
+    aec = np.zeros((n_vertices, n_vertices), dtype=np.float64)
+
+    for i in range(n_vertices):
+        for j in range(i + 1, n_vertices):
+            zi = analytic[:, i]
+            zj = analytic[:, j]
+
+            # Direction 1: orthogonalize j w.r.t. i
+            beta_ji = np.real(zj * np.conj(zi)) / (np.abs(zi) ** 2 + tiny)
+            zj_orth = zj - beta_ji * zi
+            r1 = np.corrcoef(envelopes[:, i], np.abs(zj_orth))[0, 1]
+
+            # Direction 2: orthogonalize i w.r.t. j
+            beta_ij = np.real(zi * np.conj(zj)) / (np.abs(zj) ** 2 + tiny)
+            zi_orth = zi - beta_ij * zj
+            r2 = np.corrcoef(envelopes[:, j], np.abs(zi_orth))[0, 1]
+
+            val = (r1 + r2) / 2.0
+            aec[i, j] = val
+            aec[j, i] = val
+
+    return aec
+
+
+def _compute_partial_corr(stc_data, sfreq, band, n_vertices):
+    """Partial correlation via precision matrix on band-filtered data."""
+    fmin, fmax = band
+    nyq = sfreq / 2
+    lo = max(fmin / nyq, 1e-5)
+    hi = min(fmax / nyq, 0.9999)
+    sos = butter(4, [lo, hi], btype="band", output="sos")
+
+    n_times = stc_data.shape[1]
+    filtered = np.empty((n_times, n_vertices))
+    for i in range(n_vertices):
+        filtered[:, i] = sosfiltfilt(sos, stc_data[i])
+
+    cov = np.cov(filtered, rowvar=False)
+    trace = np.trace(cov) / n_vertices
+    alpha = 0.01
+    cov_reg = (1 - alpha) * cov + alpha * trace * np.eye(n_vertices)
+
+    try:
+        prec = np.linalg.inv(cov_reg)
+    except np.linalg.LinAlgError:
+        logger.warning("Singular covariance matrix — returning zeros")
+        return np.zeros((n_vertices, n_vertices))
+
+    d = np.sqrt(np.diag(prec))
+    d[d == 0] = 1.0
+    pcorr = -prec / np.outer(d, d)
+    np.fill_diagonal(pcorr, 0.0)
+    # Take absolute value for unsigned connectivity strength
+    return np.abs(pcorr)
 
 
 def compute_vertex_connectivity_matrix(
@@ -38,7 +268,8 @@ def compute_vertex_connectivity_matrix(
     band : tuple[float, float]
         Frequency band (fmin, fmax) to average connectivity over.
     metric : str
-        Connectivity metric. Currently only "imag_coherence" supported.
+        Connectivity metric: "coherence", "imag_coherence", "pli", "dwpli",
+        "aec", or "partial_corr".
     nperseg : int, optional
         Welch segment length. Default: 2 * sfreq.
     window : str
@@ -49,61 +280,112 @@ def compute_vertex_connectivity_matrix(
     conn_matrix : ndarray, shape (n_vertices, n_vertices)
         Symmetric connectivity matrix.
     """
-    if metric != "imag_coherence":
-        raise ValueError(f"Unknown metric: {metric}")
+    if metric not in _ALL_METRICS:
+        raise ValueError(
+            f"Unknown metric: {metric}. Supported: {sorted(_ALL_METRICS)}"
+        )
 
-    n_vertices, n_times = stc_data.shape
-    fmin, fmax = band
+    n_vertices = stc_data.shape[0]
 
-    if nperseg is None:
-        nperseg = int(2 * sfreq)
-    nperseg = min(nperseg, n_times)
-    noverlap = nperseg // 2
+    # AEC and partial_corr don't use the STFT path
+    if metric == "aec":
+        return _compute_aec(stc_data, sfreq, band, n_vertices)
+    if metric == "partial_corr":
+        return _compute_partial_corr(stc_data, sfreq, band, n_vertices)
 
-    # Compute STFT for all vertices at once
-    # boundary=None, padded=False to match welch/csd segment boundaries
-    freqs, _, Zxx = stft(
-        stc_data, fs=sfreq, window=window,
-        nperseg=nperseg, noverlap=noverlap,
-        boundary=None, padded=False,
+    # Spectral metrics: coherence, imag_coherence, pli, dwpli
+    csd_sum, auto_sum, Zxx_band, total = _stft_cross_spectra(
+        stc_data, sfreq, band, nperseg=nperseg, window=window,
     )
-    # Zxx: (n_vertices, n_freq, n_segments)
 
-    band_mask = (freqs >= fmin) & (freqs <= fmax)
-    if not band_mask.any():
+    if total == 0:
         return np.zeros((n_vertices, n_vertices))
 
-    # Upcast to complex128 for numerical precision — float32 input yields
-    # complex64 STFT coefficients (~1e-10), and the imaginary part of the
-    # cross-spectrum is lost in complex64 matrix multiply.
-    Zxx_band = Zxx[:, band_mask, :].astype(np.complex128)
-    n_band_freq = Zxx_band.shape[1]
-    n_seg = Zxx_band.shape[2]
-    total = n_band_freq * n_seg
+    if metric == "coherence":
+        return _compute_coherence(csd_sum, auto_sum, total, n_vertices)
+    elif metric == "imag_coherence":
+        return _compute_imag_coherence(csd_sum, auto_sum, total, n_vertices)
+    elif metric == "pli":
+        return _compute_pli(Zxx_band, n_vertices)
+    elif metric == "dwpli":
+        return _compute_dwpli(Zxx_band, n_vertices)
 
-    # Accumulate cross-spectra and auto-spectra via segment loop
-    # Memory: O(n_vertices * n_band_freq) per iteration
-    csd_sum = np.zeros((n_vertices, n_vertices), dtype=np.complex128)
-    auto_sum = np.zeros(n_vertices, dtype=np.float64)
+    raise ValueError(f"Unhandled metric: {metric}")  # pragma: no cover
 
-    for seg_idx in range(n_seg):
-        Z_seg = Zxx_band[:, :, seg_idx]  # (n_vertices, n_band_freq)
-        # Cross-spectral matrix for this segment (summed over band freqs)
-        csd_sum += Z_seg @ np.conj(Z_seg).T
-        # Auto-spectra
-        auto_sum += np.sum(np.abs(Z_seg) ** 2, axis=1)
 
-    # Mean cross-spectrum and auto-spectrum over band freqs and segments
-    csd_mean = csd_sum / total
-    auto_mean = np.maximum(auto_sum / total, np.finfo(float).tiny)
+def compute_vertex_connectivity_matrix_multi(
+    stc_data: np.ndarray,
+    sfreq: float,
+    band: tuple[float, float],
+    metrics: list[str],
+    nperseg: int | None = None,
+    window: str = "hann",
+) -> dict[str, np.ndarray]:
+    """Compute multiple connectivity metrics in a single pass where possible.
 
-    # Normalize to coherency and extract imaginary coherence
-    norm = np.sqrt(np.outer(auto_mean, auto_mean))
-    coherency = csd_mean / norm
-    conn_matrix = np.abs(np.imag(coherency))
-    np.fill_diagonal(conn_matrix, 0.0)
+    Spectral metrics (coherence, imag_coherence, pli, dwpli) share one
+    STFT computation. AEC and partial_corr are computed independently.
 
-    return conn_matrix
+    Parameters
+    ----------
+    stc_data : ndarray, shape (n_vertices, n_times)
+        Source time courses (signed, not magnitude).
+    sfreq : float
+        Sampling frequency.
+    band : tuple[float, float]
+        Frequency band (fmin, fmax).
+    metrics : list[str]
+        List of metrics to compute.
+    nperseg : int, optional
+        Welch segment length.
+    window : str
+        Window function.
+
+    Returns
+    -------
+    results : dict[str, ndarray]
+        Mapping of metric name to (n_vertices, n_vertices) matrix.
+    """
+    for m in metrics:
+        if m not in _ALL_METRICS:
+            raise ValueError(f"Unknown metric: {m}. Supported: {sorted(_ALL_METRICS)}")
+
+    n_vertices = stc_data.shape[0]
+    results: dict[str, np.ndarray] = {}
+
+    # Compute STFT once for all spectral metrics
+    spectral_requested = [m for m in metrics if m in _SPECTRAL_METRICS]
+    if spectral_requested:
+        csd_sum, auto_sum, Zxx_band, total = _stft_cross_spectra(
+            stc_data, sfreq, band, nperseg=nperseg, window=window,
+        )
+
+        if total == 0:
+            for m in spectral_requested:
+                results[m] = np.zeros((n_vertices, n_vertices))
+        else:
+            if "coherence" in spectral_requested:
+                results["coherence"] = _compute_coherence(
+                    csd_sum, auto_sum, total, n_vertices,
+                )
+            if "imag_coherence" in spectral_requested:
+                results["imag_coherence"] = _compute_imag_coherence(
+                    csd_sum, auto_sum, total, n_vertices,
+                )
+            if "pli" in spectral_requested:
+                results["pli"] = _compute_pli(Zxx_band, n_vertices)
+            if "dwpli" in spectral_requested:
+                results["dwpli"] = _compute_dwpli(Zxx_band, n_vertices)
+
+    # Non-spectral metrics
+    if "aec" in metrics:
+        results["aec"] = _compute_aec(stc_data, sfreq, band, n_vertices)
+    if "partial_corr" in metrics:
+        results["partial_corr"] = _compute_partial_corr(
+            stc_data, sfreq, band, n_vertices,
+        )
+
+    return results
 
 
 def compute_vertex_connectivity_matrix_epochs(
@@ -141,6 +423,42 @@ def compute_vertex_connectivity_matrix_epochs(
         )
         matrices.append(mat)
     return np.mean(matrices, axis=0)
+
+
+def compute_vertex_connectivity_matrix_epochs_multi(
+    epochs: np.ndarray,
+    sfreq: float,
+    band: tuple[float, float],
+    metrics: list[str],
+    nperseg: int | None = None,
+) -> dict[str, np.ndarray]:
+    """Compute multiple connectivity metrics averaged over epochs.
+
+    Parameters
+    ----------
+    epochs : ndarray, shape (n_epochs, n_vertices, n_times)
+    sfreq : float
+    band : tuple[float, float]
+    metrics : list[str]
+    nperseg : int, optional
+
+    Returns
+    -------
+    results : dict[str, ndarray]
+        Each metric -> epoch-averaged (n_vertices, n_vertices) matrix.
+    """
+    n_epochs = epochs.shape[0]
+    # Accumulate per metric
+    accum: dict[str, list[np.ndarray]] = {m: [] for m in metrics}
+
+    for ep in range(n_epochs):
+        ep_results = compute_vertex_connectivity_matrix_multi(
+            epochs[ep], sfreq, band, metrics=metrics, nperseg=nperseg,
+        )
+        for m in metrics:
+            accum[m].append(ep_results[m])
+
+    return {m: np.mean(accum[m], axis=0) for m in metrics}
 
 
 def compute_fcd(
@@ -195,7 +513,6 @@ def compute_seed_connectivity(
     -------
     connectivity : ndarray, shape (n_vertices,)
     """
-    # Use the full matrix computation (now vectorized and fast)
     conn_mat = compute_vertex_connectivity_matrix(
         stc_data, sfreq, band, metric=metric, nperseg=nperseg,
     )

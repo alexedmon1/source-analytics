@@ -842,3 +842,145 @@ def plot_anatomical_glass_brain(
     fig.savefig(output_path, dpi=dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     logger.info("Saved anatomical glass brain: %s", output_path)
+
+
+def plot_glass_brain_edges(
+    coords: np.ndarray,
+    edges: np.ndarray,
+    output_path: str | Path,
+    *,
+    edge_values: np.ndarray | None = None,
+    title: str = "NBS Edges",
+    cmap: str = "hot_r",
+    node_size_base: float = 30,
+    node_size_scale: float = 150,
+    edge_alpha: float = 0.6,
+    edge_linewidth: float = 1.5,
+    dpi: int = 150,
+) -> None:
+    """Plot NBS significant edges on a 3-view glass brain.
+
+    Parameters
+    ----------
+    coords : ndarray, shape (n_vertices, 3)
+        Vertex coordinates (x, y, z) in mm.
+    edges : ndarray, shape (n_edges, 2)
+        Array of (i, j) vertex index pairs representing significant edges.
+    output_path : Path
+        Where to save the figure.
+    edge_values : ndarray, shape (n_edges,), optional
+        Values per edge for coloring (e.g., t-statistics). If None, all
+        edges are drawn in a single color.
+    title : str
+        Figure title.
+    cmap : str
+        Colormap for edge values.
+    node_size_base : float
+        Base marker size for vertices with no NBS edges.
+    node_size_scale : float
+        Additional size per NBS edge (hub detection).
+    edge_alpha : float
+        Edge line transparency.
+    edge_linewidth : float
+        Edge line width.
+    dpi : int
+        Output resolution.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    n_vertices = len(coords)
+    n_edges = len(edges) if len(edges) > 0 else 0
+
+    # Compute vertex degree in NBS subnetwork
+    degree = np.zeros(n_vertices, dtype=int)
+    if n_edges > 0:
+        for i, j in edges:
+            degree[i] += 1
+            degree[j] += 1
+
+    node_sizes = node_size_base + degree * node_size_scale
+
+    fig, axes_list = plt.subplots(1, 3, figsize=(18, 6))
+    proj_pairs = [(0, 1), (0, 2), (1, 2)]
+    view_titles = ["Axial", "Coronal", "Sagittal"]
+    xlabels = ["X (mm)", "X (mm)", "Y (mm)"]
+    ylabels = ["Y (mm)", "Z (mm)", "Z (mm)"]
+
+    # Edge color setup
+    if edge_values is not None and n_edges > 0:
+        enorm = Normalize(
+            vmin=np.min(edge_values), vmax=np.max(edge_values),
+        )
+        edge_cmap = plt.get_cmap(cmap)
+    else:
+        enorm = None
+        edge_cmap = None
+
+    for ax, (xi, yi), vtitle, xlab, ylab in zip(
+        axes_list, proj_pairs, view_titles, xlabels, ylabels,
+    ):
+        # Background: all vertices as gray
+        bg_mask = degree == 0
+        if bg_mask.any():
+            ax.scatter(
+                coords[bg_mask, xi], coords[bg_mask, yi],
+                s=node_size_base, c="lightgray", alpha=0.4,
+                edgecolors="gray", linewidths=0.3, zorder=1,
+            )
+
+        # NBS hub vertices (degree > 0)
+        hub_mask = degree > 0
+        if hub_mask.any():
+            ax.scatter(
+                coords[hub_mask, xi], coords[hub_mask, yi],
+                s=node_sizes[hub_mask], c="steelblue", alpha=0.8,
+                edgecolors="black", linewidths=0.8, zorder=3,
+            )
+
+        # Draw edges
+        if n_edges > 0:
+            segments = []
+            colors = []
+            for ei, (vi, vj) in enumerate(edges):
+                p1 = [coords[vi, xi], coords[vi, yi]]
+                p2 = [coords[vj, xi], coords[vj, yi]]
+                segments.append([p1, p2])
+                if edge_cmap is not None and edge_values is not None:
+                    colors.append(edge_cmap(enorm(edge_values[ei])))
+                else:
+                    colors.append((0.8, 0.2, 0.2, edge_alpha))
+
+            lc = LineCollection(
+                segments, colors=colors,
+                linewidths=edge_linewidth, alpha=edge_alpha, zorder=2,
+            )
+            ax.add_collection(lc)
+
+        ax.set_xlabel(xlab)
+        ax.set_ylabel(ylab)
+        ax.set_title(vtitle)
+        ax.set_aspect("equal")
+
+    # Colorbar for edge values
+    if edge_cmap is not None and enorm is not None:
+        sm = ScalarMappable(cmap=cmap, norm=enorm)
+        sm.set_array([])
+        fig.colorbar(sm, ax=list(axes_list), shrink=0.8, label="Edge value")
+
+    n_hubs = int((degree > 0).sum())
+    fig.suptitle(
+        f"{title}\n{n_edges} edges, {n_hubs} hub vertices",
+        fontsize=14, fontweight="bold", y=1.02,
+    )
+
+    fig.tight_layout()
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved glass brain edges: %s", output_path)

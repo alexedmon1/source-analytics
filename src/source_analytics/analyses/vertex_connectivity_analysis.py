@@ -1,8 +1,8 @@
-"""Vertex-level connectivity analysis: imaginary coherence + FCD maps.
+"""Vertex-level connectivity analysis: multiple metrics + FCD maps.
 
-Computes all-to-all imaginary coherence between source vertices, derives
-Functional Connectivity Density (FCD) maps, and tests for group differences
-using cluster-based permutation testing.
+Computes all-to-all connectivity between source vertices using one or more
+metrics, derives Functional Connectivity Density (FCD) maps, and tests for
+group differences using cluster-based permutation testing.
 """
 
 from __future__ import annotations
@@ -21,30 +21,21 @@ from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.vertex_connectivity import (
     compute_vertex_connectivity_matrix,
+    compute_vertex_connectivity_matrix_multi,
     compute_vertex_connectivity_matrix_epochs,
+    compute_vertex_connectivity_matrix_epochs_multi,
     compute_fcd,
 )
 from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
 from ..stats.cluster_permutation import cluster_permutation_test, hedges_g
 from ..viz.glass_brain import plot_glass_brain, plot_band_comparison
-from .base import BaseAnalysis
+from .base import BaseAnalysis, find_r_script_dir
 
 logger = logging.getLogger(__name__)
 
 
-def _find_r_script_dir() -> Path:
-    pkg_root = Path(__file__).resolve().parent.parent.parent.parent
-    r_dir = pkg_root / "R"
-    if r_dir.is_dir():
-        return r_dir
-    for candidate in [Path.cwd() / "R", Path(__file__).parent.parent.parent / "R"]:
-        if candidate.is_dir():
-            return candidate
-    raise FileNotFoundError("Cannot find R/ scripts directory")
-
-
 class VertexConnectivityAnalysis(BaseAnalysis):
-    """All-to-all vertex connectivity with FCD mapping."""
+    """All-to-all vertex connectivity with FCD mapping (multi-metric)."""
 
     name = "vertex_connectivity"
 
@@ -56,11 +47,18 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         self._sfreq: float | None = None
         self._subject_data: dict[str, dict] = {}
         self._subject_groups: dict[str, str] = {}
-        self._conn_matrices: dict[str, dict[str, np.ndarray]] = {}
+        # conn_matrices: uid -> band -> metric -> matrix
+        self._conn_matrices: dict[str, dict[str, dict[str, np.ndarray]]] = {}
 
         # Config
         vc_cfg = config.raw.get("vertex_connectivity", {})
-        self._metric = vc_cfg.get("metric", "imag_coherence")
+        # Support both single metric (legacy) and multi-metric list
+        metrics_cfg = vc_cfg.get("metrics")
+        if metrics_cfg is not None:
+            self._metrics = list(metrics_cfg)
+        else:
+            self._metrics = [vc_cfg.get("metric", "imag_coherence")]
+
         self._fcd_threshold = float(vc_cfg.get("fcd_threshold", 0.05))
         self._n_permutations = int(vc_cfg.get("n_permutations", 1000))
 
@@ -107,41 +105,76 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         stc_data = stc_data[self._vertex_indices]
 
         self._subject_groups[uid] = subject.group
-        subject_fcd = {}
-        subject_conn = {}
+        subject_fcd: dict[str, dict[str, np.ndarray]] = {}
+        subject_conn: dict[str, dict[str, np.ndarray]] = {}
+
+        use_multi = len(self._metrics) > 1
 
         for band_name, (fmin, fmax) in self.config.bands.items():
-            logger.info("  Computing %s connectivity (%s)...", band_name, self._metric)
+            logger.info(
+                "  Computing %s connectivity (%s)...",
+                band_name, ", ".join(self._metrics),
+            )
 
-            if self._epoch_config is not None:
-                epochs = sample_epochs(
-                    stc_data, sfreq,
-                    epoch_duration_sec=self._epoch_config.get("epoch_duration_sec", 2.0),
-                    n_epochs=self._epoch_config.get("n_epochs", 80),
-                    seed=self._epoch_config.get("seed", 42),
-                )
-                conn_mat = compute_vertex_connectivity_matrix_epochs(
-                    epochs, sfreq, (fmin, fmax), metric=self._metric,
-                )
+            if use_multi:
+                # Compute all metrics in a single pass
+                if self._epoch_config is not None:
+                    epochs = sample_epochs(
+                        stc_data, sfreq,
+                        epoch_duration_sec=self._epoch_config.get(
+                            "epoch_duration_sec", 2.0,
+                        ),
+                        n_epochs=self._epoch_config.get("n_epochs", 80),
+                        seed=self._epoch_config.get("seed", 42),
+                    )
+                    conn_results = compute_vertex_connectivity_matrix_epochs_multi(
+                        epochs, sfreq, (fmin, fmax), metrics=self._metrics,
+                    )
+                else:
+                    conn_results = compute_vertex_connectivity_matrix_multi(
+                        stc_data, sfreq, (fmin, fmax), metrics=self._metrics,
+                    )
             else:
-                conn_mat = compute_vertex_connectivity_matrix(
-                    stc_data, sfreq, (fmin, fmax), metric=self._metric,
-                )
+                # Single metric — use original function
+                metric = self._metrics[0]
+                if self._epoch_config is not None:
+                    epochs = sample_epochs(
+                        stc_data, sfreq,
+                        epoch_duration_sec=self._epoch_config.get(
+                            "epoch_duration_sec", 2.0,
+                        ),
+                        n_epochs=self._epoch_config.get("n_epochs", 80),
+                        seed=self._epoch_config.get("seed", 42),
+                    )
+                    conn_mat = compute_vertex_connectivity_matrix_epochs(
+                        epochs, sfreq, (fmin, fmax), metric=metric,
+                    )
+                else:
+                    conn_mat = compute_vertex_connectivity_matrix(
+                        stc_data, sfreq, (fmin, fmax), metric=metric,
+                    )
+                conn_results = {metric: conn_mat}
 
-            fcd = compute_fcd(conn_mat, threshold=self._fcd_threshold)
+            band_fcd = {}
+            band_conn = {}
+            for metric, conn_mat in conn_results.items():
+                fcd = compute_fcd(conn_mat, threshold=self._fcd_threshold)
+                band_fcd[metric] = fcd
+                band_conn[metric] = conn_mat
 
-            subject_fcd[band_name] = fcd
-            subject_conn[band_name] = conn_mat
+                n_vertices = len(fcd)
+                for vi in range(n_vertices):
+                    self._fcd_rows.append({
+                        "subject": uid,
+                        "group": subject.group,
+                        "vertex_idx": int(self._vertex_indices[vi]),
+                        "band": band_name,
+                        "metric": metric,
+                        "fcd": float(fcd[vi]),
+                    })
 
-            n_vertices = len(fcd)
-            for vi in range(n_vertices):
-                self._fcd_rows.append({
-                    "subject": uid,
-                    "group": subject.group,
-                    "vertex_idx": int(self._vertex_indices[vi]),
-                    "band": band_name,
-                    "fcd": float(fcd[vi]),
-                })
+            subject_fcd[band_name] = band_fcd
+            subject_conn[band_name] = band_conn
 
         self._subject_data[uid] = {"fcd": subject_fcd}
         self._conn_matrices[uid] = subject_conn
@@ -157,11 +190,13 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         logger.info("Exported vertex_fcd.csv (%d rows)", len(fcd_df))
 
         if self._source_coords is not None:
-            coords_df = pd.DataFrame(self._source_coords, columns=["x", "y", "z"])
+            coords_df = pd.DataFrame(
+                self._source_coords, columns=["x", "y", "z"],
+            )
             coords_df.index.name = "vertex_idx"
             coords_df.to_csv(data_dir / "source_coords.csv")
 
-        # Save connectivity matrices for downstream use (network analysis)
+        # Save connectivity matrices for downstream use (vertex_network)
         if self._conn_matrices:
             pkl_path = data_dir / "vertex_connectivity_matrices.pkl"
             with open(pkl_path, "wb") as f:
@@ -179,10 +214,12 @@ class VertexConnectivityAnalysis(BaseAnalysis):
 
         for contrast in self.config.contrasts:
             group_a_uids = [
-                uid for uid, g in self._subject_groups.items() if g == contrast.group_a
+                uid for uid, g in self._subject_groups.items()
+                if g == contrast.group_a
             ]
             group_b_uids = [
-                uid for uid, g in self._subject_groups.items() if g == contrast.group_b
+                uid for uid, g in self._subject_groups.items()
+                if g == contrast.group_b
             ]
 
             if not group_a_uids or not group_b_uids:
@@ -192,49 +229,66 @@ class VertexConnectivityAnalysis(BaseAnalysis):
             label_b = self.config.get_group_label(contrast.group_b)
 
             for band_name in self.config.bands:
-                data_a = np.array([
-                    self._subject_data[uid]["fcd"][band_name] for uid in group_a_uids
-                ])
-                data_b = np.array([
-                    self._subject_data[uid]["fcd"][band_name] for uid in group_b_uids
-                ])
+                for metric in self._metrics:
+                    data_a = np.array([
+                        self._subject_data[uid]["fcd"][band_name][metric]
+                        for uid in group_a_uids
+                        if band_name in self._subject_data.get(uid, {}).get("fcd", {})
+                        and metric in self._subject_data[uid]["fcd"].get(band_name, {})
+                    ])
+                    data_b = np.array([
+                        self._subject_data[uid]["fcd"][band_name][metric]
+                        for uid in group_b_uids
+                        if band_name in self._subject_data.get(uid, {}).get("fcd", {})
+                        and metric in self._subject_data[uid]["fcd"].get(band_name, {})
+                    ])
 
-                result = cluster_permutation_test(
-                    data_a, data_b, coords,
-                    n_perms=self._n_permutations,
-                    threshold=self._cluster_threshold,
-                    distance_mm=self._adjacency_distance,
-                    seed=42,
-                )
+                    if data_a.size == 0 or data_b.size == 0:
+                        continue
 
-                g_map = hedges_g(data_a, data_b)
+                    result = cluster_permutation_test(
+                        data_a, data_b, coords,
+                        n_perms=self._n_permutations,
+                        threshold=self._cluster_threshold,
+                        distance_mm=self._adjacency_distance,
+                        seed=42,
+                    )
 
-                key = f"{contrast.name}_{band_name}"
-                self._cluster_results[key] = {
-                    "result": result,
-                    "mean_a": data_a.mean(axis=0),
-                    "mean_b": data_b.mean(axis=0),
-                    "group_labels": (label_a, label_b),
-                    "band": band_name,
-                }
+                    g_map = hedges_g(data_a, data_b)
 
-                for vi in range(len(result.t_map)):
-                    all_stats.append({
-                        "contrast": contrast.name,
+                    key = f"{contrast.name}_{band_name}_{metric}"
+                    self._cluster_results[key] = {
+                        "result": result,
+                        "mean_a": data_a.mean(axis=0),
+                        "mean_b": data_b.mean(axis=0),
+                        "group_labels": (label_a, label_b),
                         "band": band_name,
-                        "vertex_idx": vi,
-                        "fcd_a": float(data_a.mean(axis=0)[vi]),
-                        "fcd_b": float(data_b.mean(axis=0)[vi]),
-                        "t": float(result.t_map[vi]),
-                        "p": float(result.p_map[vi]),
-                        "hedges_g": float(g_map[vi]),
-                        "cluster_id": int(result.cluster_labels[vi]),
-                    })
+                        "metric": metric,
+                    }
+
+                    for vi in range(len(result.t_map)):
+                        all_stats.append({
+                            "contrast": contrast.name,
+                            "band": band_name,
+                            "metric": metric,
+                            "vertex_idx": vi,
+                            "fcd_a": float(data_a.mean(axis=0)[vi]),
+                            "fcd_b": float(data_b.mean(axis=0)[vi]),
+                            "t": float(result.t_map[vi]),
+                            "p": float(result.p_map[vi]),
+                            "hedges_g": float(g_map[vi]),
+                            "cluster_id": int(result.cluster_labels[vi]),
+                        })
 
         if all_stats:
             stats_df = pd.DataFrame(all_stats)
-            stats_df.to_csv(tbl_dir / "vertex_connectivity_stats.csv", index=False)
-            logger.info("Exported vertex_connectivity_stats.csv (%d rows)", len(stats_df))
+            stats_df.to_csv(
+                tbl_dir / "vertex_connectivity_stats.csv", index=False,
+            )
+            logger.info(
+                "Exported vertex_connectivity_stats.csv (%d rows)",
+                len(stats_df),
+            )
 
     def figures(self) -> None:
         if self._source_coords is None:
@@ -246,7 +300,8 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         for key, info in self._cluster_results.items():
             result = info["result"]
             band = info["band"]
-            safe_name = band.lower().replace(" ", "_")
+            metric = info.get("metric", "imag_coherence")
+            safe_name = f"{band}_{metric}".lower().replace(" ", "_")
             group_labels = info["group_labels"]
 
             plot_band_comparison(
@@ -256,7 +311,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
                 t_map=result.t_map,
                 cluster_labels=result.cluster_labels,
                 cluster_pvalues=result.cluster_pvalues,
-                band_name=f"FCD — {band}",
+                band_name=f"FCD ({metric}) — {band}",
                 group_labels=group_labels,
                 output_path=fig_dir / f"fcd_{safe_name}.png",
             )
@@ -272,7 +327,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
             yaml.dump(config_data, f, default_flow_style=False)
 
         try:
-            r_dir = _find_r_script_dir()
+            r_dir = find_r_script_dir()
             r_script = r_dir / "vertex_connectivity_analysis.R"
             if r_script.exists():
                 cmd = [
@@ -281,7 +336,9 @@ class VertexConnectivityAnalysis(BaseAnalysis):
                     "--config", str(config_path),
                     "--output-dir", str(self.output_dir),
                 ]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=600,
+                )
                 if result.returncode == 0:
                     return
         except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -296,15 +353,15 @@ class VertexConnectivityAnalysis(BaseAnalysis):
             "# Vertex Connectivity Analysis Summary",
             "",
             f"**Study**: {self.config.name}",
-            f"**Analysis**: All-to-all vertex connectivity (imaginary coherence) + FCD",
-            f"**Metric**: {self._metric}",
+            f"**Analysis**: All-to-all vertex connectivity + FCD",
+            f"**Metrics**: {', '.join(self._metrics)}",
             f"**FCD threshold**: {self._fcd_threshold}",
             f"**Permutations**: {self._n_permutations}",
             "",
             "## Methods",
             "",
-            "Imaginary coherence was computed between all pairs of source vertices "
-            "using cross-spectral density (Welch's method). Functional Connectivity "
+            f"Connectivity was computed between all pairs of source vertices "
+            f"using {', '.join(self._metrics)}. Functional Connectivity "
             "Density (FCD) was derived by counting the fraction of connections "
             f"exceeding {self._fcd_threshold} per vertex. Group differences in FCD "
             "were tested using cluster-based permutation testing.",
@@ -323,10 +380,18 @@ class VertexConnectivityAnalysis(BaseAnalysis):
             stats_df = pd.read_csv(stats_csv)
             lines.append("## Results")
             lines.append("")
-            for band in stats_df["band"].unique():
-                sub = stats_df[stats_df["band"] == band]
+            group_cols = ["band"]
+            if "metric" in stats_df.columns:
+                group_cols.append("metric")
+            for keys, sub in stats_df.groupby(group_cols):
+                if isinstance(keys, str):
+                    label = keys
+                else:
+                    label = " / ".join(str(k) for k in keys)
                 n_sig = len(sub[sub["p"] < 0.05])
-                lines.append(f"- **{band}**: {n_sig}/{len(sub)} vertices nominally significant")
+                lines.append(
+                    f"- **{label}**: {n_sig}/{len(sub)} vertices nominally significant"
+                )
             lines.append("")
 
         lines.extend([

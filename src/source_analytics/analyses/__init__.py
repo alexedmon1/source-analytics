@@ -11,7 +11,8 @@ from .electrode_comparison_analysis import ElectrodeComparisonAnalysis
 from .vertex_connectivity_analysis import VertexConnectivityAnalysis
 from .specparam_vertex_analysis import SpecparamVertexAnalysis
 from .mvpa_analysis import MVPAAnalysis
-from .network_analysis import NetworkAnalysis
+from .roi_network_analysis import ROINetworkAnalysis
+from .vertex_network_analysis import VertexNetworkAnalysis
 from .spatial_lmm_analysis import SpatialLMMAnalysis
 from .evoked_analysis import EvokedAnalysis
 
@@ -28,7 +29,8 @@ __all__ = [
     "VertexConnectivityAnalysis",
     "SpecparamVertexAnalysis",
     "MVPAAnalysis",
-    "NetworkAnalysis",
+    "ROINetworkAnalysis",
+    "VertexNetworkAnalysis",
     "SpatialLMMAnalysis",
     "EvokedAnalysis",
 ]
