@@ -475,12 +475,17 @@ plot_comodulogram <- function(pac, contrasts, group_colors, group_labels,
   }
 }
 
-#' Forest plot for region-level post-hoc results
+#' Significance heatmap (region x freq_pair) for PAC analysis
+#'
+#' Heatmap with regions on the y-axis and frequency pairs on the x-axis.
+#' Fill = Hedges' g, asterisks on significant cells.
+#' Uses PRGn diverging palette (PAC-specific).
+#'
 #' @param posthoc_df data.frame from run_posthoc_emmeans_region()
 #' @param output_dir figures/ directory
-plot_region_forest <- function(posthoc_df, output_dir) {
+plot_pac_significance_heatmap <- function(posthoc_df, output_dir) {
   if (nrow(posthoc_df) == 0) {
-    message("  Skipping region forest plot: no post-hoc results")
+    message("  Skipping PAC significance heatmap: no post-hoc results")
     return(invisible(NULL))
   }
 
@@ -488,34 +493,40 @@ plot_region_forest <- function(posthoc_df, output_dir) {
     pdata <- posthoc_df %>%
       filter(contrast == cname) %>%
       mutate(
-        region = fct_reorder(region, estimate),
-        sig_label = ifelse(significant, "*", "")
+        sig_label = ifelse(significant, "*", ""),
+        region = fct_reorder(region, hedges_g, .fun = function(x) mean(abs(x), na.rm = TRUE))
       )
 
     if (nrow(pdata) == 0) next
 
-    n_pairs <- length(unique(pdata$freq_pair))
-
-    p <- ggplot(pdata, aes(x = estimate, y = region)) +
-      geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-      geom_errorbar(aes(xmin = estimate - 1.96 * SE, xmax = estimate + 1.96 * SE),
-                    width = 0.3, color = "grey40", orientation = "y") +
-      geom_point(aes(color = significant), size = 2.5) +
-      scale_color_manual(values = c("FALSE" = "grey60", "TRUE" = "#E74C3C"),
-                         labels = c("n.s.", "p < .05"), name = NULL) +
-      facet_wrap(~ freq_pair, scales = "free_x") +
-      labs(x = "Group Difference (emmean z-score)", y = NULL,
-           title = paste0("PAC Region Contrasts: ", cname)) +
-      theme_pub() +
-      theme(
-        axis.text.y = element_text(size = 8),
-        strip.text = element_text(size = 10)
-      )
+    # Symmetric color scale centered at 0
+    max_abs_g <- max(abs(pdata$hedges_g), na.rm = TRUE)
+    clim <- ceiling(max_abs_g * 10) / 10
 
     n_regions <- length(unique(pdata$region))
-    fname <- paste0("pac_region_forest_", cname, ".png")
+    n_pairs <- length(unique(pdata$freq_pair))
+
+    p <- ggplot(pdata, aes(x = freq_pair, y = region, fill = hedges_g)) +
+      geom_tile(color = "white", linewidth = 0.5) +
+      geom_text(aes(label = sig_label), size = 5, color = "black", fontface = "bold") +
+      geom_text(aes(label = sprintf("%.2f", hedges_g)), size = 3, vjust = -0.5) +
+      scale_fill_gradient2(
+        low = "#1B7837", mid = "white", high = "#762A83",
+        midpoint = 0, limits = c(-clim, clim),
+        name = "Hedges' g"
+      ) +
+      labs(x = "Frequency Pair", y = NULL,
+           title = paste0("Region x Freq Pair Significance: ", cname),
+           subtitle = "* = significant after Holm correction") +
+      theme_pub() +
+      theme(
+        axis.text.y = element_text(size = 9),
+        axis.text.x = element_text(angle = 45, hjust = 1)
+      )
+
+    fname <- paste0("pac_significance_heatmap_", cname, ".png")
     ggsave(file.path(output_dir, fname), p,
-           width = max(10, 4 * n_pairs), height = max(6, n_regions * 0.4 + 2),
+           width = max(8, n_pairs * 1.2 + 2), height = max(5, n_regions * 0.5 + 2),
            dpi = 300, limitsize = FALSE)
     message("  Saved: ", fname)
   }
@@ -859,9 +870,9 @@ plot_global_pac_bar(global_df, group_colors, group_labels, group_order, fig_dir)
 # Comodulogram heatmaps
 plot_comodulogram(pac, config$contrasts, group_colors, group_labels, group_order, fig_dir)
 
-# Region forest plots (if post-hoc was performed)
+# Region significance heatmaps (if post-hoc was performed)
 if (nrow(posthoc_region_df) > 0) {
-  plot_region_forest(posthoc_region_df, fig_dir)
+  plot_pac_significance_heatmap(posthoc_region_df, fig_dir)
 }
 
 # ===========================================================================

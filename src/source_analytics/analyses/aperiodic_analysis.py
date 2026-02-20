@@ -179,3 +179,34 @@ class AperiodicAnalysis(BaseAnalysis):
             logger.error("Rscript not found. Install R to enable statistics and visualization.")
         except subprocess.TimeoutExpired:
             logger.error("R script timed out after 600 seconds")
+
+        # Render brain mosaics from posthoc effect sizes
+        self._render_brain_mosaics()
+
+    def _render_brain_mosaics(self) -> None:
+        """Render brain ROI mosaics from aperiodic posthoc CSVs."""
+        from ..viz.brain_roi import render_posthoc_mosaics
+
+        tbl_dir = self.output_dir / "tables"
+        fig_dir = self.output_dir / "figures"
+
+        posthoc_csv = tbl_dir / "aperiodic_posthoc_roi.csv"
+        if not posthoc_csv.exists():
+            logger.info("No aperiodic posthoc ROI CSV — skipping brain mosaics")
+            return
+
+        roi_cats = self.config.roi_categories
+        if not roi_cats:
+            logger.info("No roi_categories in config — skipping brain mosaics")
+            return
+
+        render_posthoc_mosaics(
+            posthoc_csv,
+            roi_cats,
+            fig_dir,
+            analysis_name="aperiodic",
+            effect_col="hedges_g",
+            roi_col="roi",
+            facet_cols=["contrast", "dv"],
+            colorbar_label="Hedges' g",
+        )

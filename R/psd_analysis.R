@@ -247,13 +247,11 @@ if (has_psd_curves && length(config$roi_categories) > 0) {
                      group_labels, group_order, fig_dir)
 }
 
-# Post-hoc figures (ROI-level and region-level)
+# Post-hoc figures (ROI-level and region-level significance heatmaps)
 if (nrow(posthoc_df) > 0) {
-  plot_roi_forest(posthoc_df, fig_dir)
   plot_significance_heatmap(posthoc_df, fig_dir)
 }
 if (nrow(posthoc_region_df) > 0) {
-  plot_region_forest(posthoc_region_df, fig_dir)
   plot_region_significance_heatmap(posthoc_region_df, fig_dir)
 }
 

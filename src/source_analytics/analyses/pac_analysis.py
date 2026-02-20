@@ -192,3 +192,34 @@ class PACAnalysis(BaseAnalysis):
             )
         except subprocess.TimeoutExpired:
             logger.error("R script timed out after 600 seconds")
+
+        # Render brain mosaics from posthoc effect sizes
+        self._render_brain_mosaics()
+
+    def _render_brain_mosaics(self) -> None:
+        """Render brain ROI mosaics from PAC region-level posthoc CSVs."""
+        from ..viz.brain_roi import render_posthoc_mosaics
+
+        tbl_dir = self.output_dir / "tables"
+        fig_dir = self.output_dir / "figures"
+
+        posthoc_csv = tbl_dir / "pac_posthoc_region.csv"
+        if not posthoc_csv.exists():
+            logger.info("No PAC posthoc region CSV — skipping brain mosaics")
+            return
+
+        roi_cats = self.config.roi_categories
+        if not roi_cats:
+            logger.info("No roi_categories in config — skipping brain mosaics")
+            return
+
+        render_posthoc_mosaics(
+            posthoc_csv,
+            roi_cats,
+            fig_dir,
+            analysis_name="pac",
+            effect_col="hedges_g",
+            roi_col="region",
+            facet_cols=["contrast", "freq_pair"],
+            colorbar_label="Hedges' g",
+        )

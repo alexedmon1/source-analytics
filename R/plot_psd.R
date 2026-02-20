@@ -185,62 +185,6 @@ plot_regional_heatmap <- function(band_df, roi_categories, group_colors,
 }
 
 
-#' Forest plot of group contrast per ROI (emmeans post-hoc)
-#'
-#' Dot-and-whisker plot showing the estimated group difference at each ROI,
-#' faceted by frequency band. Significant ROIs highlighted.
-#'
-#' @param posthoc_df data.frame from run_posthoc_emmeans()
-#' @param output_dir path to figures/ directory
-plot_roi_forest <- function(posthoc_df, output_dir) {
-  if (nrow(posthoc_df) == 0) {
-    message("  Skipping forest plot: no post-hoc results")
-    return(invisible(NULL))
-  }
-
-  power_types <- unique(posthoc_df$power_type)
-  if (length(power_types) == 0) power_types <- "relative"
-
-  for (ptype in power_types) {
-    for (cname in unique(posthoc_df$contrast)) {
-      pdata <- posthoc_df %>%
-        filter(contrast == cname, power_type == ptype) %>%
-        mutate(
-          roi = fct_reorder(roi, estimate),
-          sig_label = ifelse(significant, "*", "")
-        )
-
-      if (nrow(pdata) == 0) next
-
-      n_bands <- length(unique(pdata$band))
-      n_rois <- length(unique(pdata$roi))
-
-      p <- ggplot(pdata, aes(x = estimate, y = roi)) +
-        geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-        geom_errorbar(aes(xmin = estimate - 1.96 * SE, xmax = estimate + 1.96 * SE),
-                      width = 0.3, color = "grey40", orientation = "y") +
-        geom_point(aes(color = significant), size = 2) +
-        scale_color_manual(values = c("FALSE" = "grey60", "TRUE" = "#E74C3C"),
-                           labels = c("n.s.", "p < .05"), name = NULL) +
-        facet_wrap(~ band, scales = "free_x") +
-        labs(x = "Group Difference (emmean)", y = NULL,
-             title = paste0("ROI-Level Group Contrasts: ", cname, " (", ptype, ")")) +
-        theme_pub() +
-        theme(
-          axis.text.y = element_text(size = 7),
-          strip.text = element_text(size = 10)
-        )
-
-      fname <- paste0("roi_forest_plot_", cname, "_", ptype, ".png")
-      ggsave(file.path(output_dir, fname), p,
-             width = max(10, 4 * n_bands), height = max(8, n_rois * 0.22 + 2),
-             dpi = 300, limitsize = FALSE)
-      message("  Saved: ", fname)
-    }
-  }
-}
-
-
 #' Significance heatmap (ROI x band)
 #'
 #' Heatmap with ROIs on the y-axis and frequency bands on the x-axis.
@@ -294,55 +238,6 @@ plot_significance_heatmap <- function(posthoc_df, output_dir) {
       fname <- paste0("roi_significance_heatmap_", cname, "_", ptype, ".png")
       ggsave(file.path(output_dir, fname), p,
              width = 8, height = max(6, n_rois * 0.22 + 2),
-             dpi = 300, limitsize = FALSE)
-      message("  Saved: ", fname)
-    }
-  }
-}
-
-
-#' Forest plot of group contrast per region (emmeans post-hoc)
-#'
-#' @param posthoc_region_df data.frame from run_posthoc_emmeans_region()
-#' @param output_dir path to figures/ directory
-plot_region_forest <- function(posthoc_region_df, output_dir) {
-  if (nrow(posthoc_region_df) == 0) {
-    message("  Skipping region forest plot: no post-hoc results")
-    return(invisible(NULL))
-  }
-
-  power_types <- unique(posthoc_region_df$power_type)
-  if (length(power_types) == 0) power_types <- "relative"
-
-  for (ptype in power_types) {
-    for (cname in unique(posthoc_region_df$contrast)) {
-      pdata <- posthoc_region_df %>%
-        filter(contrast == cname, power_type == ptype) %>%
-        mutate(
-          region = fct_reorder(region, estimate),
-          sig_label = ifelse(significant, "*", "")
-        )
-
-      if (nrow(pdata) == 0) next
-
-      n_bands <- length(unique(pdata$band))
-
-      p <- ggplot(pdata, aes(x = estimate, y = region)) +
-        geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-        geom_errorbar(aes(xmin = estimate - 1.96 * SE, xmax = estimate + 1.96 * SE),
-                      width = 0.3, color = "grey40", orientation = "y") +
-        geom_point(aes(color = significant), size = 3) +
-        scale_color_manual(values = c("FALSE" = "grey60", "TRUE" = "#E74C3C"),
-                           labels = c("n.s.", "p < .05"), name = NULL) +
-        facet_wrap(~ band, scales = "free_x") +
-        labs(x = "Group Difference (emmean)", y = NULL,
-             title = paste0("Region-Level Group Contrasts: ", cname, " (", ptype, ")")) +
-        theme_pub() +
-        theme(strip.text = element_text(size = 10))
-
-      fname <- paste0("region_forest_plot_", cname, "_", ptype, ".png")
-      ggsave(file.path(output_dir, fname), p,
-             width = max(10, 4 * n_bands), height = 6,
              dpi = 300, limitsize = FALSE)
       message("  Saved: ", fname)
     }

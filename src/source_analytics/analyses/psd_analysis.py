@@ -193,3 +193,34 @@ class PSDAnalysis(BaseAnalysis):
             logger.error("Rscript not found. Install R to enable statistics and visualization.")
         except subprocess.TimeoutExpired:
             logger.error("R script timed out after 600 seconds")
+
+        # Render brain mosaics from posthoc effect sizes
+        self._render_brain_mosaics()
+
+    def _render_brain_mosaics(self) -> None:
+        """Render brain ROI mosaics from PSD posthoc CSVs."""
+        from ..viz.brain_roi import render_posthoc_mosaics
+
+        tbl_dir = self.output_dir / "tables"
+        fig_dir = self.output_dir / "figures"
+
+        posthoc_csv = tbl_dir / "psd_posthoc_roi.csv"
+        if not posthoc_csv.exists():
+            logger.info("No PSD posthoc ROI CSV — skipping brain mosaics")
+            return
+
+        roi_cats = self.config.roi_categories
+        if not roi_cats:
+            logger.info("No roi_categories in config — skipping brain mosaics")
+            return
+
+        render_posthoc_mosaics(
+            posthoc_csv,
+            roi_cats,
+            fig_dir,
+            analysis_name="psd",
+            effect_col="hedges_g",
+            roi_col="roi",
+            facet_cols=["contrast", "band", "power_type"],
+            colorbar_label="Hedges' g",
+        )

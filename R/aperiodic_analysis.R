@@ -529,46 +529,60 @@ plot_aperiodic_by_region <- function(ap_df, roi_categories, group_colors,
 }
 
 
-plot_aperiodic_roi_forest <- function(posthoc_df, output_dir) {
-  if (nrow(posthoc_df) == 0) return(invisible(NULL))
+#' Significance heatmap (ROI x DV) for aperiodic analysis
+#'
+#' Heatmap with ROIs on the y-axis and DVs (exponent, offset) on the x-axis.
+#' Fill = Hedges' g, asterisks on significant cells.
+#' Uses PiYG diverging palette (aperiodic-specific).
+#'
+#' @param posthoc_df data.frame from run_posthoc_emmeans_aperiodic()
+#' @param output_dir path to figures/ directory
+plot_aperiodic_significance_heatmap <- function(posthoc_df, output_dir) {
+  if (nrow(posthoc_df) == 0) {
+    message("  Skipping aperiodic significance heatmap: no post-hoc results")
+    return(invisible(NULL))
+  }
 
-  for (dv_name in unique(posthoc_df$dv)) {
-    for (cname in unique(posthoc_df$contrast)) {
-      pdata <- posthoc_df %>%
-        filter(contrast == cname, dv == dv_name) %>%
-        mutate(
-          roi = fct_reorder(roi, estimate),
-          sig_label = ifelse(significant, "*", "")
-        )
-
-      if (nrow(pdata) == 0) next
-
-      n_rois <- length(unique(pdata$roi))
-
-      dv_label <- switch(dv_name,
-        exponent = "Exponent",
-        offset = "Offset",
-        dv_name
+  for (cname in unique(posthoc_df$contrast)) {
+    pdata <- posthoc_df %>%
+      filter(contrast == cname) %>%
+      mutate(
+        sig_label = ifelse(significant, "*", ""),
+        roi = fct_reorder(roi, hedges_g, .fun = function(x) mean(abs(x), na.rm = TRUE)),
+        dv_label = dplyr::recode(dv, exponent = "Exponent", offset = "Offset")
       )
 
-      p <- ggplot(pdata, aes(x = estimate, y = roi)) +
-        geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-        geom_errorbar(aes(xmin = estimate - 1.96 * SE, xmax = estimate + 1.96 * SE),
-                      width = 0.3, color = "grey40", orientation = "y") +
-        geom_point(aes(color = significant), size = 2) +
-        scale_color_manual(values = c("FALSE" = "grey60", "TRUE" = "#E74C3C"),
-                           labels = c("n.s.", "p < .05"), name = NULL) +
-        labs(x = "Group Difference (emmean)", y = NULL,
-             title = paste0("ROI-Level Group Contrasts: ", cname, " (", dv_label, ")")) +
-        theme_pub() +
-        theme(axis.text.y = element_text(size = 7))
+    if (nrow(pdata) == 0) next
 
-      fname <- paste0("roi_forest_plot_", dv_name, "_", cname, ".png")
-      ggsave(file.path(output_dir, fname), p,
-             width = 10, height = max(8, n_rois * 0.22 + 2),
-             dpi = 300, limitsize = FALSE)
-      message("  Saved: ", fname)
-    }
+    # Symmetric color scale centered at 0
+    max_abs_g <- max(abs(pdata$hedges_g), na.rm = TRUE)
+    clim <- ceiling(max_abs_g * 10) / 10
+
+    n_rois <- length(unique(pdata$roi))
+
+    p <- ggplot(pdata, aes(x = dv_label, y = roi, fill = hedges_g)) +
+      geom_tile(color = "white", linewidth = 0.5) +
+      geom_text(aes(label = sig_label), size = 5, color = "black", fontface = "bold") +
+      geom_text(aes(label = sprintf("%.2f", hedges_g)), size = 3, vjust = -0.5) +
+      scale_fill_gradient2(
+        low = "#4D9221", mid = "white", high = "#C51B7D",
+        midpoint = 0, limits = c(-clim, clim),
+        name = "Hedges' g"
+      ) +
+      labs(x = "Dependent Variable", y = NULL,
+           title = paste0("ROI x DV Significance: ", cname),
+           subtitle = "* = significant after Holm correction") +
+      theme_pub() +
+      theme(
+        axis.text.y = element_text(size = 7),
+        axis.text.x = element_text(size = 11)
+      )
+
+    fname <- paste0("aperiodic_significance_heatmap_", cname, ".png")
+    ggsave(file.path(output_dir, fname), p,
+           width = 6, height = max(6, n_rois * 0.22 + 2),
+           dpi = 300, limitsize = FALSE)
+    message("  Saved: ", fname)
   }
 }
 
@@ -906,9 +920,9 @@ if (length(config$roi_categories) > 0) {
                             group_labels, group_order, fig_dir)
 }
 
-# Forest plots (ROI-level)
+# Significance heatmaps (ROI-level)
 if (nrow(posthoc_df) > 0) {
-  plot_aperiodic_roi_forest(posthoc_df, fig_dir)
+  plot_aperiodic_significance_heatmap(posthoc_df, fig_dir)
 }
 
 # --- Summary report ---

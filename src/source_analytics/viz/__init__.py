@@ -23,7 +23,15 @@ from .connectivity_plots import (
     plot_connectivity_comparison,
     plot_significance_circos,
 )
-from .brain_roi import plot_brain_roi, plot_brain_roi_mosaic
+from .brain_roi import plot_brain_roi, plot_brain_roi_mosaic, render_posthoc_mosaics
+from .palettes import (
+    ANALYSIS_CMAPS,
+    R_GRADIENT2_COLORS,
+    get_diverging_cmap,
+    get_sequential_cmap,
+    get_diverging_cmap_name,
+    get_r_gradient2,
+)
 from .radar import plot_radar
 
 __all__ = [
@@ -46,5 +54,12 @@ __all__ = [
     "plot_significance_circos",
     "plot_brain_roi",
     "plot_brain_roi_mosaic",
+    "render_posthoc_mosaics",
+    "ANALYSIS_CMAPS",
+    "R_GRADIENT2_COLORS",
+    "get_diverging_cmap",
+    "get_sequential_cmap",
+    "get_diverging_cmap_name",
+    "get_r_gradient2",
     "plot_radar",
 ]
