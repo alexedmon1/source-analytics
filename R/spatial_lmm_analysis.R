@@ -12,7 +12,11 @@ suppressPackageStartupMessages({
 option_list <- list(
   make_option("--data-dir", type = "character", help = "Path to data/ directory"),
   make_option("--config",   type = "character", help = "Path to study_config.yaml"),
-  make_option("--output-dir", type = "character", help = "Path to output directory")
+  make_option("--output-dir", type = "character", help = "Path to output directory"),
+  make_option("--fig-dir", type = "character", default = NULL,
+              help = "Directory for figures (default: output-dir/figures)"),
+  make_option("--tbl-dir", type = "character", default = NULL,
+              help = "Directory for tables (default: output-dir/tables)")
 )
 opts <- parse_args(OptionParser(option_list = option_list))
 
@@ -45,8 +49,8 @@ cat(sprintf("Spatial LMM: %d subjects, %d bands, %d metrics, %d vertices per sub
             n_subjects, length(bands), length(metrics), length(unique(dat$vertex_idx))))
 
 # --- Fit models per band x metric --------------------------------------------
-fig_dir <- file.path(output_dir, "figures")
-tbl_dir <- file.path(output_dir, "tables")
+fig_dir <- if (!is.null(opts[["fig-dir"]])) opts[["fig-dir"]] else file.path(output_dir, "figures")
+tbl_dir <- if (!is.null(opts[["tbl-dir"]])) opts[["tbl-dir"]] else file.path(output_dir, "tables")
 dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(tbl_dir, showWarnings = FALSE, recursive = TRUE)
 

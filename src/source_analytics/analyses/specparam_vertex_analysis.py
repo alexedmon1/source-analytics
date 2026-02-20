@@ -157,7 +157,7 @@ class SpecparamVertexAnalysis(BaseAnalysis):
             return
 
         coords = self._source_coords
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
         all_stats = []
 
         for contrast in self.config.contrasts:
@@ -262,7 +262,7 @@ class SpecparamVertexAnalysis(BaseAnalysis):
             return
 
         coords = self._source_coords
-        fig_dir = self.output_dir / "figures"
+        fig_dir = self.fig_dir
 
         for key, info in self._cluster_results.items():
             result = info["result"]
@@ -315,6 +315,8 @@ class SpecparamVertexAnalysis(BaseAnalysis):
                     "--data-dir", str(data_dir),
                     "--config", str(config_path),
                     "--output-dir", str(self.output_dir),
+                    "--fig-dir", str(self.fig_dir),
+                    "--tbl-dir", str(self.tbl_dir),
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
                 if result.returncode == 0:
@@ -325,7 +327,7 @@ class SpecparamVertexAnalysis(BaseAnalysis):
         self._write_python_summary()
 
     def _write_python_summary(self) -> None:
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
 
         lines = [
             "# Spectral Parameterization (Vertex-Level) Summary",

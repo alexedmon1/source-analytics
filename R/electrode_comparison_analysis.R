@@ -24,10 +24,14 @@ parser$add_argument("--config", required = TRUE,
                     help = "Path to study YAML config")
 parser$add_argument("--output-dir", required = TRUE,
                     help = "Root output directory for this analysis")
+parser$add_argument("--fig-dir", default = NULL,
+                    help = "Directory for figures (default: output-dir/figures)")
+parser$add_argument("--tbl-dir", default = NULL,
+                    help = "Directory for tables (default: output-dir/tables)")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
-tables_dir <- args$tables_dir
+tables_dir <- if (!is.null(args$tbl_dir)) args$tbl_dir else args$tables_dir
 config_path <- args$config
 output_dir <- args$output_dir
 
@@ -197,7 +201,7 @@ for (ptype in unique(stats_df$power_type)) {
 }
 
 # Figure references
-fig_dir <- file.path(output_dir, "figures")
+fig_dir <- if (!is.null(args$fig_dir)) args$fig_dir else file.path(output_dir, "figures")
 fig_files <- sort(list.files(fig_dir, pattern = "\\.png$"))
 if (length(fig_files) > 0) {
   add("## Figures")

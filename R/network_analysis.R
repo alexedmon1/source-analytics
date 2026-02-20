@@ -10,7 +10,11 @@ suppressPackageStartupMessages({
 option_list <- list(
   make_option("--data-dir", type = "character", help = "Path to data/ directory"),
   make_option("--config",   type = "character", help = "Path to study_config.yaml"),
-  make_option("--output-dir", type = "character", help = "Path to output directory")
+  make_option("--output-dir", type = "character", help = "Path to output directory"),
+  make_option("--fig-dir", type = "character", default = NULL,
+              help = "Directory for figures (default: output-dir/figures)"),
+  make_option("--tbl-dir", type = "character", default = NULL,
+              help = "Directory for tables (default: output-dir/tables)")
 )
 opts <- parse_args(OptionParser(option_list = option_list))
 
@@ -19,6 +23,9 @@ config_path <- opts[["config"]]
 output_dir  <- opts[["output-dir"]]
 
 config <- read_yaml(config_path)
+
+fig_dir <- if (!is.null(opts[["fig-dir"]])) opts[["fig-dir"]] else file.path(output_dir, "figures")
+tbl_dir <- if (!is.null(opts[["tbl-dir"]])) opts[["tbl-dir"]] else file.path(output_dir, "tables")
 
 # --- Load data ----------------------------------------------------------------
 global_path <- file.path(data_dir, "network_global_metrics.csv")
@@ -142,7 +149,7 @@ if (!is.null(global_tests) && nrow(global_tests) > 0) {
 }
 
 # NBS results
-nbs_path <- file.path(output_dir, "tables", "nbs_results.csv")
+nbs_path <- file.path(tbl_dir, "nbs_results.csv")
 if (file.exists(nbs_path)) {
   nbs <- read.csv(nbs_path, stringsAsFactors = FALSE)
   sig_nbs <- nbs[nbs$p_corrected < 0.05, ]

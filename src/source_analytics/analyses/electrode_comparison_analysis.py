@@ -190,7 +190,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             return
 
         data_dir = self.output_dir / "data"
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
 
         # --- Correlation and effect sizes per band ---
         stats_rows = []
@@ -297,8 +297,8 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        tbl_dir = self.output_dir / "tables"
-        fig_dir = self.output_dir / "figures"
+        tbl_dir = self.tbl_dir
+        fig_dir = self.fig_dir
 
         stats_csv = tbl_dir / "comparison_stats.csv"
         if not stats_csv.exists():
@@ -513,7 +513,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
     def summary(self) -> None:
         """Call Rscript for formatted comparison report."""
         data_dir = self.output_dir / "data"
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
 
         # Verify prerequisite files exist
         if not (tbl_dir / "comparison_stats.csv").exists():
@@ -545,6 +545,8 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             "--tables-dir", str(tbl_dir),
             "--config", str(config_path),
             "--output-dir", str(self.output_dir),
+            "--fig-dir", str(self.fig_dir),
+            "--tbl-dir", str(self.tbl_dir),
         ]
 
         logger.info("Calling R: %s", " ".join(cmd))

@@ -153,8 +153,8 @@ class SpatialLMMAnalysis(BaseAnalysis):
 
     def figures(self) -> None:
         """Delegate to R (variograms, etc). Python generates residual maps if available."""
-        tbl_dir = self.output_dir / "tables"
-        fig_dir = self.output_dir / "figures"
+        tbl_dir = self.tbl_dir
+        fig_dir = self.fig_dir
 
         residuals_csv = tbl_dir / "spatial_residuals.csv"
         if residuals_csv.exists() and self._source_coords is not None:
@@ -201,6 +201,8 @@ class SpatialLMMAnalysis(BaseAnalysis):
             "--data-dir", str(data_dir),
             "--config", str(config_path),
             "--output-dir", str(self.output_dir),
+            "--fig-dir", str(self.fig_dir),
+            "--tbl-dir", str(self.tbl_dir),
         ]
 
         logger.info("Calling R: %s", " ".join(cmd))

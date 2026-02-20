@@ -206,7 +206,7 @@ class ROINetworkAnalysis(BaseAnalysis):
         roi_df.to_csv(data_dir / "roi_labels.csv", index=False)
 
     def statistics(self) -> None:
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
         all_stats = []
 
         for contrast in self.config.contrasts:
@@ -342,7 +342,7 @@ class ROINetworkAnalysis(BaseAnalysis):
 
     def figures(self) -> None:
         """Generate NBS circos overlays and global metric bar charts."""
-        fig_dir = self.output_dir / "figures"
+        fig_dir = self.fig_dir
 
         # Global metric bar charts
         global_csv = self.output_dir / "data" / "roi_network_global_metrics.csv"
@@ -419,6 +419,8 @@ class ROINetworkAnalysis(BaseAnalysis):
                     "--data-dir", str(data_dir),
                     "--config", str(config_path),
                     "--output-dir", str(self.output_dir),
+                    "--fig-dir", str(self.fig_dir),
+                    "--tbl-dir", str(self.tbl_dir),
                 ]
                 result = subprocess.run(
                     cmd, capture_output=True, text=True, timeout=600,
@@ -431,7 +433,7 @@ class ROINetworkAnalysis(BaseAnalysis):
         self._write_python_summary()
 
     def _write_python_summary(self) -> None:
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
 
         lines = [
             "# ROI Network Analysis Summary",

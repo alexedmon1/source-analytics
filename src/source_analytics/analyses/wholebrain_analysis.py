@@ -258,7 +258,7 @@ class WholebrainAnalysis(BaseAnalysis):
             return
 
         coords = self._source_coords
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
         data_dir = self.output_dir / "data"
         is_tfce = self._correction_method == "tfce"
 
@@ -503,7 +503,7 @@ class WholebrainAnalysis(BaseAnalysis):
             return
 
         coords = self._source_coords
-        fig_dir = self.output_dir / "figures"
+        fig_dir = self.fig_dir
         group_labels = getattr(self, "_contrast_labels", ("Group A", "Group B"))
         is_tfce = self._correction_method == "tfce"
 
@@ -592,6 +592,8 @@ class WholebrainAnalysis(BaseAnalysis):
             "--data-dir", str(data_dir),
             "--config", str(config_path),
             "--output-dir", str(self.output_dir),
+            "--fig-dir", str(self.fig_dir),
+            "--tbl-dir", str(self.tbl_dir),
         ]
 
         logger.info("Calling R: %s", " ".join(cmd))
@@ -618,7 +620,7 @@ class WholebrainAnalysis(BaseAnalysis):
 
     def _write_python_summary(self) -> None:
         """Fallback summary when R is not available."""
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
         is_tfce = self._correction_method == "tfce"
 
         if is_tfce:

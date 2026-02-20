@@ -793,6 +793,10 @@ parser$add_argument("--config", required = TRUE,
                     help = "Path to study YAML config")
 parser$add_argument("--output-dir", required = TRUE,
                     help = "Root output directory for this analysis")
+parser$add_argument("--fig-dir", default = NULL,
+                    help = "Directory for figures (default: output-dir/figures)")
+parser$add_argument("--tbl-dir", default = NULL,
+                    help = "Directory for tables (default: output-dir/tables)")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
@@ -800,8 +804,8 @@ config_path <- args$config
 output_dir <- args$output_dir
 
 # Create output subdirs
-fig_dir <- file.path(output_dir, "figures")
-tbl_dir <- file.path(output_dir, "tables")
+fig_dir <- if (!is.null(args$fig_dir)) args$fig_dir else file.path(output_dir, "figures")
+tbl_dir <- if (!is.null(args$tbl_dir)) args$tbl_dir else file.path(output_dir, "tables")
 dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(tbl_dir, showWarnings = FALSE, recursive = TRUE)
 

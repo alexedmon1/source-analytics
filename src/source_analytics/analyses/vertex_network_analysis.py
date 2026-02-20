@@ -317,7 +317,7 @@ class VertexNetworkAnalysis(BaseAnalysis):
             return
 
         coords = self._source_coords
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
         all_stats = []
 
         for contrast in self.config.contrasts:
@@ -441,7 +441,7 @@ class VertexNetworkAnalysis(BaseAnalysis):
             return
 
         coords = self._source_coords
-        fig_dir = self.output_dir / "figures"
+        fig_dir = self.fig_dir
 
         # Nodal metric glass brains
         for key, info in self._cluster_results.items():
@@ -503,6 +503,8 @@ class VertexNetworkAnalysis(BaseAnalysis):
                     "--data-dir", str(data_dir),
                     "--config", str(config_path),
                     "--output-dir", str(self.output_dir),
+                    "--fig-dir", str(self.fig_dir),
+                    "--tbl-dir", str(self.tbl_dir),
                 ]
                 result = subprocess.run(
                     cmd, capture_output=True, text=True, timeout=600,
@@ -515,7 +517,7 @@ class VertexNetworkAnalysis(BaseAnalysis):
         self._write_python_summary()
 
     def _write_python_summary(self) -> None:
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
 
         lines = [
             "# Vertex Network Analysis Summary",

@@ -137,8 +137,8 @@ class ConnectivityAnalysis(BaseAnalysis):
         )
 
         data_dir = self.output_dir / "data"
-        fig_dir = self.output_dir / "figures"
-        tables_dir = self.output_dir / "tables"
+        fig_dir = self.fig_dir
+        tables_dir = self.tbl_dir
 
         # Try both filenames (aggregate() writes roi_connectivity_edges.csv;
         # older runs may have connectivity_edges.csv)
@@ -278,6 +278,8 @@ class ConnectivityAnalysis(BaseAnalysis):
             "--data-dir", str(data_dir),
             "--config", str(config_path),
             "--output-dir", str(self.output_dir),
+            "--fig-dir", str(self.fig_dir),
+            "--tbl-dir", str(self.tbl_dir),
         ]
 
         logger.info("Calling R: %s", " ".join(cmd))

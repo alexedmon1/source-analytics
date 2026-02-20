@@ -42,9 +42,22 @@ class BaseAnalysis(ABC):
         self.config = config
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        (self.output_dir / "figures").mkdir(exist_ok=True)
-        (self.output_dir / "tables").mkdir(exist_ok=True)
         (self.output_dir / "data").mkdir(exist_ok=True)
+        # figures and tables go under results_dir
+        self.fig_dir.mkdir(parents=True, exist_ok=True)
+        self.tbl_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def fig_dir(self) -> Path:
+        """Directory for figures (under results_dir)."""
+        paradigm = self.config.paradigm_name or ""
+        return self.config.results_dir / "figures" / paradigm / self.name
+
+    @property
+    def tbl_dir(self) -> Path:
+        """Directory for tables (under results_dir)."""
+        paradigm = self.config.paradigm_name or ""
+        return self.config.results_dir / "tables" / paradigm / self.name
 
     @abstractmethod
     def setup(self) -> None:

@@ -28,7 +28,9 @@ class StudyConfig:
     name : str
         Human-readable study name.
     output_dir : Path
-        Root directory for analysis outputs.
+        Root directory for analysis outputs (intermediate data).
+    results_dir : Path
+        Root directory for results (figures, tables).
     groups : dict[str, str]
         Mapping of group_id -> display label.
     group_order : list[str]
@@ -53,6 +55,7 @@ class StudyConfig:
 
     name: str
     output_dir: Path
+    results_dir: Path
     groups: dict[str, str]
     group_order: list[str]
     group_colors: dict[str, str]
@@ -84,6 +87,12 @@ class StudyConfig:
 
         # Resolve output_dir: explicit or default to config file's directory
         output_dir = Path(data["output_dir"]) if "output_dir" in data else config_dir
+
+        # Resolve results_dir: explicit or default to sibling results/
+        if "results_dir" in data:
+            results_dir = Path(data["results_dir"])
+        else:
+            results_dir = output_dir.parent / "results"
 
         # Resolve discovery.root_dir: explicit or default to sibling derivatives/
         discovery = data.get("discovery", {})
@@ -122,6 +131,7 @@ class StudyConfig:
         return cls(
             name=data["name"],
             output_dir=output_dir,
+            results_dir=results_dir,
             groups=data.get("groups", {}),
             group_order=data.get("group_order", list(data.get("groups", {}).keys())),
             group_colors=data.get("group_colors", {}),
@@ -184,6 +194,7 @@ class StudyConfig:
         return StudyConfig(
             name=f"{self.name} — {name}",
             output_dir=self.output_dir / name,
+            results_dir=self.results_dir,
             groups=self.groups,
             group_order=self.group_order,
             group_colors=self.group_colors,
@@ -277,6 +288,7 @@ class StudyConfig:
         return StudyConfig(
             name=f"{self.name} — {paradigm}",
             output_dir=self.output_dir / paradigm,
+            results_dir=self.results_dir,
             groups=self.groups,
             group_order=self.group_order,
             group_colors=self.group_colors,

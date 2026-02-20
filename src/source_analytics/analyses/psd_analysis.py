@@ -170,6 +170,8 @@ class PSDAnalysis(BaseAnalysis):
             "--data-dir", str(data_dir),
             "--config", str(config_path),
             "--output-dir", str(self.output_dir),
+            "--fig-dir", str(self.fig_dir),
+            "--tbl-dir", str(self.tbl_dir),
         ]
 
         logger.info("Calling R: %s", " ".join(cmd))
@@ -201,8 +203,8 @@ class PSDAnalysis(BaseAnalysis):
         """Render brain ROI mosaics from PSD posthoc CSVs."""
         from ..viz.brain_roi import render_posthoc_mosaics
 
-        tbl_dir = self.output_dir / "tables"
-        fig_dir = self.output_dir / "figures"
+        tbl_dir = self.tbl_dir
+        fig_dir = self.fig_dir
 
         posthoc_csv = tbl_dir / "psd_posthoc_roi.csv"
         if not posthoc_csv.exists():

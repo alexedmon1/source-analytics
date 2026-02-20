@@ -148,7 +148,7 @@ class MVPAAnalysis(BaseAnalysis):
             logger.error("No subject data for MVPA")
             return
 
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
         all_results = []
 
         for contrast in self.config.contrasts:
@@ -209,7 +209,7 @@ class MVPAAnalysis(BaseAnalysis):
             return
 
         coords = self._source_coords
-        fig_dir = self.output_dir / "figures"
+        fig_dir = self.fig_dir
 
         for key, result in self._mvpa_results.items():
             safe_name = key.lower().replace(" ", "_")
@@ -279,6 +279,8 @@ class MVPAAnalysis(BaseAnalysis):
                     "--data-dir", str(data_dir),
                     "--config", str(config_path),
                     "--output-dir", str(self.output_dir),
+                    "--fig-dir", str(self.fig_dir),
+                    "--tbl-dir", str(self.tbl_dir),
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
                 if result.returncode == 0:
@@ -289,7 +291,7 @@ class MVPAAnalysis(BaseAnalysis):
         self._write_python_summary()
 
     def _write_python_summary(self) -> None:
-        tbl_dir = self.output_dir / "tables"
+        tbl_dir = self.tbl_dir
 
         lines = [
             "# MVPA Analysis Summary",
