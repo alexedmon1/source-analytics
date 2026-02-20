@@ -105,6 +105,18 @@ class StudyConfig:
             pcopy = dict(pdata)
             if "data_dir" in pcopy:
                 pcopy["data_dir"] = str((config_dir / pcopy["data_dir"]).resolve())
+            # Also resolve per-analysis data_dir when analyses is a dict
+            analyses_raw = pcopy.get("analyses")
+            if isinstance(analyses_raw, dict):
+                resolved = {}
+                for aname, acfg in analyses_raw.items():
+                    acopy = dict(acfg) if isinstance(acfg, dict) else {}
+                    if "data_dir" in acopy:
+                        acopy["data_dir"] = str(
+                            (config_dir / acopy["data_dir"]).resolve()
+                        )
+                    resolved[aname] = acopy
+                pcopy["analyses"] = resolved
             paradigms[pname] = pcopy
 
         return cls(
@@ -135,7 +147,10 @@ class StudyConfig:
         pdata = self.paradigms.get(name)
         if pdata is None:
             return None
-        return pdata.get("analyses")
+        analyses = pdata.get("analyses")
+        if isinstance(analyses, dict):
+            return list(analyses.keys())
+        return analyses
 
     def for_paradigm(self, name: str) -> StudyConfig:
         """Return a paradigm-scoped config suitable for StudyAnalyzer.
@@ -182,6 +197,99 @@ class StudyConfig:
             evoked=pdata.get("evoked", self.evoked),
             paradigm_name=name,
             raw={**self.raw, **pdata},
+        )
+
+    # Keys that control subject discovery, not analysis-specific config
+    _DISCOVERY_KEYS = {"data_dir", "required_files", "subjects", "vertex_filter",
+                       "data_subdir"}
+
+    def for_paradigm_analysis(
+        self, paradigm: str, analysis: str,
+    ) -> StudyConfig:
+        """Return a config scoped to a paradigm + specific analysis.
+
+        When ``analyses`` is a dict, each analysis entry can declare its own
+        ``data_dir``, ``required_files``, ``vertex_filter``, etc.  These
+        override paradigm-level values.  Non-discovery keys in the analysis
+        entry are placed into ``raw[analysis]`` so the analysis class finds
+        them via ``config.raw.get(analysis, {})``.
+        """
+        if paradigm not in self.paradigms:
+            available = ", ".join(self.paradigms.keys())
+            raise ValueError(
+                f"Unknown paradigm '{paradigm}'. Available: {available}"
+            )
+
+        pdata = self.paradigms[paradigm]
+        analyses_raw = pdata.get("analyses", {})
+
+        # Get the per-analysis config dict
+        if isinstance(analyses_raw, dict):
+            analysis_cfg = dict(analyses_raw.get(analysis, {}))
+        else:
+            # List format — analysis-specific config at paradigm level
+            analysis_cfg = dict(pdata.get(analysis, {}))
+
+        # Separate discovery keys from analysis-specific config
+        a_data_dir = analysis_cfg.pop("data_dir", None)
+        a_required = analysis_cfg.pop("required_files", None)
+        a_subjects = analysis_cfg.pop("subjects", None)
+        a_vfilter = analysis_cfg.pop("vertex_filter", None)
+        a_subdir = analysis_cfg.pop("data_subdir", None)
+
+        # Build discovery: analysis > paradigm > top-level
+        discovery: dict[str, Any] = {}
+
+        data_dir = a_data_dir or pdata.get("data_dir")
+        if data_dir:
+            discovery["root_dir"] = data_dir
+
+        data_subdir = a_subdir or pdata.get("data_subdir")
+        if not data_subdir:
+            data_subdir = self.discovery.get("data_subdir")
+        if data_subdir:
+            discovery["data_subdir"] = data_subdir
+
+        subjects = a_subjects or pdata.get("subjects")
+        if subjects:
+            discovery["subject_groups"] = subjects
+
+        required_files = a_required or pdata.get("required_files")
+        if required_files:
+            discovery["required_files"] = required_files
+
+        # vertex_filter: analysis > paradigm > top-level
+        vertex_filter = a_vfilter or pdata.get("vertex_filter", self.vertex_filter)
+        if not isinstance(vertex_filter, dict):
+            vertex_filter = {}
+
+        # Build raw dict — merge analysis config under the analysis name
+        raw = {**self.raw, **pdata}
+        if analysis_cfg:
+            raw[analysis] = analysis_cfg
+
+        # Dedicated config attributes: read from raw (which now has
+        # analysis config merged in) falling back to paradigm then top-level
+        wholebrain = raw.get("wholebrain", self.wholebrain)
+        evoked = raw.get("evoked", self.evoked)
+        electrode = raw.get("electrode", self.electrode)
+
+        return StudyConfig(
+            name=f"{self.name} — {paradigm}",
+            output_dir=self.output_dir / paradigm,
+            groups=self.groups,
+            group_order=self.group_order,
+            group_colors=self.group_colors,
+            contrasts=self.contrasts,
+            bands=self.bands,
+            roi_categories=self.roi_categories,
+            discovery=discovery,
+            vertex_filter=vertex_filter,
+            wholebrain=wholebrain if isinstance(wholebrain, dict) else {},
+            electrode=electrode if isinstance(electrode, dict) else {},
+            evoked=evoked if isinstance(evoked, dict) else {},
+            paradigm_name=paradigm,
+            raw=raw,
         )
 
     def get_group_label(self, group_id: str) -> str:

@@ -50,10 +50,10 @@ def cmd_run(args):
     if config.has_paradigms:
         # Multi-paradigm config
         if args.paradigm:
-            # Scope to one paradigm
-            pconfig = config.for_paradigm(args.paradigm)
             if args.analysis:
-                _run_single(pconfig, args.analysis)
+                # Scope to one paradigm + one analysis
+                aconfig = config.for_paradigm_analysis(args.paradigm, args.analysis)
+                _run_single(aconfig, args.analysis)
             else:
                 # Run all analyses listed for this paradigm
                 analyses = config.get_paradigm_analyses(args.paradigm)
@@ -64,7 +64,8 @@ def cmd_run(args):
                     print(f"{'='*60}")
                     print(f"Paradigm: {args.paradigm}  |  Analysis: {analysis_name}")
                     print(f"{'='*60}")
-                    _run_single(pconfig, analysis_name)
+                    aconfig = config.for_paradigm_analysis(args.paradigm, analysis_name)
+                    _run_single(aconfig, analysis_name)
                     print()
         else:
             if args.analysis:
@@ -72,17 +73,17 @@ def cmd_run(args):
                 print("Specify --paradigm or omit --analysis to run everything.")
                 sys.exit(1)
             # Run all paradigms, all their analyses
-            for pname, pdata in config.paradigms.items():
-                analyses = pdata.get("analyses", [])
+            for pname in config.paradigms:
+                analyses = config.get_paradigm_analyses(pname) or []
                 if not analyses:
                     print(f"Skipping paradigm '{pname}' (no analyses listed)")
                     continue
-                pconfig = config.for_paradigm(pname)
                 for analysis_name in analyses:
                     print(f"{'='*60}")
                     print(f"Paradigm: {pname}  |  Analysis: {analysis_name}")
                     print(f"{'='*60}")
-                    _run_single(pconfig, analysis_name)
+                    aconfig = config.for_paradigm_analysis(pname, analysis_name)
+                    _run_single(aconfig, analysis_name)
                     print()
     else:
         # Legacy single-paradigm config
@@ -155,9 +156,11 @@ def cmd_validate(args):
             print(f"--- Paradigm: {pname} ---")
             analyses = config.get_paradigm_analyses(pname) or []
             print(f"  Analyses: {', '.join(analyses) if analyses else '(none)'}")
-            pconfig = config.for_paradigm(pname)
-            issues = _validate_single(pconfig, pname)
-            all_issues.extend(issues)
+            for aname in analyses:
+                aconfig = config.for_paradigm_analysis(pname, aname)
+                print(f"  [{aname}]")
+                issues = _validate_single(aconfig, f"{pname}/{aname}")
+                all_issues.extend(issues)
             print()
 
         if all_issues:
