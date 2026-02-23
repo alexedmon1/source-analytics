@@ -18,13 +18,37 @@ library(scales)
 library(patchwork)
 library(forcats)
 
+# Resolve script directory for sourcing helpers
+script_dir <- if (exists("script.dir")) {
+  script.dir
+} else {
+  tryCatch({
+    args_all <- commandArgs(trailingOnly = FALSE)
+    file_arg <- grep("^--file=", args_all, value = TRUE)
+    if (length(file_arg) > 0) {
+      dirname(normalizePath(sub("^--file=", "", file_arg)))
+    } else {
+      "R"
+    }
+  }, error = function(e) "R")
+}
+
+tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
+
+# Define sig_stars locally if not sourced
+if (!exists("sig_stars")) {
+  sig_stars <- function(q) {
+    ifelse(q < 0.001, "***", ifelse(q < 0.01, "**", ifelse(q < 0.05, "*", "")))
+  }
+}
+
 # Conditionally load LMM packages (only needed for region-level analysis)
 has_lme4 <- requireNamespace("lme4", quietly = TRUE) &&
             requireNamespace("lmerTest", quietly = TRUE) &&
             requireNamespace("emmeans", quietly = TRUE)
 
 # --- Publication theme (matches other analysis scripts) ---
-theme_pub <- function(base_size = 11) {
+theme_pub <- function(base_size = 14) {
   theme_minimal(base_size = base_size) +
     theme(
       panel.grid.minor = element_blank(),
@@ -354,7 +378,7 @@ run_posthoc_emmeans_region <- function(region_df, contrasts, omnibus_df, gate = 
 #' @param group_colors, group_labels, group_order from config
 #' @param output_dir figures/ directory
 plot_global_pac_bar <- function(global_df, group_colors, group_labels,
-                                group_order, output_dir) {
+                                group_order, output_dir, sig_df = NULL) {
   plot_data <- global_df %>%
     filter(group %in% group_order) %>%
     mutate(
@@ -373,24 +397,48 @@ plot_global_pac_bar <- function(global_df, group_colors, group_labels,
   color_vals <- group_colors[group_order]
   names(color_vals) <- group_labels[group_order]
 
-  p <- ggplot(summary_data, aes(x = freq_pair, y = mean_val, fill = group_label)) +
-    geom_col(position = position_dodge(width = 0.8), width = 0.7, alpha = 0.85) +
-    geom_errorbar(
-      aes(ymin = mean_val - sem_val, ymax = mean_val + sem_val),
-      position = position_dodge(width = 0.8), width = 0.3
-    ) +
-    geom_point(
-      data = plot_data,
-      aes(x = freq_pair, y = mean_z_score, fill = group_label),
-      position = position_jitterdodge(dodge.width = 0.8, jitter.width = 0.1),
-      size = 1, alpha = 0.4, shape = 21, color = "grey30", show.legend = FALSE
-    ) +
+  p <- ggplot(plot_data, aes(x = freq_pair, y = mean_z_score, fill = group_label)) +
+    geom_boxplot(width = 0.6, alpha = 0.7, position = position_dodge(0.8),
+                 outlier.shape = NA) +
+    geom_jitter(aes(color = group_label),
+                position = position_jitterdodge(dodge.width = 0.8, jitter.width = 0.1),
+                size = 1.5, alpha = 0.5, show.legend = FALSE) +
     geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
     scale_fill_manual(values = color_vals, name = NULL) +
+    scale_color_manual(values = color_vals, name = NULL) +
     labs(x = "Frequency Pair (phase-amplitude)", y = "Global z-scored MI",
          title = "Phase-Amplitude Coupling by Frequency Pair and Group") +
     theme_pub() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+  # Add asterisk annotations for significant freq_pair comparisons
+  if (!is.null(sig_df) && nrow(sig_df) > 0) {
+    sig_hits <- sig_df %>% filter(significant == TRUE)
+
+    if (nrow(sig_hits) > 0) {
+      # Compute y_max per freq_pair for positioning
+      y_maxes <- plot_data %>%
+        group_by(freq_pair) %>%
+        summarise(y_max = max(mean_z_score, na.rm = TRUE), .groups = "drop")
+
+      annot_data <- sig_hits %>%
+        inner_join(y_maxes, by = "freq_pair") %>%
+        mutate(
+          y_pos = y_max * 1.05,
+          sig_label_star = sig_stars(q_value)
+        ) %>%
+        filter(sig_label_star != "")
+
+      if (nrow(annot_data) > 0) {
+        p <- p + geom_text(
+          data = annot_data,
+          aes(x = freq_pair, y = y_pos, label = sig_label_star),
+          inherit.aes = FALSE,
+          fontface = "bold", size = 5, color = "black"
+        )
+      }
+    }
+  }
 
   n_pairs <- length(unique(summary_data$freq_pair))
   ggsave(file.path(output_dir, "pac_global_bar.png"), p,
@@ -756,11 +804,14 @@ parser$add_argument("--fig-dir", default = NULL,
                     help = "Directory for figures (default: output-dir/figures)")
 parser$add_argument("--tbl-dir", default = NULL,
                     help = "Directory for tables (default: output-dir/tables)")
+parser$add_argument("--figures-only", action = "store_true", default = FALSE,
+                    help = "Skip statistics; regenerate figures from existing data/tables")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
 config_path <- args$config
 output_dir <- args$output_dir
+figures_only <- args$figures_only
 
 # Create output subdirs
 fig_dir <- if (!is.null(args$fig_dir)) args$fig_dir else file.path(output_dir, "figures")
@@ -784,83 +835,119 @@ message("Groups: ", paste(group_order, collapse = ", "))
 message("Freq pairs: ", paste(unique(pac$freq_pair), collapse = ", "))
 
 # ===========================================================================
-# 1. Global PAC analysis
+# 1. Global PAC analysis (summary always needed for figures)
 # ===========================================================================
-message("\n=== Global PAC Analysis ===")
-
 global_df <- compute_global_pac(pac)
 message("  Global PAC computed: ", nrow(global_df), " subject x freq_pair rows")
 
-global_ttest_df <- run_global_ttests(global_df, config$contrasts)
-if (nrow(global_ttest_df) > 0) {
-  message("\n  === Global T-Test Results ===")
-  for (i in seq_len(nrow(global_ttest_df))) {
-    row <- global_ttest_df[i, ]
-    sig_str <- if (isTRUE(row$significant)) " ***" else ""
-    message(sprintf("  %s | %s: t=%.2f, q=%.4f%s",
-                    row$contrast, row$freq_pair,
-                    ifelse(is.na(row$t_stat), 0, row$t_stat),
-                    ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
-  }
-}
+if (!figures_only) {
+  # ===========================================================================
+  # 1b. Global PAC t-tests
+  # ===========================================================================
+  message("\n=== Global PAC Analysis ===")
 
-# ===========================================================================
-# 2. Region-level analysis (if roi_categories defined)
-# ===========================================================================
-omnibus_region_df <- data.frame()
-posthoc_region_df <- data.frame()
-
-if (length(config$roi_categories) > 0 && has_lme4) {
-  message("\n=== Region-Level PAC Analysis ===")
-
-  region_df <- aggregate_to_regions(pac, config$roi_categories)
-  n_regions <- length(unique(region_df$region))
-  message("  Aggregated to ", n_regions, " regions")
-
-  omnibus_region_df <- run_omnibus_lmm_region(region_df, config$contrasts)
-
-  if (nrow(omnibus_region_df) > 0) {
-    for (i in seq_len(nrow(omnibus_region_df))) {
-      row <- omnibus_region_df[i, ]
-      grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
-      int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
-      message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
+  global_ttest_df <- run_global_ttests(global_df, config$contrasts)
+  if (nrow(global_ttest_df) > 0) {
+    message("\n  === Global T-Test Results ===")
+    for (i in seq_len(nrow(global_ttest_df))) {
+      row <- global_ttest_df[i, ]
+      sig_str <- if (isTRUE(row$significant)) " ***" else ""
+      message(sprintf("  %s | %s: t=%.2f, q=%.4f%s",
                       row$contrast, row$freq_pair,
-                      row$group_F, row$group_q, grp_sig,
-                      row$interaction_F, row$interaction_q, int_sig))
+                      ifelse(is.na(row$t_stat), 0, row$t_stat),
+                      ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
     }
   }
 
-  posthoc_region_df <- run_posthoc_emmeans_region(region_df, config$contrasts, omnibus_region_df)
+  # ===========================================================================
+  # 2. Region-level analysis (if roi_categories defined)
+  # ===========================================================================
+  omnibus_region_df <- data.frame()
+  posthoc_region_df <- data.frame()
 
-  if (nrow(posthoc_region_df) > 0) {
-    sig_count <- sum(posthoc_region_df$significant, na.rm = TRUE)
-    message("  ", nrow(posthoc_region_df), " region contrasts, ", sig_count, " significant")
+  if (length(config$roi_categories) > 0 && has_lme4) {
+    message("\n=== Region-Level PAC Analysis ===")
+
+    region_df <- aggregate_to_regions(pac, config$roi_categories)
+    n_regions <- length(unique(region_df$region))
+    message("  Aggregated to ", n_regions, " regions")
+
+    omnibus_region_df <- run_omnibus_lmm_region(region_df, config$contrasts)
+
+    if (nrow(omnibus_region_df) > 0) {
+      for (i in seq_len(nrow(omnibus_region_df))) {
+        row <- omnibus_region_df[i, ]
+        grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
+        int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
+        message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
+                        row$contrast, row$freq_pair,
+                        row$group_F, row$group_q, grp_sig,
+                        row$interaction_F, row$interaction_q, int_sig))
+      }
+    }
+
+    posthoc_region_df <- run_posthoc_emmeans_region(region_df, config$contrasts, omnibus_region_df)
+
+    if (nrow(posthoc_region_df) > 0) {
+      sig_count <- sum(posthoc_region_df$significant, na.rm = TRUE)
+      message("  ", nrow(posthoc_region_df), " region contrasts, ", sig_count, " significant")
+    } else {
+      message("  No post-hoc tests (no significant omnibus effects)")
+    }
+  } else if (length(config$roi_categories) == 0) {
+    message("\n  No roi_categories in config -- skipping region-level analysis")
   } else {
-    message("  No post-hoc tests (no significant omnibus effects)")
+    message("\n  lme4/lmerTest not available -- skipping region-level LMM analysis")
   }
-} else if (length(config$roi_categories) == 0) {
-  message("\n  No roi_categories in config -- skipping region-level analysis")
+
+  # ===========================================================================
+  # Export tables
+  # ===========================================================================
+  message("\nExporting tables...")
+
+  if (nrow(global_ttest_df) > 0) {
+    write_csv(global_ttest_df, file.path(tbl_dir, "pac_global.csv"))
+    message("  Saved: tables/pac_global.csv")
+  }
+  if (nrow(omnibus_region_df) > 0) {
+    write_csv(omnibus_region_df, file.path(tbl_dir, "pac_omnibus_region.csv"))
+    message("  Saved: tables/pac_omnibus_region.csv")
+  }
+  if (nrow(posthoc_region_df) > 0) {
+    write_csv(posthoc_region_df, file.path(tbl_dir, "pac_posthoc_region.csv"))
+    message("  Saved: tables/pac_posthoc_region.csv")
+  }
+
 } else {
-  message("\n  lme4/lmerTest not available -- skipping region-level LMM analysis")
-}
+  # --figures-only: load existing tables from disk
+  message("\n=== Figures-only mode: loading existing tables from ", tbl_dir, " ===")
 
-# ===========================================================================
-# Export tables
-# ===========================================================================
-message("\nExporting tables...")
+  global_ttest_path <- file.path(tbl_dir, "pac_global.csv")
+  global_ttest_df <- if (file.exists(global_ttest_path)) {
+    message("  Loading: pac_global.csv")
+    read_csv(global_ttest_path, show_col_types = FALSE)
+  } else {
+    message("  Not found: pac_global.csv -- significance annotations will be omitted")
+    data.frame()
+  }
 
-if (nrow(global_ttest_df) > 0) {
-  write_csv(global_ttest_df, file.path(tbl_dir, "pac_global.csv"))
-  message("  Saved: tables/pac_global.csv")
-}
-if (nrow(omnibus_region_df) > 0) {
-  write_csv(omnibus_region_df, file.path(tbl_dir, "pac_omnibus_region.csv"))
-  message("  Saved: tables/pac_omnibus_region.csv")
-}
-if (nrow(posthoc_region_df) > 0) {
-  write_csv(posthoc_region_df, file.path(tbl_dir, "pac_posthoc_region.csv"))
-  message("  Saved: tables/pac_posthoc_region.csv")
+  omnibus_path <- file.path(tbl_dir, "pac_omnibus_region.csv")
+  omnibus_region_df <- if (file.exists(omnibus_path)) {
+    message("  Loading: pac_omnibus_region.csv")
+    read_csv(omnibus_path, show_col_types = FALSE)
+  } else {
+    message("  Not found: pac_omnibus_region.csv")
+    data.frame()
+  }
+
+  posthoc_path <- file.path(tbl_dir, "pac_posthoc_region.csv")
+  posthoc_region_df <- if (file.exists(posthoc_path)) {
+    message("  Loading: pac_posthoc_region.csv")
+    read_csv(posthoc_path, show_col_types = FALSE)
+  } else {
+    message("  Not found: pac_posthoc_region.csv")
+    data.frame()
+  }
 }
 
 # ===========================================================================
@@ -868,8 +955,9 @@ if (nrow(posthoc_region_df) > 0) {
 # ===========================================================================
 message("\nGenerating figures...")
 
-# Global PAC bar chart
-plot_global_pac_bar(global_df, group_colors, group_labels, group_order, fig_dir)
+# Global PAC bar chart (with significance annotations from t-test results)
+plot_global_pac_bar(global_df, group_colors, group_labels, group_order, fig_dir,
+                     sig_df = if (nrow(global_ttest_df) > 0) global_ttest_df else NULL)
 
 # Comodulogram heatmaps
 plot_comodulogram(pac, config$contrasts, group_colors, group_labels, group_order, fig_dir)
@@ -880,22 +968,26 @@ if (nrow(posthoc_region_df) > 0) {
 }
 
 # ===========================================================================
-# Summary report
+# Summary report (skip in figures-only mode)
 # ===========================================================================
-message("\nWriting summary...")
+if (!figures_only) {
+  message("\nWriting summary...")
 
-n_subjects <- pac %>%
-  dplyr::distinct(subject, group) %>%
-  dplyr::count(group) %>%
-  { setNames(.$n, .$group) }
+  n_subjects <- pac %>%
+    dplyr::distinct(subject, group) %>%
+    dplyr::count(group) %>%
+    { setNames(.$n, .$group) }
 
-sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
+  sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
 
-write_pac_summary(
-  global_df, global_ttest_df,
-  omnibus_region_df, posthoc_region_df,
-  config, n_subjects, sfreq,
-  fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md")
-)
+  write_pac_summary(
+    global_df, global_ttest_df,
+    omnibus_region_df, posthoc_region_df,
+    config, n_subjects, sfreq,
+    fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md")
+  )
+} else {
+  message("\nSkipping summary report (--figures-only)")
+}
 
 message("\nDone. Output: ", output_dir)

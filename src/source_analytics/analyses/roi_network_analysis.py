@@ -300,6 +300,19 @@ class ROINetworkAnalysis(BaseAnalysis):
         # Apply FDR correction to nodal stats
         if all_stats:
             stats_df = pd.DataFrame(all_stats)
+
+            # Handle NaN p-values (from zero-variance ROIs, e.g. constant
+            # degree/betweenness in disconnected regions)
+            nan_mask = np.isnan(stats_df["p"].values)
+            n_nan = nan_mask.sum()
+            if n_nan > 0:
+                logger.warning(
+                    "%d / %d nodal t-tests produced NaN p-values "
+                    "(likely zero-variance ROIs); setting to 1.0 for FDR",
+                    n_nan, len(stats_df),
+                )
+                stats_df.loc[nan_mask, "p"] = 1.0
+
             from scipy.stats import false_discovery_control
             try:
                 stats_df["p_fdr"] = false_discovery_control(stats_df["p"].values)
@@ -350,13 +363,65 @@ class ROINetworkAnalysis(BaseAnalysis):
             self._plot_global_metrics(global_csv, fig_dir)
 
     def _plot_global_metrics(self, csv_path: Path, fig_dir: Path) -> None:
-        """Bar charts of global graph metrics by group."""
+        """Bar charts of global graph metrics by group, with significance asterisks."""
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        from scipy import stats as sp_stats
 
         df = pd.read_csv(csv_path)
         global_metrics = ["global_efficiency", "modularity", "small_worldness"]
+
+        # Compute pairwise Welch t-tests for significance annotations
+        contrasts = self.config.raw.get("contrasts", [])
+        sig_results = []
+
+        for metric in self._connectivity_metrics:
+            sub = df[df["metric"] == metric] if "metric" in df.columns else df
+            if sub.empty:
+                continue
+
+            for gm_name in global_metrics:
+                for contrast in contrasts:
+                    cname = contrast["name"]
+                    ga, gb = contrast["group_a"], contrast["group_b"]
+                    for band in sub["band"].unique():
+                        vals_a = sub[(sub["group"] == ga) & (sub["band"] == band)][gm_name].dropna()
+                        vals_b = sub[(sub["group"] == gb) & (sub["band"] == band)][gm_name].dropna()
+                        if len(vals_a) < 2 or len(vals_b) < 2:
+                            continue
+                        t_stat, p_val = sp_stats.ttest_ind(vals_a, vals_b, equal_var=False)
+                        sig_results.append({
+                            "metric": metric, "gm_name": gm_name,
+                            "contrast": cname, "band": band,
+                            "p_value": p_val,
+                        })
+
+        # FDR correction (Benjamini-Hochberg) across all tests
+        sig_df = pd.DataFrame(sig_results)
+        if not sig_df.empty:
+            p_vals = sig_df["p_value"].values
+            n_tests = len(p_vals)
+            ranked = np.argsort(p_vals)
+            q_vals = np.empty(n_tests)
+            for i, rank_i in enumerate(np.argsort(ranked)):
+                q_vals[ranked[rank_i]] = p_vals[ranked[rank_i]] * n_tests / (rank_i + 1)
+            # Enforce monotonicity (step-up)
+            q_vals_sorted = q_vals[np.argsort(p_vals)]
+            for i in range(n_tests - 2, -1, -1):
+                q_vals_sorted[i] = min(q_vals_sorted[i], q_vals_sorted[i + 1])
+            q_vals[np.argsort(p_vals)] = q_vals_sorted
+            q_vals = np.minimum(q_vals, 1.0)
+            sig_df["q_value"] = q_vals
+            sig_df["significant"] = sig_df["q_value"] < 0.05
+            sig_df["sig_label"] = sig_df["q_value"].apply(
+                lambda q: "***" if q < 0.001 else ("**" if q < 0.01 else ("*" if q < 0.05 else ""))
+            )
+
+            # Save to tables
+            tbl_dir = self.tbl_dir
+            sig_df.to_csv(tbl_dir / "roi_network_global_pairwise.csv", index=False)
+            logger.info("Exported roi_network_global_pairwise.csv")
 
         for metric in self._connectivity_metrics:
             sub = df[df["metric"] == metric] if "metric" in df.columns else df
@@ -372,22 +437,45 @@ class ROINetworkAnalysis(BaseAnalysis):
                 x = np.arange(len(bands))
                 width = 0.8 / max(len(groups), 1)
 
+                bar_tops = {}  # band -> max bar top for annotation positioning
                 for gi, group in enumerate(sorted(groups)):
                     group_data = sub[sub["group"] == group]
                     means = []
                     sems = []
                     for band in bands:
                         vals = group_data[group_data["band"] == band][gm_name]
-                        means.append(vals.mean() if len(vals) > 0 else 0)
-                        sems.append(
-                            vals.std() / np.sqrt(len(vals))
-                            if len(vals) > 1 else 0
-                        )
+                        m = vals.mean() if len(vals) > 0 else 0
+                        s = vals.std() / np.sqrt(len(vals)) if len(vals) > 1 else 0
+                        means.append(m)
+                        sems.append(s)
+                        top = m + s
+                        if band not in bar_tops or top > bar_tops[band]:
+                            bar_tops[band] = top
                     label = self.config.get_group_label(group)
                     ax.bar(
                         x + gi * width, means, width,
                         yerr=sems, label=label, capsize=3,
                     )
+
+                # Add significance asterisks
+                if not sig_df.empty:
+                    metric_sig = sig_df[
+                        (sig_df["metric"] == metric) &
+                        (sig_df["gm_name"] == gm_name) &
+                        (sig_df["significant"])
+                    ]
+                    for _, row in metric_sig.iterrows():
+                        band = row["band"]
+                        bi = list(bands).index(band) if band in bands else -1
+                        if bi < 0:
+                            continue
+                        y_pos = bar_tops.get(band, 0) * 1.05
+                        x_pos = x[bi] + width * (len(groups) - 1) / 2
+                        ax.text(
+                            x_pos, y_pos, row["sig_label"],
+                            ha="center", va="bottom",
+                            fontsize=12, fontweight="bold", color="black",
+                        )
 
                 ax.set_xticks(x + width * (len(groups) - 1) / 2)
                 ax.set_xticklabels(bands, rotation=45, ha="right")

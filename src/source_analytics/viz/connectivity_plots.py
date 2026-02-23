@@ -260,7 +260,7 @@ def plot_significance_circos(
         sm, ax=ax, orientation="horizontal",
         fraction=0.04, pad=0.04, shrink=0.5,
     )
-    cbar.set_label("Difference", fontsize=9)
+    cbar.set_label("Difference", fontsize=12)
 
     if title:
         fig.suptitle(title, fontsize=13, fontweight="bold", y=1.0)
@@ -395,7 +395,7 @@ def plot_circos(
         # Region label at midpoint of region arc
         mid_angle = np.radians((theta1 + theta2) / 2)
         label_r = 1.12 if show_roi_labels else 1.08
-        label_fs = 9 if show_roi_labels else 10
+        label_fs = 12 if show_roi_labels else 12
         lx = label_r * np.cos(mid_angle)
         ly = label_r * np.sin(mid_angle)
         rotation = np.degrees(mid_angle)
@@ -441,7 +441,7 @@ def plot_circos(
             ax.text(
                 lx, ly, short_labels[i],
                 ha=ha, va="center",
-                fontsize=6,
+                fontsize=8,
                 rotation=rotation,
                 rotation_mode="anchor",
                 color="0.2",
@@ -593,8 +593,8 @@ def plot_connectivity_heatmap(
     short_labels = [_short_roi_label(r) for r in roi_labels]
     ax.set_xticks(range(n))
     ax.set_yticks(range(n))
-    ax.set_xticklabels(short_labels, rotation=90, ha="center", fontsize=4)
-    ax.set_yticklabels(short_labels, fontsize=4)
+    ax.set_xticklabels(short_labels, rotation=90, ha="center", fontsize=7)
+    ax.set_yticklabels(short_labels, fontsize=7)
 
     # Region colours for tick labels
     tab10 = plt.cm.tab10
@@ -623,7 +623,7 @@ def plot_connectivity_heatmap(
         color = tab10(ri % 10)
         ax.text(
             mid, -1.8, region_names[ri],
-            ha="center", va="bottom", fontsize=4.5,
+            ha="center", va="bottom", fontsize=7,
             fontweight="bold", color=color, rotation=45,
         )
         offset += sz
@@ -729,12 +729,12 @@ def plot_connectivity_multicontrast(
                     cmap=cm, threshold=thresh, vmin=lo, vmax=hi,
                     show_roi_labels=show_roi_labels,
                 )
-                ax.set_title(col_label, fontsize=14, fontweight="bold", pad=10)
+                ax.set_title(col_label, fontsize=16, fontweight="bold", pad=10)
 
             # Row label on the left
             axes[row_idx, 0].text(
                 -1.55, 0, row_label,
-                fontsize=14, fontweight="bold",
+                fontsize=16, fontweight="bold",
                 ha="right", va="center", rotation=90,
             )
 
@@ -748,8 +748,8 @@ def plot_connectivity_multicontrast(
                 orientation="horizontal",
                 fraction=0.035, pad=0.04, shrink=0.5,
             )
-            cbar_grp.set_label("Mean connectivity", fontsize=10)
-            cbar_grp.ax.tick_params(labelsize=8)
+            cbar_grp.set_label("Mean connectivity", fontsize=12)
+            cbar_grp.ax.tick_params(labelsize=10)
 
             sm_diff = ScalarMappable(
                 cmap="RdBu_r", norm=Normalize(vmin=-diff_vmax, vmax=diff_vmax),
@@ -760,8 +760,8 @@ def plot_connectivity_multicontrast(
                 orientation="horizontal",
                 fraction=0.035, pad=0.04, shrink=0.5,
             )
-            cbar_diff.set_label(f"{label_a} \u2212 {label_b}", fontsize=10)
-            cbar_diff.ax.tick_params(labelsize=8)
+            cbar_diff.set_label(f"{label_a} \u2212 {label_b}", fontsize=12)
+            cbar_diff.ax.tick_params(labelsize=10)
 
         plt.subplots_adjust(hspace=0.15, wspace=0.05)
 
@@ -897,7 +897,7 @@ def plot_connectivity_comparison(
                 vmin=lo, vmax=hi,
                 show_roi_labels=show_roi_labels,
             )
-            axes[ax_i].set_title(label, fontsize=14, fontweight="bold", pad=8)
+            axes[ax_i].set_title(label, fontsize=16, fontweight="bold", pad=8)
 
         # Colorbars below
         sm_grp = ScalarMappable(
@@ -908,7 +908,7 @@ def plot_connectivity_comparison(
             sm_grp, ax=[axes[0], axes[1]], orientation="horizontal",
             fraction=0.04, pad=0.06, shrink=0.6,
         )
-        cbar_grp.set_label("Mean connectivity", fontsize=11)
+        cbar_grp.set_label("Mean connectivity", fontsize=12)
 
         sm_diff = ScalarMappable(
             cmap="RdBu_r", norm=Normalize(vmin=-diff_vmax, vmax=diff_vmax),
@@ -920,7 +920,7 @@ def plot_connectivity_comparison(
         )
         cbar_diff.set_label(
             f"{group_labels[0]} \u2212 {group_labels[1]}",
-            fontsize=11,
+            fontsize=12,
         )
 
     elif plot_type == "heatmap":

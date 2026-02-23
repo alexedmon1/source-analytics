@@ -194,8 +194,8 @@ class EvokedAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Delegated to R."""
-        pass
+        """Regenerate R figures from existing data/tables."""
+        self._call_r_figures_only("evoked_analysis.R", "evoked_measures.csv")
 
     def summary(self) -> None:
         """Call Rscript for statistics, figures, and summary."""

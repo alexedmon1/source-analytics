@@ -129,8 +129,8 @@ class PSDAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Delegated to R — this is a no-op in Python."""
-        pass
+        """Regenerate R figures from existing data/tables."""
+        self._call_r_figures_only("psd_analysis.R", "band_power.csv")
 
     def summary(self) -> None:
         """Call Rscript for statistics, figures, and summary."""

@@ -18,13 +18,37 @@ library(scales)
 library(patchwork)
 library(forcats)
 
+# Resolve script directory for sourcing helpers
+script_dir <- if (exists("script.dir")) {
+  script.dir
+} else {
+  tryCatch({
+    args_all <- commandArgs(trailingOnly = FALSE)
+    file_arg <- grep("^--file=", args_all, value = TRUE)
+    if (length(file_arg) > 0) {
+      dirname(normalizePath(sub("^--file=", "", file_arg)))
+    } else {
+      "R"
+    }
+  }, error = function(e) "R")
+}
+
+tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
+
+# Define sig_stars locally if not sourced
+if (!exists("sig_stars")) {
+  sig_stars <- function(q) {
+    ifelse(q < 0.001, "***", ifelse(q < 0.01, "**", ifelse(q < 0.05, "*", "")))
+  }
+}
+
 # Conditionally load LMM packages (only needed for region-pair analysis)
 has_lme4 <- requireNamespace("lme4", quietly = TRUE) &&
             requireNamespace("lmerTest", quietly = TRUE) &&
             requireNamespace("emmeans", quietly = TRUE)
 
 # --- Publication theme (matches plot_psd.R) ---
-theme_pub <- function(base_size = 11) {
+theme_pub <- function(base_size = 14) {
   theme_minimal(base_size = base_size) +
     theme(
       panel.grid.minor = element_blank(),
@@ -464,7 +488,8 @@ plot_connectivity_matrices <- function(edges, metric_col, group_colors,
 #' @param group_colors, group_labels, group_order from config
 #' @param output_dir figures/ directory
 plot_global_connectivity_bar <- function(global_df, group_colors, group_labels,
-                                         group_order, output_dir) {
+                                         group_order, output_dir,
+                                         sig_df = NULL) {
   # Pivot to long format for both metrics
   plot_data <- global_df %>%
     filter(group %in% group_order) %>%
@@ -494,24 +519,59 @@ plot_global_connectivity_bar <- function(global_df, group_colors, group_labels,
   color_vals <- group_colors[group_order]
   names(color_vals) <- group_labels[group_order]
 
-  p <- ggplot(summary_data, aes(x = band, y = mean_val, fill = group_label)) +
-    geom_col(position = position_dodge(width = 0.8), width = 0.7, alpha = 0.85) +
-    geom_errorbar(
-      aes(ymin = mean_val - sem_val, ymax = mean_val + sem_val),
-      position = position_dodge(width = 0.8), width = 0.3
-    ) +
-    geom_point(
-      data = plot_data,
-      aes(x = band, y = value, fill = group_label),
-      position = position_jitterdodge(dodge.width = 0.8, jitter.width = 0.1),
-      size = 1, alpha = 0.4, shape = 21, color = "grey30", show.legend = FALSE
-    ) +
+  p <- ggplot(plot_data, aes(x = band, y = value, fill = group_label)) +
+    geom_boxplot(width = 0.6, alpha = 0.7, position = position_dodge(0.8),
+                 outlier.shape = NA) +
+    geom_jitter(aes(color = group_label),
+                position = position_jitterdodge(dodge.width = 0.8, jitter.width = 0.1),
+                size = 1.5, alpha = 0.5, shape = 21, show.legend = FALSE) +
     scale_fill_manual(values = color_vals, name = NULL) +
+    scale_color_manual(values = color_vals, name = NULL) +
     facet_wrap(~ metric, scales = "free_y") +
     labs(x = "Frequency Band", y = "Global Connectivity (mean of all edges)",
          title = "Global Functional Connectivity by Band and Group") +
     theme_pub() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+  # Add asterisk annotations for significant band-level comparisons
+  if (!is.null(sig_df) && nrow(sig_df) > 0) {
+    sig_hits <- sig_df %>% filter(significant == TRUE)
+
+    if (nrow(sig_hits) > 0) {
+      # Map metric names to facet labels
+      sig_hits <- sig_hits %>%
+        mutate(
+          metric_facet = case_when(
+            metric == "coherence" ~ "Coherence",
+            metric == "imag_coherence" ~ "Imag. Coherence",
+            TRUE ~ metric
+          )
+        )
+
+      # Compute y_max per band x metric for positioning
+      y_maxes <- plot_data %>%
+        group_by(band, metric) %>%
+        summarise(y_max = max(value, na.rm = TRUE), .groups = "drop")
+
+      annot_data <- sig_hits %>%
+        inner_join(y_maxes, by = c("band", "metric_facet" = "metric")) %>%
+        mutate(
+          y_pos = y_max * 1.05,
+          metric = metric_facet,
+          sig_label_star = sig_stars(q_value)
+        ) %>%
+        filter(sig_label_star != "")
+
+      if (nrow(annot_data) > 0) {
+        p <- p + geom_text(
+          data = annot_data,
+          aes(x = band, y = y_pos, label = sig_label_star),
+          inherit.aes = FALSE,
+          fontface = "bold", size = 5, color = "black"
+        )
+      }
+    }
+  }
 
   n_bands <- length(unique(summary_data$band))
   ggsave(file.path(output_dir, "roi_connectivity_global_bar.png"), p,
@@ -797,11 +857,14 @@ parser$add_argument("--fig-dir", default = NULL,
                     help = "Directory for figures (default: output-dir/figures)")
 parser$add_argument("--tbl-dir", default = NULL,
                     help = "Directory for tables (default: output-dir/tables)")
+parser$add_argument("--figures-only", action = "store_true", default = FALSE,
+                    help = "Skip statistics; regenerate figures from existing data/tables")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
 config_path <- args$config
 output_dir <- args$output_dir
+figures_only <- args$figures_only
 
 # Create output subdirs
 fig_dir <- if (!is.null(args$fig_dir)) args$fig_dir else file.path(output_dir, "figures")
@@ -832,101 +895,137 @@ message("\n=== Global Connectivity Analysis ===")
 global_df <- compute_global_connectivity(edges)
 message("  Global connectivity computed: ", nrow(global_df), " subject x band rows")
 
-global_ttest_df <- run_global_ttests(global_df, config$contrasts, config$bands)
-if (nrow(global_ttest_df) > 0) {
-  message("\n  === Global T-Test Results ===")
-  for (i in seq_len(nrow(global_ttest_df))) {
-    row <- global_ttest_df[i, ]
-    sig_str <- if (isTRUE(row$significant)) " ***" else ""
-    message(sprintf("  %s | %s | %s: t=%.2f, q=%.4f%s",
-                    row$contrast, row$metric, row$band,
-                    ifelse(is.na(row$t_stat), 0, row$t_stat),
-                    ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
-  }
-}
-
-# ===========================================================================
-# 2. Region-pair analysis (if roi_categories defined)
-# ===========================================================================
-omnibus_region_pair_df <- data.frame()
-posthoc_region_pair_df <- data.frame()
-
-if (length(config$roi_categories) > 0 && has_lme4) {
-  message("\n=== Region-Pair Connectivity Analysis ===")
-
-  region_pair_df <- aggregate_edges_to_region_pairs(edges, config$roi_categories)
-  n_region_pairs <- length(unique(region_pair_df$region_pair))
-  message("  Aggregated to ", n_region_pairs, " region pairs")
-
-  all_omnibus <- list()
-  all_posthoc <- list()
-
-  region_metrics <- c("coherence", "imag_coherence")
-  if ("pli" %in% names(region_pair_df) && !all(is.na(region_pair_df$pli))) {
-    region_metrics <- c(region_metrics, "pli")
-  }
-  if ("dwpli" %in% names(region_pair_df) && !all(is.na(region_pair_df$dwpli))) {
-    region_metrics <- c(region_metrics, "dwpli")
-  }
-  if ("aec" %in% names(region_pair_df) && !all(is.na(region_pair_df$aec))) {
-    region_metrics <- c(region_metrics, "aec")
+if (!figures_only) {
+  global_ttest_df <- run_global_ttests(global_df, config$contrasts, config$bands)
+  if (nrow(global_ttest_df) > 0) {
+    message("\n  === Global T-Test Results ===")
+    for (i in seq_len(nrow(global_ttest_df))) {
+      row <- global_ttest_df[i, ]
+      sig_str <- if (isTRUE(row$significant)) " ***" else ""
+      message(sprintf("  %s | %s | %s: t=%.2f, q=%.4f%s",
+                      row$contrast, row$metric, row$band,
+                      ifelse(is.na(row$t_stat), 0, row$t_stat),
+                      ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
+    }
   }
 
-  for (metric in region_metrics) {
-    message("\n  --- Metric: ", metric, " ---")
+  # ===========================================================================
+  # 2. Region-pair analysis (if roi_categories defined)
+  # ===========================================================================
+  omnibus_region_pair_df <- data.frame()
+  posthoc_region_pair_df <- data.frame()
 
-    omnibus <- run_omnibus_lmm_region_pair(region_pair_df, config$contrasts,
-                                            config$bands, metric = metric)
-    all_omnibus[[metric]] <- omnibus
+  if (length(config$roi_categories) > 0 && has_lme4) {
+    message("\n=== Region-Pair Connectivity Analysis ===")
 
-    if (nrow(omnibus) > 0) {
-      for (i in seq_len(nrow(omnibus))) {
-        row <- omnibus[i, ]
-        grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
-        int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
-        message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
-                        row$contrast, row$band,
-                        row$group_F, row$group_q, grp_sig,
-                        row$interaction_F, row$interaction_q, int_sig))
+    region_pair_df <- aggregate_edges_to_region_pairs(edges, config$roi_categories)
+    n_region_pairs <- length(unique(region_pair_df$region_pair))
+    message("  Aggregated to ", n_region_pairs, " region pairs")
+
+    all_omnibus <- list()
+    all_posthoc <- list()
+
+    region_metrics <- c("coherence", "imag_coherence")
+    if ("pli" %in% names(region_pair_df) && !all(is.na(region_pair_df$pli))) {
+      region_metrics <- c(region_metrics, "pli")
+    }
+    if ("dwpli" %in% names(region_pair_df) && !all(is.na(region_pair_df$dwpli))) {
+      region_metrics <- c(region_metrics, "dwpli")
+    }
+    if ("aec" %in% names(region_pair_df) && !all(is.na(region_pair_df$aec))) {
+      region_metrics <- c(region_metrics, "aec")
+    }
+
+    for (metric in region_metrics) {
+      message("\n  --- Metric: ", metric, " ---")
+
+      omnibus <- run_omnibus_lmm_region_pair(region_pair_df, config$contrasts,
+                                              config$bands, metric = metric)
+      all_omnibus[[metric]] <- omnibus
+
+      if (nrow(omnibus) > 0) {
+        for (i in seq_len(nrow(omnibus))) {
+          row <- omnibus[i, ]
+          grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
+          int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
+          message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
+                          row$contrast, row$band,
+                          row$group_F, row$group_q, grp_sig,
+                          row$interaction_F, row$interaction_q, int_sig))
+        }
+      }
+
+      posthoc <- run_posthoc_emmeans_region_pair(region_pair_df, config$contrasts,
+                                                 config$bands, omnibus, metric = metric)
+      all_posthoc[[metric]] <- posthoc
+
+      if (nrow(posthoc) > 0) {
+        sig_count <- sum(posthoc$significant, na.rm = TRUE)
+        message("  ", nrow(posthoc), " region-pair contrasts, ", sig_count, " significant")
+      } else {
+        message("  No post-hoc tests (no significant omnibus effects)")
       }
     }
 
-    posthoc <- run_posthoc_emmeans_region_pair(region_pair_df, config$contrasts,
-                                               config$bands, omnibus, metric = metric)
-    all_posthoc[[metric]] <- posthoc
-
-    if (nrow(posthoc) > 0) {
-      sig_count <- sum(posthoc$significant, na.rm = TRUE)
-      message("  ", nrow(posthoc), " region-pair contrasts, ", sig_count, " significant")
-    } else {
-      message("  No post-hoc tests (no significant omnibus effects)")
-    }
+    omnibus_region_pair_df <- bind_rows(all_omnibus)
+    posthoc_region_pair_df <- bind_rows(all_posthoc)
+  } else if (length(config$roi_categories) == 0) {
+    message("\n  No roi_categories in config -- skipping region-pair analysis")
+  } else {
+    message("\n  lme4/lmerTest not available -- skipping region-pair LMM analysis")
   }
 
-  omnibus_region_pair_df <- bind_rows(all_omnibus)
-  posthoc_region_pair_df <- bind_rows(all_posthoc)
-} else if (length(config$roi_categories) == 0) {
-  message("\n  No roi_categories in config -- skipping region-pair analysis")
+  # ===========================================================================
+  # Export tables
+  # ===========================================================================
+  message("\nExporting tables...")
+
+  if (nrow(global_ttest_df) > 0) {
+    write_csv(global_ttest_df, file.path(tbl_dir, "roi_connectivity_global.csv"))
+    message("  Saved: tables/roi_connectivity_global.csv")
+  }
+  if (nrow(omnibus_region_pair_df) > 0) {
+    write_csv(omnibus_region_pair_df, file.path(tbl_dir, "roi_connectivity_omnibus_region_pair.csv"))
+    message("  Saved: tables/roi_connectivity_omnibus_region_pair.csv")
+  }
+  if (nrow(posthoc_region_pair_df) > 0) {
+    write_csv(posthoc_region_pair_df, file.path(tbl_dir, "roi_connectivity_posthoc_region_pair.csv"))
+    message("  Saved: tables/roi_connectivity_posthoc_region_pair.csv")
+  }
 } else {
-  message("\n  lme4/lmerTest not available -- skipping region-pair LMM analysis")
-}
+  # --figures-only: load existing tables from disk
+  message("\n=== Figures-only mode: loading existing tables from ", tbl_dir, " ===")
 
-# ===========================================================================
-# Export tables
-# ===========================================================================
-message("\nExporting tables...")
+  global_ttest_path <- file.path(tbl_dir, "roi_connectivity_global.csv")
+  omnibus_path <- file.path(tbl_dir, "roi_connectivity_omnibus_region_pair.csv")
+  posthoc_path <- file.path(tbl_dir, "roi_connectivity_posthoc_region_pair.csv")
 
-if (nrow(global_ttest_df) > 0) {
-  write_csv(global_ttest_df, file.path(tbl_dir, "roi_connectivity_global.csv"))
-  message("  Saved: tables/roi_connectivity_global.csv")
-}
-if (nrow(omnibus_region_pair_df) > 0) {
-  write_csv(omnibus_region_pair_df, file.path(tbl_dir, "roi_connectivity_omnibus_region_pair.csv"))
-  message("  Saved: tables/roi_connectivity_omnibus_region_pair.csv")
-}
-if (nrow(posthoc_region_pair_df) > 0) {
-  write_csv(posthoc_region_pair_df, file.path(tbl_dir, "roi_connectivity_posthoc_region_pair.csv"))
-  message("  Saved: tables/roi_connectivity_posthoc_region_pair.csv")
+  global_ttest_df <- if (file.exists(global_ttest_path)) {
+    df <- read_csv(global_ttest_path, show_col_types = FALSE)
+    message("  Loaded: roi_connectivity_global.csv (", nrow(df), " rows)")
+    df
+  } else {
+    message("  Not found: roi_connectivity_global.csv -- using empty frame")
+    data.frame()
+  }
+
+  omnibus_region_pair_df <- if (file.exists(omnibus_path)) {
+    df <- read_csv(omnibus_path, show_col_types = FALSE)
+    message("  Loaded: roi_connectivity_omnibus_region_pair.csv (", nrow(df), " rows)")
+    df
+  } else {
+    message("  Not found: roi_connectivity_omnibus_region_pair.csv -- using empty frame")
+    data.frame()
+  }
+
+  posthoc_region_pair_df <- if (file.exists(posthoc_path)) {
+    df <- read_csv(posthoc_path, show_col_types = FALSE)
+    message("  Loaded: roi_connectivity_posthoc_region_pair.csv (", nrow(df), " rows)")
+    df
+  } else {
+    message("  Not found: roi_connectivity_posthoc_region_pair.csv -- using empty frame")
+    data.frame()
+  }
 }
 
 # ===========================================================================
@@ -939,8 +1038,9 @@ for (mc in c("coherence", "imag_coherence")) {
   plot_connectivity_matrices(edges, mc, group_colors, group_labels, group_order, fig_dir)
 }
 
-# Global connectivity bar chart
-plot_global_connectivity_bar(global_df, group_colors, group_labels, group_order, fig_dir)
+# Global connectivity bar chart (with significance annotations from t-test results)
+plot_global_connectivity_bar(global_df, group_colors, group_labels, group_order, fig_dir,
+                              sig_df = if (nrow(global_ttest_df) > 0) global_ttest_df else NULL)
 
 # Region-pair forest plots (if post-hoc was performed)
 if (nrow(posthoc_region_pair_df) > 0) {
@@ -950,20 +1050,24 @@ if (nrow(posthoc_region_pair_df) > 0) {
 # ===========================================================================
 # Summary report
 # ===========================================================================
-message("\nWriting summary...")
+if (!figures_only) {
+  message("\nWriting summary...")
 
-n_subjects <- edges %>%
-  dplyr::distinct(subject, group) %>%
-  dplyr::count(group) %>%
-  { setNames(.$n, .$group) }
+  n_subjects <- edges %>%
+    dplyr::distinct(subject, group) %>%
+    dplyr::count(group) %>%
+    { setNames(.$n, .$group) }
 
-sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
+  sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
 
-write_connectivity_summary(
-  global_df, global_ttest_df,
-  omnibus_region_pair_df, posthoc_region_pair_df,
-  config, n_subjects, sfreq,
-  fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md")
-)
+  write_connectivity_summary(
+    global_df, global_ttest_df,
+    omnibus_region_pair_df, posthoc_region_pair_df,
+    config, n_subjects, sfreq,
+    fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md")
+  )
+} else {
+  message("\nSkipping summary report (--figures-only)")
+}
 
 message("\nDone. Output: ", output_dir)

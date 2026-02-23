@@ -544,6 +544,91 @@ run_omnibus_lmm_region_nested <- function(band_df, contrasts, bands, roi_categor
 #' @param power_type character — column to use as DV
 #' @param gate logical — if TRUE, only run for significant omnibus results
 #' @return data.frame (one row per contrast x band x region)
+##' Convert q-values to significance star labels
+#'
+#' @param q numeric vector of q-values (FDR-corrected p-values)
+#' @return character vector: "***" (q<0.001), "**" (q<0.01), "*" (q<0.05), "" otherwise
+sig_stars <- function(q) {
+  ifelse(q < 0.001, "***",
+  ifelse(q < 0.01, "**",
+  ifelse(q < 0.05, "*", "")))
+}
+
+
+#' Run marginal (global) pairwise group comparisons from existing LMM fit
+#'
+#' Calls emmeans(fit, pairwise ~ group) which averages over all ROI/region/spatial
+#' levels, giving the overall pairwise group contrast. Designed to be called
+#' alongside existing per-ROI posthoc — reuses the same model fit.
+#'
+#' @param data data.frame with columns: subject, group, dv, and a spatial factor (roi/region)
+#' @param contrasts list of lists, each with name, group_a, group_b
+#' @param spatial_col name of spatial grouping column (default "roi")
+#' @param dv_col name of dependent variable column (default "dv")
+#' @param dv_label character label for the DV in output (e.g., "dB", "relative", "exponent")
+#' @param band_label optional band name (for multi-band analyses)
+#' @return data.frame with one row per contrast: contrast, dv, band, estimate, SE, df, t_ratio, p_value, q_value, hedges_g, significant, sig_label
+run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
+                               dv_col = "dv", dv_label = "",
+                               band_label = NA_character_) {
+  results <- list()
+
+  for (contrast in contrasts) {
+    cname <- contrast$name
+    ga <- contrast$group_a
+    gb <- contrast$group_b
+
+    cdata <- data %>% filter(group %in% c(ga, gb))
+    if (nrow(cdata) == 0) next
+
+    cdata$group <- factor(cdata$group, levels = c(gb, ga))
+    cdata[[spatial_col]] <- factor(cdata[[spatial_col]])
+    cdata$dv <- cdata[[dv_col]]
+
+    tryCatch({
+      formula_str <- paste0("dv ~ group * ", spatial_col, " + (1 | subject)")
+      fit <- lmer(as.formula(formula_str), data = cdata)
+
+      emm <- emmeans(fit, pairwise ~ group)
+      con_df <- as.data.frame(emm$contrasts)
+
+      resid_sd <- sigma(fit)
+      hg <- con_df$estimate[1] / resid_sd
+
+      results[[length(results) + 1]] <- data.frame(
+        contrast = cname,
+        dv = dv_label,
+        band = band_label,
+        group_a = ga,
+        group_b = gb,
+        estimate = con_df$estimate[1],
+        SE = con_df$SE[1],
+        df = con_df$df[1],
+        t_ratio = con_df$t.ratio[1],
+        p_value = con_df$p.value[1],
+        hedges_g = hg,
+        stringsAsFactors = FALSE
+      )
+    }, warning = function(w) {
+      # Continue on singular fit warnings
+    }, error = function(e) {
+      message("  Global posthoc failed for ", cname, "/", dv_label,
+              if (!is.na(band_label)) paste0("/", band_label) else "",
+              ": ", conditionMessage(e))
+    })
+  }
+
+  global_df <- bind_rows(results)
+  if (nrow(global_df) > 0) {
+    # FDR correction across all tests
+    global_df$q_value <- p.adjust(global_df$p_value, method = "BH")
+    global_df$significant <- global_df$q_value < 0.05
+    global_df$sig_label <- sig_stars(global_df$q_value)
+  }
+  return(global_df)
+}
+
+
 run_posthoc_emmeans_region_nested <- function(band_df, contrasts, bands, roi_categories,
                                                omnibus_df, power_type = "relative",
                                                gate = TRUE) {

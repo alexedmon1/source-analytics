@@ -118,8 +118,10 @@ class TransferEntropyAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Skip for now — exploratory analysis, no visualization yet."""
-        pass
+        """Regenerate R figures from existing data/tables."""
+        self._call_r_figures_only(
+            "transfer_entropy_analysis.R", "transfer_entropy_edges.csv",
+        )
 
     def summary(self) -> None:
         """Call Rscript for statistics and summary report."""

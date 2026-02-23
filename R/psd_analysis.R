@@ -42,11 +42,14 @@ parser$add_argument("--fig-dir", default = NULL,
                     help = "Directory for figures (default: output-dir/figures)")
 parser$add_argument("--tbl-dir", default = NULL,
                     help = "Directory for tables (default: output-dir/tables)")
+parser$add_argument("--figures-only", action = "store_true", default = FALSE,
+                    help = "Skip statistics; regenerate figures from existing data/tables")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
 config_path <- args$config
 output_dir <- args$output_dir
+figures_only <- args$figures_only
 
 # Create output subdirs
 fig_dir <- if (!is.null(args$fig_dir)) args$fig_dir else file.path(output_dir, "figures")
@@ -84,61 +87,29 @@ message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 message("Bands: ", paste(names(config$bands), collapse = ", "))
 
-# --- Run LMMs for each power type ---
-power_types <- c("relative", "dB")
+if (!figures_only) {
+  # --- Run LMMs for each power type ---
+  power_types <- c("relative", "dB")
 
-all_omnibus <- list()
-all_posthoc <- list()
-all_omnibus_region <- list()
-all_posthoc_region <- list()
-all_omnibus_region_nested <- list()
-all_posthoc_region_nested <- list()
+  all_omnibus <- list()
+  all_posthoc <- list()
+  all_omnibus_region <- list()
+  all_posthoc_region <- list()
+  all_omnibus_region_nested <- list()
+  all_posthoc_region_nested <- list()
 
-for (ptype in power_types) {
-  message("\n=== Power type: ", ptype, " ===")
+  for (ptype in power_types) {
+    message("\n=== Power type: ", ptype, " ===")
 
-  # --- ROI-level omnibus ---
-  message("\nRunning ROI-level omnibus LMM (group * roi)...")
-  omnibus <- run_omnibus_lmm(band_df, config$contrasts, config$bands, power_type = ptype)
-  all_omnibus[[ptype]] <- omnibus
+    # --- ROI-level omnibus ---
+    message("\nRunning ROI-level omnibus LMM (group * roi)...")
+    omnibus <- run_omnibus_lmm(band_df, config$contrasts, config$bands, power_type = ptype)
+    all_omnibus[[ptype]] <- omnibus
 
-  if (nrow(omnibus) > 0) {
-    message("\n  === ROI-Level Omnibus (", ptype, ") ===")
-    for (i in seq_len(nrow(omnibus))) {
-      row <- omnibus[i, ]
-      grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
-      int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
-      message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
-                      row$contrast, row$band,
-                      row$group_F, row$group_q, grp_sig,
-                      row$interaction_F, row$interaction_q, int_sig))
-    }
-  }
-
-  # --- ROI-level post-hoc ---
-  message("Running ROI-level post-hoc emmeans...")
-  posthoc <- run_posthoc_emmeans(band_df, config$contrasts, config$bands, omnibus,
-                                  power_type = ptype)
-  all_posthoc[[ptype]] <- posthoc
-
-  if (nrow(posthoc) > 0) {
-    sig_count <- sum(posthoc$significant, na.rm = TRUE)
-    message("  ", nrow(posthoc), " ROI contrasts, ", sig_count, " significant")
-  } else {
-    message("  No post-hoc tests (no significant omnibus effects)")
-  }
-
-  # --- Region-level (if roi_categories defined) ---
-  if (length(config$roi_categories) > 0) {
-    message("Running region-level omnibus LMM (group * region)...")
-    omnibus_reg <- run_omnibus_lmm_region(band_df, config$contrasts, config$bands,
-                                           config$roi_categories, power_type = ptype)
-    all_omnibus_region[[ptype]] <- omnibus_reg
-
-    if (nrow(omnibus_reg) > 0) {
-      message("\n  === Region-Level Omnibus (", ptype, ") ===")
-      for (i in seq_len(nrow(omnibus_reg))) {
-        row <- omnibus_reg[i, ]
+    if (nrow(omnibus) > 0) {
+      message("\n  === ROI-Level Omnibus (", ptype, ") ===")
+      for (i in seq_len(nrow(omnibus))) {
+        row <- omnibus[i, ]
         grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
         int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
         message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
@@ -148,95 +119,177 @@ for (ptype in power_types) {
       }
     }
 
-    message("Running region-level post-hoc emmeans...")
-    posthoc_reg <- run_posthoc_emmeans_region(band_df, config$contrasts, config$bands,
-                                               config$roi_categories, omnibus_reg,
-                                               power_type = ptype)
-    all_posthoc_region[[ptype]] <- posthoc_reg
+    # --- ROI-level post-hoc ---
+    message("Running ROI-level post-hoc emmeans...")
+    posthoc <- run_posthoc_emmeans(band_df, config$contrasts, config$bands, omnibus,
+                                    power_type = ptype)
+    all_posthoc[[ptype]] <- posthoc
 
-    if (nrow(posthoc_reg) > 0) {
-      sig_count <- sum(posthoc_reg$significant, na.rm = TRUE)
-      message("  ", nrow(posthoc_reg), " region contrasts, ", sig_count, " significant")
+    if (nrow(posthoc) > 0) {
+      sig_count <- sum(posthoc$significant, na.rm = TRUE)
+      message("  ", nrow(posthoc), " ROI contrasts, ", sig_count, " significant")
     } else {
-      message("  No region post-hoc tests (no significant omnibus effects)")
+      message("  No post-hoc tests (no significant omnibus effects)")
     }
 
-    # --- Region-level nested (individual ROIs as replicates) ---
-    message("Running region-level nested omnibus LMM (group * region, ROIs as replicates)...")
-    omnibus_reg_nested <- run_omnibus_lmm_region_nested(band_df, config$contrasts, config$bands,
-                                                         config$roi_categories, power_type = ptype)
-    all_omnibus_region_nested[[ptype]] <- omnibus_reg_nested
+    # --- Region-level (if roi_categories defined) ---
+    if (length(config$roi_categories) > 0) {
+      message("Running region-level omnibus LMM (group * region)...")
+      omnibus_reg <- run_omnibus_lmm_region(band_df, config$contrasts, config$bands,
+                                             config$roi_categories, power_type = ptype)
+      all_omnibus_region[[ptype]] <- omnibus_reg
 
-    if (nrow(omnibus_reg_nested) > 0) {
-      message("\n  === Region-Level Nested Omnibus (", ptype, ") ===")
-      for (i in seq_len(nrow(omnibus_reg_nested))) {
-        row <- omnibus_reg_nested[i, ]
-        grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
-        int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
-        message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
-                        row$contrast, row$band,
-                        row$group_F, row$group_q, grp_sig,
-                        row$interaction_F, row$interaction_q, int_sig))
+      if (nrow(omnibus_reg) > 0) {
+        message("\n  === Region-Level Omnibus (", ptype, ") ===")
+        for (i in seq_len(nrow(omnibus_reg))) {
+          row <- omnibus_reg[i, ]
+          grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
+          int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
+          message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
+                          row$contrast, row$band,
+                          row$group_F, row$group_q, grp_sig,
+                          row$interaction_F, row$interaction_q, int_sig))
+        }
+      }
+
+      message("Running region-level post-hoc emmeans...")
+      posthoc_reg <- run_posthoc_emmeans_region(band_df, config$contrasts, config$bands,
+                                                 config$roi_categories, omnibus_reg,
+                                                 power_type = ptype)
+      all_posthoc_region[[ptype]] <- posthoc_reg
+
+      if (nrow(posthoc_reg) > 0) {
+        sig_count <- sum(posthoc_reg$significant, na.rm = TRUE)
+        message("  ", nrow(posthoc_reg), " region contrasts, ", sig_count, " significant")
+      } else {
+        message("  No region post-hoc tests (no significant omnibus effects)")
+      }
+
+      # --- Region-level nested (individual ROIs as replicates) ---
+      message("Running region-level nested omnibus LMM (group * region, ROIs as replicates)...")
+      omnibus_reg_nested <- run_omnibus_lmm_region_nested(band_df, config$contrasts, config$bands,
+                                                           config$roi_categories, power_type = ptype)
+      all_omnibus_region_nested[[ptype]] <- omnibus_reg_nested
+
+      if (nrow(omnibus_reg_nested) > 0) {
+        message("\n  === Region-Level Nested Omnibus (", ptype, ") ===")
+        for (i in seq_len(nrow(omnibus_reg_nested))) {
+          row <- omnibus_reg_nested[i, ]
+          grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
+          int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
+          message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
+                          row$contrast, row$band,
+                          row$group_F, row$group_q, grp_sig,
+                          row$interaction_F, row$interaction_q, int_sig))
+        }
+      }
+
+      message("Running region-level nested post-hoc emmeans...")
+      posthoc_reg_nested <- run_posthoc_emmeans_region_nested(band_df, config$contrasts, config$bands,
+                                                               config$roi_categories, omnibus_reg_nested,
+                                                               power_type = ptype)
+      all_posthoc_region_nested[[ptype]] <- posthoc_reg_nested
+
+      if (nrow(posthoc_reg_nested) > 0) {
+        sig_count <- sum(posthoc_reg_nested$significant, na.rm = TRUE)
+        message("  ", nrow(posthoc_reg_nested), " nested region contrasts, ", sig_count, " significant")
+      } else {
+        message("  No nested region post-hoc tests (no significant omnibus effects)")
       }
     }
+  }
 
-    message("Running region-level nested post-hoc emmeans...")
-    posthoc_reg_nested <- run_posthoc_emmeans_region_nested(band_df, config$contrasts, config$bands,
-                                                             config$roi_categories, omnibus_reg_nested,
-                                                             power_type = ptype)
-    all_posthoc_region_nested[[ptype]] <- posthoc_reg_nested
+  # --- Combine results across power types ---
+  omnibus_df <- bind_rows(all_omnibus)
+  posthoc_df <- bind_rows(all_posthoc)
+  omnibus_region_df <- bind_rows(all_omnibus_region)
+  posthoc_region_df <- bind_rows(all_posthoc_region)
+  omnibus_region_nested_df <- bind_rows(all_omnibus_region_nested)
+  posthoc_region_nested_df <- bind_rows(all_posthoc_region_nested)
 
-    if (nrow(posthoc_reg_nested) > 0) {
-      sig_count <- sum(posthoc_reg_nested$significant, na.rm = TRUE)
-      message("  ", nrow(posthoc_reg_nested), " nested region contrasts, ", sig_count, " significant")
-    } else {
-      message("  No nested region post-hoc tests (no significant omnibus effects)")
+  # --- Export tables ---
+  message("\nExporting tables...")
+  if (nrow(omnibus_df) > 0) {
+    write_csv(omnibus_df, file.path(tbl_dir, "psd_omnibus.csv"))
+    message("  Saved: tables/psd_omnibus.csv")
+  }
+  if (nrow(posthoc_df) > 0) {
+    write_csv(posthoc_df, file.path(tbl_dir, "psd_posthoc_roi.csv"))
+    message("  Saved: tables/psd_posthoc_roi.csv")
+  }
+  if (nrow(omnibus_region_df) > 0) {
+    write_csv(omnibus_region_df, file.path(tbl_dir, "psd_omnibus_region.csv"))
+    message("  Saved: tables/psd_omnibus_region.csv")
+  }
+  if (nrow(posthoc_region_df) > 0) {
+    write_csv(posthoc_region_df, file.path(tbl_dir, "psd_posthoc_region.csv"))
+    message("  Saved: tables/psd_posthoc_region.csv")
+  }
+  if (nrow(omnibus_region_nested_df) > 0) {
+    write_csv(omnibus_region_nested_df, file.path(tbl_dir, "psd_omnibus_region_nested.csv"))
+    message("  Saved: tables/psd_omnibus_region_nested.csv")
+  }
+  if (nrow(posthoc_region_nested_df) > 0) {
+    write_csv(posthoc_region_nested_df, file.path(tbl_dir, "psd_posthoc_region_nested.csv"))
+    message("  Saved: tables/psd_posthoc_region_nested.csv")
+  }
+
+  # --- Global posthoc (marginal group comparisons averaged over ROIs) ---
+  message("\nComputing global posthoc (marginal group comparisons)...")
+  global_posthoc_list <- list()
+  for (ptype in power_types) {
+    for (band_name in names(config$bands)) {
+      gp_data <- band_df %>%
+        filter(band == band_name,
+               group %in% unlist(lapply(config$contrasts, function(c) c(c$group_a, c$group_b)))) %>%
+        mutate(dv = .data[[ptype]])
+
+      if (nrow(gp_data) == 0) next
+
+      gp <- run_posthoc_global(gp_data, config$contrasts, spatial_col = "roi",
+                                dv_col = "dv", dv_label = ptype,
+                                band_label = band_name)
+      if (nrow(gp) > 0) global_posthoc_list[[paste(ptype, band_name)]] <- gp
     }
   }
-}
+  global_posthoc_df <- bind_rows(global_posthoc_list)
 
-# --- Combine results across power types ---
-omnibus_df <- bind_rows(all_omnibus)
-posthoc_df <- bind_rows(all_posthoc)
-omnibus_region_df <- bind_rows(all_omnibus_region)
-posthoc_region_df <- bind_rows(all_posthoc_region)
-omnibus_region_nested_df <- bind_rows(all_omnibus_region_nested)
-posthoc_region_nested_df <- bind_rows(all_posthoc_region_nested)
+  if (nrow(global_posthoc_df) > 0) {
+    # Re-apply FDR across all band x contrast tests within each power_type
+    global_posthoc_df <- global_posthoc_df %>%
+      group_by(dv) %>%
+      mutate(
+        q_value = p.adjust(p_value, method = "BH"),
+        significant = q_value < 0.05,
+        sig_label = sig_stars(q_value)
+      ) %>%
+      ungroup()
 
-# --- Export tables ---
-message("\nExporting tables...")
-if (nrow(omnibus_df) > 0) {
-  write_csv(omnibus_df, file.path(tbl_dir, "psd_omnibus.csv"))
-  message("  Saved: tables/psd_omnibus.csv")
-}
-if (nrow(posthoc_df) > 0) {
-  write_csv(posthoc_df, file.path(tbl_dir, "psd_posthoc_roi.csv"))
-  message("  Saved: tables/psd_posthoc_roi.csv")
-}
-if (nrow(omnibus_region_df) > 0) {
-  write_csv(omnibus_region_df, file.path(tbl_dir, "psd_omnibus_region.csv"))
-  message("  Saved: tables/psd_omnibus_region.csv")
-}
-if (nrow(posthoc_region_df) > 0) {
-  write_csv(posthoc_region_df, file.path(tbl_dir, "psd_posthoc_region.csv"))
-  message("  Saved: tables/psd_posthoc_region.csv")
-}
-if (nrow(omnibus_region_nested_df) > 0) {
-  write_csv(omnibus_region_nested_df, file.path(tbl_dir, "psd_omnibus_region_nested.csv"))
-  message("  Saved: tables/psd_omnibus_region_nested.csv")
-}
-if (nrow(posthoc_region_nested_df) > 0) {
-  write_csv(posthoc_region_nested_df, file.path(tbl_dir, "psd_posthoc_region_nested.csv"))
-  message("  Saved: tables/psd_posthoc_region_nested.csv")
+    write_csv(global_posthoc_df, file.path(tbl_dir, "psd_posthoc_global.csv"))
+    message("  Saved: tables/psd_posthoc_global.csv")
+    sig_global <- global_posthoc_df %>% filter(significant == TRUE)
+    message("  ", nrow(global_posthoc_df), " global contrasts, ", nrow(sig_global), " significant")
+  }
+} else {
+  message("Figures-only mode: loading existing tables...")
+  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "psd_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "psd_posthoc_roi.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_region_df <- tryCatch(read_csv(file.path(tbl_dir, "psd_omnibus_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_region_df <- tryCatch(read_csv(file.path(tbl_dir, "psd_posthoc_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  global_posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "psd_posthoc_global.csv"), show_col_types = FALSE), error = function(e) data.frame())
 }
 
 # --- Figures ---
 message("\nGenerating figures...")
 
-# Band power boxplots
+# Band power boxplots (with significance brackets)
 for (ptype in c("relative", "dB")) {
+  ptype_sig <- if (nrow(global_posthoc_df) > 0) {
+    global_posthoc_df %>% filter(dv == ptype)
+  } else NULL
+
   plot_band_power_box(band_df, group_colors, group_labels, group_order,
-                      fig_dir, power_type = ptype)
+                      fig_dir, power_type = ptype, sig_df = ptype_sig)
 }
 
 # Regional heatmaps
@@ -259,21 +312,23 @@ if (nrow(posthoc_region_df) > 0) {
   plot_region_significance_heatmap(posthoc_region_df, fig_dir)
 }
 
-# --- Summary report ---
-message("\nWriting summary...")
+if (!figures_only) {
+  # --- Summary report ---
+  message("\nWriting summary...")
 
-n_subjects <- band_df %>%
-  dplyr::distinct(subject, group) %>%
-  dplyr::count(group) %>%
-  { setNames(.$n, .$group) }
+  n_subjects <- band_df %>%
+    dplyr::distinct(subject, group) %>%
+    dplyr::count(group) %>%
+    { setNames(.$n, .$group) }
 
-sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
+  sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
 
-write_summary(omnibus_df, posthoc_df, config, n_subjects, sfreq,
-              fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md"),
-              omnibus_region_df = omnibus_region_df,
-              posthoc_region_df = posthoc_region_df,
-              omnibus_region_nested_df = omnibus_region_nested_df,
-              posthoc_region_nested_df = posthoc_region_nested_df)
+  write_summary(omnibus_df, posthoc_df, config, n_subjects, sfreq,
+                fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md"),
+                omnibus_region_df = omnibus_region_df,
+                posthoc_region_df = posthoc_region_df,
+                omnibus_region_nested_df = omnibus_region_nested_df,
+                posthoc_region_nested_df = posthoc_region_nested_df)
+}
 
 message("\nDone. Output: ", output_dir)

@@ -10,6 +10,7 @@ Requires: matplotlib, numpy, pandas.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -40,7 +41,8 @@ def plot_radar(
     group_colors: dict[str, str] | None = None,
     group_labels: dict[str, str] | None = None,
     title: str = "Regional Profile vs Vehicle",
-    figsize: tuple[float, float] = (20, 7),
+    sig_data: pd.DataFrame | None = None,
+    figsize: tuple[float, float] | None = None,
     dpi: int = 200,
 ) -> Path:
     """Render a radar chart of regional profiles by treatment group.
@@ -67,8 +69,12 @@ def plot_radar(
         Group name → display label.
     title : str
         Figure suptitle.
-    figsize : tuple
-        Figure size in inches.
+    sig_data : DataFrame, optional
+        Significance markers.  Columns: ``band``, ``region``, ``contrast``,
+        ``sig_label`` (e.g. ``"*"``, ``"**"``).  Stars are drawn at the
+        corresponding spoke just outside the max data value.
+    figsize : tuple, optional
+        Figure size in inches.  Auto-computed if *None* (multi-row for >3 bands).
     dpi : int
         Output resolution.
 
@@ -117,16 +123,29 @@ def plot_radar(
     angles = np.linspace(0, 2 * np.pi, n_regions, endpoint=False).tolist()
     angles += angles[:1]  # close the polygon
 
+    # Multi-row layout when >3 bands
+    ncol = min(n_bands, 4)
+    nrow = math.ceil(n_bands / ncol)
+    if figsize is None:
+        figsize = (5 * ncol, 5 * nrow)
+
     fig, axes = plt.subplots(
-        1, n_bands, figsize=figsize,
+        nrow, ncol, figsize=figsize,
         subplot_kw=dict(polar=True), facecolor="white",
     )
+    # Flatten to 1-D list regardless of shape
     if n_bands == 1:
         axes = [axes]
+    else:
+        axes = np.array(axes).flatten().tolist()
 
-    fig.suptitle(title, fontsize=14, fontweight="bold", y=1.0)
+    # Hide unused axes
+    for i in range(n_bands, len(axes)):
+        axes[i].set_visible(False)
 
-    for ax, band in zip(axes, bands):
+    fig.suptitle(title, fontsize=18, fontweight="bold", y=1.0)
+
+    for ax, band in zip(axes[:n_bands], bands):
         bstats = stats[stats["band"] == band]
 
         # Zero reference (Vehicle baseline)
@@ -154,7 +173,7 @@ def plot_radar(
             label = group_labels.get(group, group)
 
             ax.plot(
-                angles, values, color=color, linewidth=2.5,
+                angles, values, color=color, linewidth=3.0,
                 label=label, zorder=3,
             )
             ax.fill_between(
@@ -162,18 +181,46 @@ def plot_radar(
                 color=color, alpha=0.12, zorder=2,
             )
 
+        # Significance markers for this band
+        if sig_data is not None and not sig_data.empty:
+            band_sig = sig_data[sig_data["band"] == band]
+            if not band_sig.empty:
+                # Compute max abs data value per region for positioning
+                max_vals = {}
+                for r_idx, r in enumerate(regions):
+                    r_vals = []
+                    for group in treatment_groups:
+                        gs = bstats[(bstats["group"] == group)].set_index("region")
+                        if r in gs.index:
+                            r_vals.append(abs(gs.loc[r, "mean"]) + gs.loc[r, "sem"])
+                    max_vals[r] = max(r_vals) if r_vals else 0.0
+
+                for _, row in band_sig.iterrows():
+                    region = row["region"]
+                    sig_label = row["sig_label"]
+                    if region in regions and sig_label:
+                        r_idx = regions.index(region)
+                        angle = angles[r_idx]
+                        r_pos = max_vals.get(region, 0.0) * 1.15
+                        ax.text(
+                            angle, r_pos, sig_label,
+                            fontsize=13, fontweight="bold",
+                            ha="center", va="center",
+                            color="black", zorder=5,
+                        )
+
         ax.set_xticks(angles[:-1])
         ax.set_xticklabels(
-            [r.replace("_", "\n") for r in regions], fontsize=7,
+            [r.replace("_", "\n") for r in regions], fontsize=11,
         )
         ax.set_title(
-            band.replace("_", " ").title(), fontsize=12, pad=20,
+            band.replace("_", " ").title(), fontsize=15, pad=20,
         )
         ax.grid(True, alpha=0.25)
 
     axes[0].legend(
         loc="upper left", bbox_to_anchor=(-0.3, 1.15),
-        fontsize=10, frameon=False,
+        fontsize=13, frameon=False,
     )
 
     plt.tight_layout()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -90,6 +91,82 @@ class BaseAnalysis(ABC):
     def summary(self) -> None:
         """Write markdown summary report."""
         ...
+
+    def _call_r_figures_only(self, r_script_name: str, data_csv: str) -> bool:
+        """Call an R analysis script with --figures-only to regenerate figures.
+
+        Parameters
+        ----------
+        r_script_name : str
+            Name of the R script (e.g. "psd_analysis.R").
+        data_csv : str
+            Name of the required data CSV (e.g. "band_power.csv").
+            Used to verify that data exists before calling R.
+
+        Returns
+        -------
+        bool
+            True if the R script ran successfully.
+        """
+        data_dir = self.output_dir / "data"
+        if not (data_dir / data_csv).exists():
+            logger.warning(
+                "%s not found — skipping R figure regeneration", data_csv,
+            )
+            return False
+
+        try:
+            r_dir = find_r_script_dir()
+        except FileNotFoundError as e:
+            logger.error(str(e))
+            return False
+
+        r_script = r_dir / r_script_name
+        if not r_script.exists():
+            logger.error("R script not found: %s", r_script)
+            return False
+
+        # Ensure study config YAML exists in data dir
+        config_path = data_dir / "study_config.yaml"
+        if not config_path.exists():
+            import yaml
+            config_data = dict(self.config.raw)
+            if hasattr(self, "_sfreq") and self._sfreq is not None:
+                config_data["sfreq"] = self._sfreq
+            with open(config_path, "w") as f:
+                yaml.dump(config_data, f, default_flow_style=False)
+
+        cmd = [
+            "Rscript", str(r_script),
+            "--data-dir", str(data_dir),
+            "--config", str(config_path),
+            "--output-dir", str(self.output_dir),
+            "--fig-dir", str(self.fig_dir),
+            "--tbl-dir", str(self.tbl_dir),
+            "--figures-only",
+        ]
+
+        logger.info("Calling R (figures-only): %s", " ".join(cmd))
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=300,
+            )
+            if result.stderr:
+                for line in result.stderr.strip().split("\n"):
+                    if line.strip():
+                        logger.info("[R] %s", line)
+            if result.returncode != 0:
+                logger.error(
+                    "R figures-only failed (exit %d)", result.returncode,
+                )
+                return False
+            return True
+        except FileNotFoundError:
+            logger.error("Rscript not found — install R for figure generation")
+            return False
+        except subprocess.TimeoutExpired:
+            logger.error("R figures-only timed out after 300s")
+            return False
 
     def run(self, subjects: list[SubjectInfo], steps: set[str] | None = None) -> None:
         """Execute the analysis lifecycle.

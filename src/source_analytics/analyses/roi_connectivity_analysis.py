@@ -253,6 +253,11 @@ class ConnectivityAnalysis(BaseAnalysis):
 
         logger.info("Generated %d connectivity figures", n_figs)
 
+        # Also regenerate R-generated figures (bar/boxplots, heatmaps)
+        self._call_r_figures_only(
+            "roi_connectivity_analysis.R", "roi_connectivity_edges.csv",
+        )
+
     def summary(self) -> None:
         """Call Rscript for statistics, figures, and summary report."""
         data_dir = self.output_dir / "data"

@@ -119,8 +119,8 @@ class AperiodicAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Delegated to R."""
-        pass
+        """Regenerate R figures from existing data/tables."""
+        self._call_r_figures_only("aperiodic_analysis.R", "aperiodic_params.csv")
 
     def summary(self) -> None:
         """Call Rscript for statistics, figures, and summary."""

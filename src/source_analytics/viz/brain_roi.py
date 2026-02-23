@@ -104,7 +104,7 @@ def _make_slice_rgb(
     return np.clip(rgb, 0, 1)
 
 
-def _add_direction_labels(ax, left, right, bottom, top, fontsize=7):
+def _add_direction_labels(ax, left, right, bottom, top, fontsize=9):
     """Add L/R/A/P/D/V direction indicators at panel edges."""
     kw = dict(fontsize=fontsize, color="0.4", fontweight="bold",
               ha="center", va="center", transform=ax.transAxes)
@@ -224,7 +224,7 @@ def plot_brain_roi_mosaic(
         hspace=0.08, wspace=0.08,
         left=0.02, right=0.98, top=0.94, bottom=0.05,
     )
-    fig.suptitle(title, fontsize=14, fontweight="bold")
+    fig.suptitle(title, fontsize=17, fontweight="bold")
 
     slice_kw = dict(label_to_value=label_to_value, cmap=cmap, norm=norm,
                     vmin=vmin, vmax=vmax, roi_opacity=roi_opacity)
@@ -239,7 +239,7 @@ def plot_brain_roi_mosaic(
         ax.imshow(rgb, extent=ext, aspect="equal", interpolation="nearest",
                   origin="lower")
         ax.set_title(f"Coronal  Y = {_vox_to_mm(1, yi):.1f} mm",
-                     fontsize=9, pad=3)
+                     fontsize=12, pad=3)
         ax.set_xlim(-6, 6)
         ax.set_ylim(-4.5, 4.5)
         ax.axis("off")
@@ -255,7 +255,7 @@ def plot_brain_roi_mosaic(
         ax.imshow(rgb, extent=ext, aspect="equal", interpolation="nearest",
                   origin="lower")
         ax.set_title(f"Axial  Z = {_vox_to_mm(2, zi):.1f} mm",
-                     fontsize=9, pad=3)
+                     fontsize=12, pad=3)
         ax.set_xlim(-6, 6)
         ax.set_ylim(-9, 9)
         ax.axis("off")
@@ -271,7 +271,7 @@ def plot_brain_roi_mosaic(
         ax.imshow(rgb, extent=ext, aspect="equal", interpolation="nearest",
                   origin="lower")
         ax.set_title(f"Sagittal  X = {_vox_to_mm(0, xi):.1f} mm",
-                     fontsize=9, pad=3)
+                     fontsize=12, pad=3)
         ax.set_xlim(-9, 9)
         ax.set_ylim(-4.5, 4.5)
         ax.axis("off")
@@ -282,8 +282,8 @@ def plot_brain_roi_mosaic(
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar = fig.colorbar(sm, cax=cbar_ax, orientation="horizontal")
-    cbar.set_label(colorbar_label, fontsize=10)
-    cbar.ax.tick_params(labelsize=8)
+    cbar.set_label(colorbar_label, fontsize=12)
+    cbar.ax.tick_params(labelsize=10)
 
     fig.savefig(output_path, dpi=dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)

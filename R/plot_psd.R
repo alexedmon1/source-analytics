@@ -11,9 +11,10 @@ library(tidyr)
 library(scales)
 library(patchwork)
 library(forcats)
+library(ggsignif)
 
 # Publication theme
-theme_pub <- function(base_size = 11) {
+theme_pub <- function(base_size = 14) {
   theme_minimal(base_size = base_size) +
     theme(
       panel.grid.minor = element_blank(),
@@ -92,7 +93,7 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
 #' @param power_type one of "relative", "absolute", "dB"
 plot_band_power_box <- function(band_df, group_colors, group_labels,
                                  group_order, output_dir,
-                                 power_type = "relative") {
+                                 power_type = "relative", sig_df = NULL) {
 
   # Subject-level means (average across ROIs)
   subj_means <- band_df %>%
@@ -126,6 +127,45 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
     theme_pub() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           legend.position = "none")
+
+  # Add significance brackets per facet
+  if (!is.null(sig_df) && nrow(sig_df) > 0) {
+    sig_hits <- sig_df %>% filter(significant == TRUE)
+
+    if (nrow(sig_hits) > 0) {
+      # Compute y_max per band for positioning
+      y_ranges <- subj_means %>%
+        group_by(band) %>%
+        summarise(y_max = max(value, na.rm = TRUE),
+                  y_range = diff(range(value, na.rm = TRUE)),
+                  .groups = "drop")
+
+      for (b in unique(sig_hits$band)) {
+        b_sig <- sig_hits %>% filter(band == b)
+        b_range <- y_ranges %>% filter(band == b)
+        if (nrow(b_range) == 0) next
+
+        y_step <- b_range$y_range[1] * 0.08
+
+        for (i in seq_len(nrow(b_sig))) {
+          row <- b_sig[i, ]
+          label_a <- group_labels[row$group_a]
+          label_b <- group_labels[row$group_b]
+          y_pos <- b_range$y_max[1] + y_step * i
+
+          p <- p + geom_signif(
+            data = subj_means %>% filter(band == b),
+            comparisons = list(c(label_a, label_b)),
+            annotations = row$sig_label,
+            y_position = y_pos,
+            tip_length = 0.02,
+            textsize = 5,
+            color = "black"
+          )
+        }
+      }
+    }
+  }
 
   n_cols <- ceiling(length(band_order) / 2)
   fname <- paste0("band_power_", power_type, ".png")
@@ -170,7 +210,7 @@ plot_regional_heatmap <- function(band_df, roi_categories, group_colors,
 
     p <- ggplot(gdata, aes(x = band, y = category, fill = value)) +
       geom_tile(color = "white", linewidth = 0.5) +
-      geom_text(aes(label = sprintf("%.4f", value)), size = 3) +
+      geom_text(aes(label = sprintf("%.4f", value)), size = 5) +
       scale_fill_viridis_c(option = "inferno", name = tools::toTitleCase(power_type)) +
       labs(x = "Band", y = "Region",
            title = paste0(label, " \u2014 ", tools::toTitleCase(power_type), " Power")) +
@@ -220,7 +260,7 @@ plot_significance_heatmap <- function(posthoc_df, output_dir) {
 
       p <- ggplot(pdata, aes(x = band, y = roi, fill = hedges_g)) +
         geom_tile(color = "white", linewidth = 0.5) +
-        geom_text(aes(label = sig_label), size = 5, color = "black", fontface = "bold") +
+        geom_text(aes(label = sig_label), size = 7, color = "black", fontface = "bold") +
         scale_fill_gradient2(
           low = "#2166AC", mid = "white", high = "#B2182B",
           midpoint = 0, limits = c(-clim, clim),
@@ -231,7 +271,7 @@ plot_significance_heatmap <- function(posthoc_df, output_dir) {
              subtitle = "* = significant after Holm correction") +
         theme_pub() +
         theme(
-          axis.text.y = element_text(size = 7),
+          axis.text.y = element_text(size = 9),
           axis.text.x = element_text(angle = 45, hjust = 1)
         )
 
@@ -274,8 +314,8 @@ plot_region_significance_heatmap <- function(posthoc_region_df, output_dir) {
 
       p <- ggplot(pdata, aes(x = band, y = region, fill = hedges_g)) +
         geom_tile(color = "white", linewidth = 0.5) +
-        geom_text(aes(label = sig_label), size = 6, color = "black", fontface = "bold") +
-        geom_text(aes(label = sprintf("%.2f", hedges_g)), size = 3, vjust = -0.5) +
+        geom_text(aes(label = sig_label), size = 7, color = "black", fontface = "bold") +
+        geom_text(aes(label = sprintf("%.2f", hedges_g)), size = 5, vjust = -0.5) +
         scale_fill_gradient2(
           low = "#2166AC", mid = "white", high = "#B2182B",
           midpoint = 0, limits = c(-clim, clim),

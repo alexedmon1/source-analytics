@@ -18,6 +18,7 @@ library(emmeans)
 library(ggplot2)
 library(scales)
 library(forcats)
+library(ggsignif)
 
 # Resolve script directory for sourcing helpers
 script_dir <- if (exists("script.dir")) {
@@ -34,11 +35,12 @@ script_dir <- if (exists("script.dir")) {
   }, error = function(e) "R")
 }
 
-# Reuse plot theme from plot_psd.R if available, otherwise define inline
+# Source helpers
+tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
 tryCatch(source(file.path(script_dir, "plot_psd.R")), error = function(e) NULL)
 
 if (!exists("theme_pub")) {
-  theme_pub <- function(base_size = 11) {
+  theme_pub <- function(base_size = 14) {
     theme_minimal(base_size = base_size) +
       theme(
         panel.grid.minor = element_blank(),
@@ -62,11 +64,14 @@ parser$add_argument("--fig-dir", default = NULL,
                     help = "Directory for figures (default: output-dir/figures)")
 parser$add_argument("--tbl-dir", default = NULL,
                     help = "Directory for tables (default: output-dir/tables)")
+parser$add_argument("--figures-only", action = "store_true", default = FALSE,
+                    help = "Skip statistics; regenerate figures from existing data/tables")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
 config_path <- args$config
 output_dir <- args$output_dir
+figures_only <- args$figures_only
 
 fig_dir <- if (!is.null(args$fig_dir)) args$fig_dir else file.path(output_dir, "figures")
 tbl_dir <- if (!is.null(args$tbl_dir)) args$tbl_dir else file.path(output_dir, "tables")
@@ -427,7 +432,7 @@ run_posthoc_emmeans_region_aperiodic <- function(ap_df, contrasts, roi_categorie
 # ============================================================
 
 plot_aperiodic_boxplot <- function(ap_df, dv_name, group_colors, group_labels,
-                                    group_order, output_dir) {
+                                    group_order, output_dir, sig_df = NULL) {
   # Subject-level means (average across ROIs)
   subj_means <- ap_df %>%
     filter(group %in% group_order) %>%
@@ -458,6 +463,34 @@ plot_aperiodic_boxplot <- function(ap_df, dv_name, group_colors, group_labels,
     theme_pub() +
     theme(legend.position = "none")
 
+  # Add significance brackets if sig_df provided
+  if (!is.null(sig_df) && nrow(sig_df) > 0) {
+    sig_hits <- sig_df %>%
+      filter(dv == dv_name, significant == TRUE)
+
+    if (nrow(sig_hits) > 0) {
+      y_max <- max(subj_means$value, na.rm = TRUE)
+      y_range <- diff(range(subj_means$value, na.rm = TRUE))
+      y_step <- y_range * 0.08
+
+      for (i in seq_len(nrow(sig_hits))) {
+        row <- sig_hits[i, ]
+        label_a <- group_labels[row$group_a]
+        label_b <- group_labels[row$group_b]
+        y_pos <- y_max + y_step * i
+
+        p <- p + geom_signif(
+          comparisons = list(c(label_a, label_b)),
+          annotations = row$sig_label,
+          y_position = y_pos,
+          tip_length = 0.02,
+          textsize = 5,
+          color = "black"
+        )
+      }
+    }
+  }
+
   fname <- paste0("aperiodic_", dv_name, "_boxplot.png")
   ggsave(file.path(output_dir, fname), p, width = 5, height = 5, dpi = 300)
   message("  Saved: ", fname)
@@ -465,7 +498,8 @@ plot_aperiodic_boxplot <- function(ap_df, dv_name, group_colors, group_labels,
 
 
 plot_aperiodic_by_region <- function(ap_df, roi_categories, group_colors,
-                                      group_labels, group_order, output_dir) {
+                                      group_labels, group_order, output_dir,
+                                      sig_df = NULL) {
   if (length(roi_categories) == 0) return(invisible(NULL))
 
   roi_to_cat <- data.frame(
@@ -526,6 +560,45 @@ plot_aperiodic_by_region <- function(ap_df, roi_categories, group_colors,
     theme_pub() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           strip.text = element_text(face = "bold", size = 11))
+
+  # Add asterisk annotations for significant region-level comparisons
+  if (!is.null(sig_df) && nrow(sig_df) > 0) {
+    sig_hits <- sig_df %>%
+      filter(dv == "exponent", significant == TRUE)
+
+    if (nrow(sig_hits) > 0) {
+      # Map region names to categories
+      region_to_area <- area_map
+
+      # Compute y_max per category from the plot data
+      y_maxes <- region_data %>%
+        group_by(category) %>%
+        summarise(y_max = max(exponent, na.rm = TRUE), .groups = "drop")
+
+      # Build annotation data frame
+      annot_data <- sig_hits %>%
+        rename(category = region) %>%
+        inner_join(y_maxes, by = "category") %>%
+        mutate(
+          area = region_to_area[category],
+          area = factor(area, levels = c("Frontal / Prefrontal", "Sensory",
+                                         "Association", "Limbic / Temporal",
+                                         "Subcortical")),
+          y_pos = y_max + 0.03,
+          sig_label = sig_stars(q_value)
+        ) %>%
+        filter(sig_label != "")
+
+      if (nrow(annot_data) > 0) {
+        p <- p + geom_text(
+          data = annot_data,
+          aes(x = category, y = y_pos, label = sig_label),
+          inherit.aes = FALSE,
+          fontface = "bold", size = 5, color = "black"
+        )
+      }
+    }
+  }
 
   ggsave(file.path(output_dir, "aperiodic_by_region.png"), p,
          width = 14, height = 10, dpi = 300)
@@ -814,53 +887,23 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
 
 dvs <- c("exponent", "offset")
 
-all_omnibus <- list()
-all_posthoc <- list()
-all_omnibus_region <- list()
-all_posthoc_region <- list()
+if (!figures_only) {
+  all_omnibus <- list()
+  all_posthoc <- list()
+  all_omnibus_region <- list()
+  all_posthoc_region <- list()
 
-for (dv_name in dvs) {
-  message("\n=== DV: ", dv_name, " ===")
+  for (dv_name in dvs) {
+    message("\n=== DV: ", dv_name, " ===")
 
-  # ROI-level omnibus
-  message("Running ROI-level omnibus LMM (group * roi)...")
-  omnibus <- run_omnibus_lmm_aperiodic(ap_df, config$contrasts, dv_name)
-  all_omnibus[[dv_name]] <- omnibus
+    # ROI-level omnibus
+    message("Running ROI-level omnibus LMM (group * roi)...")
+    omnibus <- run_omnibus_lmm_aperiodic(ap_df, config$contrasts, dv_name)
+    all_omnibus[[dv_name]] <- omnibus
 
-  if (nrow(omnibus) > 0) {
-    for (i in seq_len(nrow(omnibus))) {
-      row <- omnibus[i, ]
-      grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
-      int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
-      message(sprintf("  %s | %s: group F=%.2f p=%.4f%s | interaction F=%.2f p=%.4f%s",
-                      row$contrast, row$dv,
-                      row$group_F, row$group_p, grp_sig,
-                      row$interaction_F, row$interaction_p, int_sig))
-    }
-  }
-
-  # ROI-level post-hoc
-  message("Running ROI-level post-hoc emmeans...")
-  posthoc <- run_posthoc_emmeans_aperiodic(ap_df, config$contrasts, dv_name, omnibus)
-  all_posthoc[[dv_name]] <- posthoc
-
-  if (nrow(posthoc) > 0) {
-    sig_count <- sum(posthoc$significant, na.rm = TRUE)
-    message("  ", nrow(posthoc), " ROI contrasts, ", sig_count, " significant")
-  } else {
-    message("  No post-hoc tests (no significant omnibus effects)")
-  }
-
-  # Region-level (if roi_categories defined)
-  if (length(config$roi_categories) > 0) {
-    message("Running region-level omnibus LMM (group * region)...")
-    omnibus_reg <- run_omnibus_lmm_region_aperiodic(ap_df, config$contrasts,
-                                                     config$roi_categories, dv_name)
-    all_omnibus_region[[dv_name]] <- omnibus_reg
-
-    if (nrow(omnibus_reg) > 0) {
-      for (i in seq_len(nrow(omnibus_reg))) {
-        row <- omnibus_reg[i, ]
+    if (nrow(omnibus) > 0) {
+      for (i in seq_len(nrow(omnibus))) {
+        row <- omnibus[i, ]
         grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
         int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
         message(sprintf("  %s | %s: group F=%.2f p=%.4f%s | interaction F=%.2f p=%.4f%s",
@@ -870,58 +913,120 @@ for (dv_name in dvs) {
       }
     }
 
-    message("Running region-level post-hoc emmeans...")
-    posthoc_reg <- run_posthoc_emmeans_region_aperiodic(
-      ap_df, config$contrasts, config$roi_categories, omnibus_reg, dv_name)
-    all_posthoc_region[[dv_name]] <- posthoc_reg
+    # ROI-level post-hoc
+    message("Running ROI-level post-hoc emmeans...")
+    posthoc <- run_posthoc_emmeans_aperiodic(ap_df, config$contrasts, dv_name, omnibus)
+    all_posthoc[[dv_name]] <- posthoc
 
-    if (nrow(posthoc_reg) > 0) {
-      sig_count <- sum(posthoc_reg$significant, na.rm = TRUE)
-      message("  ", nrow(posthoc_reg), " region contrasts, ", sig_count, " significant")
+    if (nrow(posthoc) > 0) {
+      sig_count <- sum(posthoc$significant, na.rm = TRUE)
+      message("  ", nrow(posthoc), " ROI contrasts, ", sig_count, " significant")
     } else {
-      message("  No region post-hoc tests (no significant omnibus effects)")
+      message("  No post-hoc tests (no significant omnibus effects)")
+    }
+
+    # Region-level (if roi_categories defined)
+    if (length(config$roi_categories) > 0) {
+      message("Running region-level omnibus LMM (group * region)...")
+      omnibus_reg <- run_omnibus_lmm_region_aperiodic(ap_df, config$contrasts,
+                                                       config$roi_categories, dv_name)
+      all_omnibus_region[[dv_name]] <- omnibus_reg
+
+      if (nrow(omnibus_reg) > 0) {
+        for (i in seq_len(nrow(omnibus_reg))) {
+          row <- omnibus_reg[i, ]
+          grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
+          int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
+          message(sprintf("  %s | %s: group F=%.2f p=%.4f%s | interaction F=%.2f p=%.4f%s",
+                          row$contrast, row$dv,
+                          row$group_F, row$group_p, grp_sig,
+                          row$interaction_F, row$interaction_p, int_sig))
+        }
+      }
+
+      message("Running region-level post-hoc emmeans...")
+      posthoc_reg <- run_posthoc_emmeans_region_aperiodic(
+        ap_df, config$contrasts, config$roi_categories, omnibus_reg, dv_name)
+      all_posthoc_region[[dv_name]] <- posthoc_reg
+
+      if (nrow(posthoc_reg) > 0) {
+        sig_count <- sum(posthoc_reg$significant, na.rm = TRUE)
+        message("  ", nrow(posthoc_reg), " region contrasts, ", sig_count, " significant")
+      } else {
+        message("  No region post-hoc tests (no significant omnibus effects)")
+      }
     }
   }
-}
 
-# Combine results across DVs
-omnibus_df <- bind_rows(all_omnibus)
-posthoc_df <- bind_rows(all_posthoc)
-omnibus_region_df <- bind_rows(all_omnibus_region)
-posthoc_region_df <- bind_rows(all_posthoc_region)
+  # Combine results across DVs
+  omnibus_df <- bind_rows(all_omnibus)
+  posthoc_df <- bind_rows(all_posthoc)
+  omnibus_region_df <- bind_rows(all_omnibus_region)
+  posthoc_region_df <- bind_rows(all_posthoc_region)
 
-# --- Export tables ---
-message("\nExporting tables...")
-if (nrow(omnibus_df) > 0) {
-  write_csv(omnibus_df, file.path(tbl_dir, "aperiodic_omnibus.csv"))
-  message("  Saved: tables/aperiodic_omnibus.csv")
-}
-if (nrow(posthoc_df) > 0) {
-  write_csv(posthoc_df, file.path(tbl_dir, "aperiodic_posthoc_roi.csv"))
-  message("  Saved: tables/aperiodic_posthoc_roi.csv")
-}
-if (nrow(omnibus_region_df) > 0) {
-  write_csv(omnibus_region_df, file.path(tbl_dir, "aperiodic_omnibus_region.csv"))
-  message("  Saved: tables/aperiodic_omnibus_region.csv")
-}
-if (nrow(posthoc_region_df) > 0) {
-  write_csv(posthoc_region_df, file.path(tbl_dir, "aperiodic_posthoc_region.csv"))
-  message("  Saved: tables/aperiodic_posthoc_region.csv")
+  # --- Export tables ---
+  message("\nExporting tables...")
+  if (nrow(omnibus_df) > 0) {
+    write_csv(omnibus_df, file.path(tbl_dir, "aperiodic_omnibus.csv"))
+    message("  Saved: tables/aperiodic_omnibus.csv")
+  }
+  if (nrow(posthoc_df) > 0) {
+    write_csv(posthoc_df, file.path(tbl_dir, "aperiodic_posthoc_roi.csv"))
+    message("  Saved: tables/aperiodic_posthoc_roi.csv")
+  }
+  if (nrow(omnibus_region_df) > 0) {
+    write_csv(omnibus_region_df, file.path(tbl_dir, "aperiodic_omnibus_region.csv"))
+    message("  Saved: tables/aperiodic_omnibus_region.csv")
+  }
+  if (nrow(posthoc_region_df) > 0) {
+    write_csv(posthoc_region_df, file.path(tbl_dir, "aperiodic_posthoc_region.csv"))
+    message("  Saved: tables/aperiodic_posthoc_region.csv")
+  }
+
+  # --- Global posthoc (marginal group comparisons averaged over ROIs) ---
+  message("\nComputing global posthoc (marginal group comparisons)...")
+  global_posthoc_list <- list()
+  for (dv_name in dvs) {
+    gp_data <- ap_df %>%
+      filter(group %in% unlist(lapply(config$contrasts, function(c) c(c$group_a, c$group_b)))) %>%
+      mutate(dv = .data[[dv_name]])
+
+    gp <- run_posthoc_global(gp_data, config$contrasts, spatial_col = "roi",
+                              dv_col = "dv", dv_label = dv_name)
+    if (nrow(gp) > 0) global_posthoc_list[[dv_name]] <- gp
+  }
+  global_posthoc_df <- bind_rows(global_posthoc_list)
+
+  if (nrow(global_posthoc_df) > 0) {
+    write_csv(global_posthoc_df, file.path(tbl_dir, "aperiodic_posthoc_global.csv"))
+    message("  Saved: tables/aperiodic_posthoc_global.csv")
+    sig_global <- global_posthoc_df %>% filter(significant == TRUE)
+    message("  ", nrow(global_posthoc_df), " global contrasts, ", nrow(sig_global), " significant")
+  }
+} else {
+  message("Figures-only mode: loading existing tables...")
+  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "aperiodic_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "aperiodic_posthoc_roi.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_region_df <- tryCatch(read_csv(file.path(tbl_dir, "aperiodic_omnibus_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_region_df <- tryCatch(read_csv(file.path(tbl_dir, "aperiodic_posthoc_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  global_posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "aperiodic_posthoc_global.csv"), show_col_types = FALSE), error = function(e) data.frame())
 }
 
 # --- Figures ---
 message("\nGenerating figures...")
 
-# Boxplots for exponent and offset
+# Boxplots for exponent and offset (with significance brackets)
 for (dv_name in dvs) {
   plot_aperiodic_boxplot(ap_df, dv_name, group_colors, group_labels,
-                          group_order, fig_dir)
+                          group_order, fig_dir,
+                          sig_df = if (nrow(global_posthoc_df) > 0) global_posthoc_df else NULL)
 }
 
-# Region bar chart
+# Region bar chart (with asterisk annotations)
 if (length(config$roi_categories) > 0) {
   plot_aperiodic_by_region(ap_df, config$roi_categories, group_colors,
-                            group_labels, group_order, fig_dir)
+                            group_labels, group_order, fig_dir,
+                            sig_df = if (nrow(posthoc_region_df) > 0) posthoc_region_df else NULL)
 }
 
 # Significance heatmaps (ROI-level)
@@ -929,21 +1034,23 @@ if (nrow(posthoc_df) > 0) {
   plot_aperiodic_significance_heatmap(posthoc_df, fig_dir)
 }
 
-# --- Summary report ---
-message("\nWriting summary...")
+if (!figures_only) {
+  # --- Summary report ---
+  message("\nWriting summary...")
 
-n_subjects <- ap_df %>%
-  dplyr::distinct(subject, group) %>%
-  dplyr::count(group) %>%
-  { setNames(.$n, .$group) }
+  n_subjects <- ap_df %>%
+    dplyr::distinct(subject, group) %>%
+    dplyr::count(group) %>%
+    { setNames(.$n, .$group) }
 
-sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
-fitting_method <- if (nrow(ap_df) > 0) ap_df$method[1] else "unknown"
+  sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
+  fitting_method <- if (nrow(ap_df) > 0) ap_df$method[1] else "unknown"
 
-write_aperiodic_summary(omnibus_df, posthoc_df, config, n_subjects, sfreq,
-                         fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md"),
-                         fitting_method,
-                         omnibus_region_df = omnibus_region_df,
-                         posthoc_region_df = posthoc_region_df)
+  write_aperiodic_summary(omnibus_df, posthoc_df, config, n_subjects, sfreq,
+                           fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md"),
+                           fitting_method,
+                           omnibus_region_df = omnibus_region_df,
+                           posthoc_region_df = posthoc_region_df)
+}
 
 message("\nDone. Output: ", output_dir)

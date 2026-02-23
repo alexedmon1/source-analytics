@@ -15,6 +15,7 @@ library(ggplot2)
 library(lme4)
 library(lmerTest)
 library(emmeans)
+library(ggsignif)
 
 # Resolve script directory for sourcing helpers
 script_dir <- if (exists("script.dir")) {
@@ -31,6 +32,7 @@ script_dir <- if (exists("script.dir")) {
   }, error = function(e) "R")
 }
 
+source(file.path(script_dir, "stats_utils.R"))
 source(file.path(script_dir, "report.R"))
 
 # --- Argument parsing ---
@@ -45,11 +47,14 @@ parser$add_argument("--fig-dir", default = NULL,
                     help = "Directory for figures (default: output-dir/figures)")
 parser$add_argument("--tbl-dir", default = NULL,
                     help = "Directory for tables (default: output-dir/tables)")
+parser$add_argument("--figures-only", action = "store_true", default = FALSE,
+                    help = "Skip statistics; regenerate figures from existing data/tables")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
 config_path <- args$config
 output_dir <- args$output_dir
+figures_only <- args$figures_only
 
 fig_dir <- if (!is.null(args$fig_dir)) args$fig_dir else file.path(output_dir, "figures")
 tbl_dir <- if (!is.null(args$tbl_dir)) args$tbl_dir else file.path(output_dir, "tables")
@@ -82,6 +87,7 @@ message("Groups: ", paste(group_order, collapse = ", "))
 measure_names <- unique(measures_df$measure_name)
 message("Measures: ", paste(measure_names, collapse = ", "))
 
+if (!figures_only) {
 # --- Run LMM for each contrast x measure ---
 all_omnibus <- list()
 all_posthoc <- list()
@@ -460,6 +466,46 @@ if (nrow(posthoc_region_df) > 0) {
   message("  Saved: tables/evoked_posthoc_region.csv")
 }
 
+# --- Global posthoc (marginal group comparisons averaged over ROIs) ---
+message("\nComputing global posthoc (marginal group comparisons)...")
+global_posthoc_list <- list()
+for (mname in measure_names) {
+  gp_data <- measures_df %>%
+    filter(measure_name == mname,
+           group %in% unlist(lapply(config$contrasts, function(c) c(c$group_a, c$group_b))))
+
+  if (nrow(gp_data) == 0) next
+
+  gp <- run_posthoc_global(gp_data, config$contrasts, spatial_col = "roi",
+                            dv_col = "value", dv_label = mname)
+  if (nrow(gp) > 0) global_posthoc_list[[mname]] <- gp
+}
+global_posthoc_df <- bind_rows(global_posthoc_list)
+
+if (nrow(global_posthoc_df) > 0) {
+  # Re-apply FDR across all measure x contrast tests
+  global_posthoc_df <- global_posthoc_df %>%
+    mutate(
+      q_value = p.adjust(p_value, method = "BH"),
+      significant = q_value < 0.05,
+      sig_label = sig_stars(q_value)
+    )
+
+  write_csv(global_posthoc_df, file.path(tbl_dir, "evoked_posthoc_global.csv"))
+  message("  Saved: tables/evoked_posthoc_global.csv")
+  sig_global <- global_posthoc_df %>% filter(significant == TRUE)
+  message("  ", nrow(global_posthoc_df), " global contrasts, ", nrow(sig_global), " significant")
+}
+
+} else {
+  message("Figures-only mode: loading existing tables...")
+  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "evoked_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "evoked_posthoc_roi.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_region_df <- tryCatch(read_csv(file.path(tbl_dir, "evoked_omnibus_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_region_df <- tryCatch(read_csv(file.path(tbl_dir, "evoked_posthoc_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  global_posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "evoked_posthoc_global.csv"), show_col_types = FALSE), error = function(e) data.frame())
+}
+
 # --- Figures ---
 message("\nGenerating figures...")
 
@@ -493,13 +539,16 @@ for (mname in measure_names) {
     plot_data$region <- factor(plot_data$region, levels = names(config$roi_categories))
 
     p <- ggplot(plot_data, aes(x = region, y = value, fill = group)) +
-      geom_violin(alpha = 0.6, scale = "width", position = position_dodge(0.8)) +
-      geom_boxplot(width = 0.15, alpha = 0.8, position = position_dodge(0.8),
-                   outlier.size = 0.5) +
+      geom_boxplot(width = 0.6, alpha = 0.7, position = position_dodge(0.8),
+                   outlier.shape = NA) +
+      geom_jitter(aes(color = group), width = 0.15, size = 1.5, alpha = 0.5,
+                  position = position_jitterdodge(dodge.width = 0.8, jitter.width = 0.15),
+                  show.legend = FALSE) +
       scale_fill_manual(values = group_colors, labels = group_labels) +
+      scale_color_manual(values = group_colors, labels = group_labels) +
       labs(title = paste0(mname, " by Region"),
            x = "Region", y = y_label, fill = "Group") +
-      theme_minimal(base_size = 11) +
+      theme_minimal(base_size = 14) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
     fname <- file.path(fig_dir, paste0("evoked_", mname, "_by_region.png"))
@@ -514,15 +563,49 @@ for (mname in measure_names) {
 
   subj_means$group <- factor(subj_means$group, levels = group_order)
 
-  p2 <- ggplot(subj_means, aes(x = group, y = value, fill = group)) +
-    geom_violin(alpha = 0.6) +
-    geom_boxplot(width = 0.2, alpha = 0.8, outlier.size = 0.5) +
-    geom_jitter(width = 0.1, size = 1, alpha = 0.5) +
-    scale_fill_manual(values = group_colors, labels = group_labels) +
+  # Use group labels for x-axis
+  subj_means$group_label <- group_labels[as.character(subj_means$group)]
+  label_order <- group_labels[group_order]
+  subj_means$group_label <- factor(subj_means$group_label, levels = label_order)
+
+  color_vals <- group_colors[group_order]
+  names(color_vals) <- label_order
+
+  p2 <- ggplot(subj_means, aes(x = group_label, y = value, fill = group_label)) +
+    geom_boxplot(width = 0.5, alpha = 0.7, outlier.shape = NA) +
+    geom_jitter(width = 0.1, size = 1.5, alpha = 0.5) +
+    scale_fill_manual(values = color_vals, name = NULL) +
     labs(title = paste0(mname, " — Group Comparison (mean across ROIs)"),
-         x = "Group", y = y_label) +
-    theme_minimal(base_size = 12) +
+         x = NULL, y = y_label) +
+    theme_minimal(base_size = 14) +
     theme(legend.position = "none")
+
+  # Add significance brackets
+  if (nrow(global_posthoc_df) > 0) {
+    m_sig <- global_posthoc_df %>% filter(dv == mname, significant == TRUE)
+
+    if (nrow(m_sig) > 0) {
+      y_max <- max(subj_means$value, na.rm = TRUE)
+      y_range <- diff(range(subj_means$value, na.rm = TRUE))
+      y_step <- y_range * 0.08
+
+      for (j in seq_len(nrow(m_sig))) {
+        row <- m_sig[j, ]
+        label_a <- group_labels[row$group_a]
+        label_b <- group_labels[row$group_b]
+        y_pos <- y_max + y_step * j
+
+        p2 <- p2 + geom_signif(
+          comparisons = list(c(label_a, label_b)),
+          annotations = row$sig_label,
+          y_position = y_pos,
+          tip_length = 0.02,
+          textsize = 5,
+          color = "black"
+        )
+      }
+    }
+  }
 
   fname2 <- file.path(fig_dir, paste0("evoked_", mname, "_group.png"))
   ggsave(fname2, p2, width = 6, height = 5, dpi = 150)
@@ -556,7 +639,7 @@ if (file.exists(tfr_file)) {
         scale_fill_viridis_c(option = "inferno") +
         labs(title = paste0(toupper(mtype), " — ", grp),
              x = "Time (s)", y = "Frequency (Hz)", fill = fill_label) +
-        theme_minimal(base_size = 11)
+        theme_minimal(base_size = 14)
 
       fname <- file.path(fig_dir, paste0("tfr_", mtype, "_", grp, ".png"))
       ggsave(fname, p, width = 10, height = 6, dpi = 150)
@@ -587,6 +670,7 @@ if (nrow(posthoc_df) > 0) {
   }
 }
 
+if (!figures_only) {
 # --- Summary report ---
 message("\nWriting summary...")
 
@@ -748,5 +832,6 @@ if (length(fig_files) > 0) {
 
 writeLines(lines, file.path(output_dir, "ANALYSIS_SUMMARY.md"))
 message("  Report written: ", file.path(output_dir, "ANALYSIS_SUMMARY.md"))
+} # end if (!figures_only)
 
 message("\nDone. Output: ", output_dir)

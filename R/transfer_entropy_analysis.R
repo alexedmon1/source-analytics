@@ -24,7 +24,7 @@ has_lme4 <- requireNamespace("lme4", quietly = TRUE) &&
             requireNamespace("emmeans", quietly = TRUE)
 
 # --- Publication theme ---
-theme_pub <- function(base_size = 11) {
+theme_pub <- function(base_size = 14) {
   theme_minimal(base_size = base_size) +
     theme(
       panel.grid.minor = element_blank(),
@@ -416,19 +416,14 @@ plot_global_te_bar <- function(global_df, group_colors, group_labels,
   color_vals <- group_colors[group_order]
   names(color_vals) <- group_labels[group_order]
 
-  p <- ggplot(summary_data, aes(x = band, y = mean_val, fill = group_label)) +
-    geom_col(position = position_dodge(width = 0.8), width = 0.7, alpha = 0.85) +
-    geom_errorbar(
-      aes(ymin = mean_val - sem_val, ymax = mean_val + sem_val),
-      position = position_dodge(width = 0.8), width = 0.3
-    ) +
-    geom_point(
-      data = plot_data,
-      aes(x = band, y = mean_te, fill = group_label),
-      position = position_jitterdodge(dodge.width = 0.8, jitter.width = 0.1),
-      size = 1, alpha = 0.4, shape = 21, color = "grey30", show.legend = FALSE
-    ) +
+  p <- ggplot(plot_data, aes(x = band, y = mean_te, fill = group_label)) +
+    geom_boxplot(width = 0.6, alpha = 0.7, position = position_dodge(0.8),
+                 outlier.shape = NA) +
+    geom_jitter(aes(color = group_label),
+                position = position_jitterdodge(dodge.width = 0.8, jitter.width = 0.1),
+                size = 1.5, alpha = 0.5, show.legend = FALSE) +
     scale_fill_manual(values = color_vals, name = NULL) +
+    scale_color_manual(values = color_vals, name = NULL) +
     labs(x = "Frequency Band", y = "Global Transfer Entropy (mean of all directed edges)",
          title = "Global Transfer Entropy by Band and Group") +
     theme_pub() +
@@ -664,11 +659,14 @@ parser$add_argument("--fig-dir", default = NULL,
                     help = "Directory for figures (default: output-dir/figures)")
 parser$add_argument("--tbl-dir", default = NULL,
                     help = "Directory for tables (default: output-dir/tables)")
+parser$add_argument("--figures-only", action = "store_true", default = FALSE,
+                    help = "Skip statistics; regenerate figures from existing data/tables")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
 config_path <- args$config
 output_dir <- args$output_dir
+figures_only <- args$figures_only
 
 fig_dir <- if (!is.null(args$fig_dir)) args$fig_dir else file.path(output_dir, "figures")
 tbl_dir <- if (!is.null(args$tbl_dir)) args$tbl_dir else file.path(output_dir, "tables")
@@ -691,103 +689,111 @@ message("Groups: ", paste(group_order, collapse = ", "))
 message("Bands: ", paste(names(config$bands), collapse = ", "))
 
 # ===========================================================================
-# 1. Global TE analysis
+# 1. Global TE analysis (needed for figures — always compute)
 # ===========================================================================
 message("\n=== Global Transfer Entropy Analysis ===")
 
 global_df <- compute_global_te(edges)
 message("  Global TE computed: ", nrow(global_df), " subject x band rows")
 
-global_ttest_df <- run_global_ttests(global_df, config$contrasts, config$bands)
-if (nrow(global_ttest_df) > 0) {
-  message("\n  === Global T-Test Results ===")
-  for (i in seq_len(nrow(global_ttest_df))) {
-    row <- global_ttest_df[i, ]
-    sig_str <- if (isTRUE(row$significant)) " ***" else ""
-    message(sprintf("  %s | %s: t=%.2f, q=%.4f%s",
-                    row$contrast, row$band,
-                    ifelse(is.na(row$t_stat), 0, row$t_stat),
-                    ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
-  }
-}
-
-# ===========================================================================
-# 2. Directional analysis
-# ===========================================================================
-message("\n=== Directional Analysis (Net TE) ===")
-
-directional_df <- run_directional_ttests(edges, config$contrasts, config$bands)
-if (nrow(directional_df) > 0) {
-  for (i in seq_len(nrow(directional_df))) {
-    row <- directional_df[i, ]
-    sig_str <- if (isTRUE(row$significant)) " ***" else ""
-    message(sprintf("  %s | %s | %s: mean_net=%.5f, t=%.2f, q=%.4f%s",
-                    row$contrast, row$group, row$band,
-                    row$mean_net_te,
-                    ifelse(is.na(row$t_stat), 0, row$t_stat),
-                    ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
-  }
-}
-
-# ===========================================================================
-# 3. Region-pair LMM
-# ===========================================================================
-omnibus_df <- data.frame()
-posthoc_df <- data.frame()
-
-if (length(config$roi_categories) > 0 && has_lme4) {
-  message("\n=== Region-Pair TE Analysis ===")
-
-  region_pair_df <- aggregate_edges_to_region_pairs(edges, config$roi_categories)
-  n_region_pairs <- length(unique(region_pair_df$region_pair))
-  message("  Aggregated to ", n_region_pairs, " directed region pairs")
-
-  omnibus_df <- run_omnibus_lmm(region_pair_df, config$contrasts, config$bands)
-
-  if (nrow(omnibus_df) > 0) {
-    for (i in seq_len(nrow(omnibus_df))) {
-      row <- omnibus_df[i, ]
-      grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
-      int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
-      message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
+if (!figures_only) {
+  global_ttest_df <- run_global_ttests(global_df, config$contrasts, config$bands)
+  if (nrow(global_ttest_df) > 0) {
+    message("\n  === Global T-Test Results ===")
+    for (i in seq_len(nrow(global_ttest_df))) {
+      row <- global_ttest_df[i, ]
+      sig_str <- if (isTRUE(row$significant)) " ***" else ""
+      message(sprintf("  %s | %s: t=%.2f, q=%.4f%s",
                       row$contrast, row$band,
-                      row$group_F, row$group_q, grp_sig,
-                      row$interaction_F, row$interaction_q, int_sig))
+                      ifelse(is.na(row$t_stat), 0, row$t_stat),
+                      ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
     }
   }
 
-  posthoc_df <- run_posthoc_emmeans(region_pair_df, config$contrasts,
-                                     config$bands, omnibus_df)
-  if (nrow(posthoc_df) > 0) {
-    sig_count <- sum(posthoc_df$significant, na.rm = TRUE)
-    message("  ", nrow(posthoc_df), " region-pair contrasts, ", sig_count, " significant")
+  # ===========================================================================
+  # 2. Directional analysis
+  # ===========================================================================
+  message("\n=== Directional Analysis (Net TE) ===")
+
+  directional_df <- run_directional_ttests(edges, config$contrasts, config$bands)
+  if (nrow(directional_df) > 0) {
+    for (i in seq_len(nrow(directional_df))) {
+      row <- directional_df[i, ]
+      sig_str <- if (isTRUE(row$significant)) " ***" else ""
+      message(sprintf("  %s | %s | %s: mean_net=%.5f, t=%.2f, q=%.4f%s",
+                      row$contrast, row$group, row$band,
+                      row$mean_net_te,
+                      ifelse(is.na(row$t_stat), 0, row$t_stat),
+                      ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
+    }
   }
-} else if (length(config$roi_categories) == 0) {
-  message("\n  No roi_categories in config -- skipping region-pair analysis")
+
+  # ===========================================================================
+  # 3. Region-pair LMM
+  # ===========================================================================
+  omnibus_df <- data.frame()
+  posthoc_df <- data.frame()
+
+  if (length(config$roi_categories) > 0 && has_lme4) {
+    message("\n=== Region-Pair TE Analysis ===")
+
+    region_pair_df <- aggregate_edges_to_region_pairs(edges, config$roi_categories)
+    n_region_pairs <- length(unique(region_pair_df$region_pair))
+    message("  Aggregated to ", n_region_pairs, " directed region pairs")
+
+    omnibus_df <- run_omnibus_lmm(region_pair_df, config$contrasts, config$bands)
+
+    if (nrow(omnibus_df) > 0) {
+      for (i in seq_len(nrow(omnibus_df))) {
+        row <- omnibus_df[i, ]
+        grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
+        int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
+        message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
+                        row$contrast, row$band,
+                        row$group_F, row$group_q, grp_sig,
+                        row$interaction_F, row$interaction_q, int_sig))
+      }
+    }
+
+    posthoc_df <- run_posthoc_emmeans(region_pair_df, config$contrasts,
+                                       config$bands, omnibus_df)
+    if (nrow(posthoc_df) > 0) {
+      sig_count <- sum(posthoc_df$significant, na.rm = TRUE)
+      message("  ", nrow(posthoc_df), " region-pair contrasts, ", sig_count, " significant")
+    }
+  } else if (length(config$roi_categories) == 0) {
+    message("\n  No roi_categories in config -- skipping region-pair analysis")
+  } else {
+    message("\n  lme4/lmerTest not available -- skipping region-pair LMM analysis")
+  }
+
+  # ===========================================================================
+  # Export tables
+  # ===========================================================================
+  message("\nExporting tables...")
+
+  if (nrow(global_ttest_df) > 0) {
+    write_csv(global_ttest_df, file.path(tbl_dir, "te_global_ttest.csv"))
+    message("  Saved: tables/te_global_ttest.csv")
+  }
+  if (nrow(directional_df) > 0) {
+    write_csv(directional_df, file.path(tbl_dir, "te_directional_ttest.csv"))
+    message("  Saved: tables/te_directional_ttest.csv")
+  }
+  if (nrow(omnibus_df) > 0) {
+    write_csv(omnibus_df, file.path(tbl_dir, "te_omnibus_lmm.csv"))
+    message("  Saved: tables/te_omnibus_lmm.csv")
+  }
+  if (nrow(posthoc_df) > 0) {
+    write_csv(posthoc_df, file.path(tbl_dir, "te_posthoc.csv"))
+    message("  Saved: tables/te_posthoc.csv")
+  }
 } else {
-  message("\n  lme4/lmerTest not available -- skipping region-pair LMM analysis")
-}
-
-# ===========================================================================
-# Export tables
-# ===========================================================================
-message("\nExporting tables...")
-
-if (nrow(global_ttest_df) > 0) {
-  write_csv(global_ttest_df, file.path(tbl_dir, "te_global_ttest.csv"))
-  message("  Saved: tables/te_global_ttest.csv")
-}
-if (nrow(directional_df) > 0) {
-  write_csv(directional_df, file.path(tbl_dir, "te_directional_ttest.csv"))
-  message("  Saved: tables/te_directional_ttest.csv")
-}
-if (nrow(omnibus_df) > 0) {
-  write_csv(omnibus_df, file.path(tbl_dir, "te_omnibus_lmm.csv"))
-  message("  Saved: tables/te_omnibus_lmm.csv")
-}
-if (nrow(posthoc_df) > 0) {
-  write_csv(posthoc_df, file.path(tbl_dir, "te_posthoc.csv"))
-  message("  Saved: tables/te_posthoc.csv")
+  message("Figures-only mode: loading existing tables...")
+  global_ttest_df <- tryCatch(read_csv(file.path(tbl_dir, "te_global_ttest.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  directional_df <- tryCatch(read_csv(file.path(tbl_dir, "te_directional_ttest.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "te_omnibus_lmm.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "te_posthoc.csv"), show_col_types = FALSE), error = function(e) data.frame())
 }
 
 # ===========================================================================
@@ -796,23 +802,25 @@ if (nrow(posthoc_df) > 0) {
 message("\nGenerating figures...")
 plot_global_te_bar(global_df, group_colors, group_labels, group_order, fig_dir)
 
-# ===========================================================================
-# Summary report
-# ===========================================================================
-message("\nWriting summary...")
+if (!figures_only) {
+  # ===========================================================================
+  # Summary report
+  # ===========================================================================
+  message("\nWriting summary...")
 
-n_subjects <- edges %>%
-  dplyr::distinct(subject, group) %>%
-  dplyr::count(group) %>%
-  { setNames(.$n, .$group) }
+  n_subjects <- edges %>%
+    dplyr::distinct(subject, group) %>%
+    dplyr::count(group) %>%
+    { setNames(.$n, .$group) }
 
-sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
+  sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
 
-write_te_summary(
-  global_df, global_ttest_df, directional_df,
-  omnibus_df, posthoc_df,
-  config, n_subjects, sfreq,
-  fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md")
-)
+  write_te_summary(
+    global_df, global_ttest_df, directional_df,
+    omnibus_df, posthoc_df,
+    config, n_subjects, sfreq,
+    fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md")
+  )
+}
 
 message("\nDone. Output: ", output_dir)
