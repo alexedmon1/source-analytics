@@ -106,7 +106,7 @@ for (contrast in config$contrasts) {
     n_b <- length(unique(mdata$subject[mdata$group == gb]))
     n_rois <- length(unique(mdata$roi))
 
-    mdata$group <- factor(mdata$group, levels = c(gb, ga))
+    mdata$group <- factor(mdata$group, levels = c(ga, gb))
     mdata$roi <- factor(mdata$roi)
 
     group_F <- NA; group_p <- NA
@@ -211,7 +211,7 @@ for (contrast in config$contrasts) {
     if (nrow(mdata) == 0) next
 
     mtype <- mdata$measure_type[1]
-    mdata$group <- factor(mdata$group, levels = c(gb, ga))
+    mdata$group <- factor(mdata$group, levels = c(ga, gb))
     mdata$roi <- factor(mdata$roi)
 
     tryCatch({
@@ -234,17 +234,20 @@ for (contrast in config$contrasts) {
           filter(roi == roi_name, group == gb) %>%
           pull(emmean)
 
-        hg <- con_df$estimate[i] / resid_sd
+        # Explicitly compute estimate as ga - gb to guarantee correct direction
+        est <- if (length(emm_a) > 0 && length(emm_b) > 0) emm_a[1] - emm_b[1] else con_df$estimate[i]
+        t_val <- est / con_df$SE[i]
+        hg <- est / resid_sd
 
         all_posthoc[[length(all_posthoc) + 1]] <- data.frame(
           contrast = cname,
           measure = mname,
           measure_type = mtype,
           roi = roi_name,
-          estimate = con_df$estimate[i],
+          estimate = est,
           SE = con_df$SE[i],
           df = con_df$df[i],
-          t_ratio = con_df$t.ratio[i],
+          t_ratio = t_val,
           p_value = con_df$p.value[i],
           q_value = con_df$q_value[i],
           emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
@@ -305,7 +308,7 @@ if (length(config$roi_categories) > 0) {
       n_b <- length(unique(rdata$subject[rdata$group == gb]))
       n_regions <- length(unique(rdata$region))
 
-      rdata$group <- factor(rdata$group, levels = c(gb, ga))
+      rdata$group <- factor(rdata$group, levels = c(ga, gb))
       rdata$region <- factor(rdata$region)
 
       group_F <- NA; group_p <- NA
@@ -393,7 +396,7 @@ if (length(config$roi_categories) > 0) {
       if (nrow(rdata) == 0) next
 
       mtype <- rdata$measure_type[1]
-      rdata$group <- factor(rdata$group, levels = c(gb, ga))
+      rdata$group <- factor(rdata$group, levels = c(ga, gb))
       rdata$region <- factor(rdata$region)
 
       tryCatch({
@@ -416,17 +419,20 @@ if (length(config$roi_categories) > 0) {
             filter(region == region_name, group == gb) %>%
             pull(emmean)
 
-          hg <- con_df$estimate[i] / resid_sd
+          # Explicitly compute estimate as ga - gb to guarantee correct direction
+          est <- if (length(emm_a) > 0 && length(emm_b) > 0) emm_a[1] - emm_b[1] else con_df$estimate[i]
+          t_val <- est / con_df$SE[i]
+          hg <- est / resid_sd
 
           all_posthoc_reg[[length(all_posthoc_reg) + 1]] <- data.frame(
             contrast = cname,
             measure = mname,
             measure_type = mtype,
             region = region_name,
-            estimate = con_df$estimate[i],
+            estimate = est,
             SE = con_df$SE[i],
             df = con_df$df[i],
-            t_ratio = con_df$t.ratio[i],
+            t_ratio = t_val,
             p_value = con_df$p.value[i],
             q_value = con_df$q_value[i],
             emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
@@ -447,8 +453,14 @@ if (length(config$roi_categories) > 0) {
   posthoc_region_df <- bind_rows(all_posthoc_reg)
 }
 
-# --- Export tables ---
+# --- Export tables (clean up stale files first) ---
 message("\nExporting tables...")
+for (f in c("evoked_omnibus.csv", "evoked_posthoc_roi.csv",
+            "evoked_omnibus_region.csv", "evoked_posthoc_region.csv")) {
+  fp <- file.path(tbl_dir, f)
+  if (file.exists(fp)) file.remove(fp)
+}
+
 if (nrow(omnibus_df) > 0) {
   write_csv(omnibus_df, file.path(tbl_dir, "evoked_omnibus.csv"))
   message("  Saved: tables/evoked_omnibus.csv")

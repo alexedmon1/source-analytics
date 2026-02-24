@@ -42,7 +42,7 @@ run_omnibus_lmm <- function(band_df, contrasts, bands, power_type = "relative") 
       n_b <- length(unique(bdata$subject[bdata$group == gb]))
       n_rois <- length(unique(bdata$roi))
 
-      bdata$group <- factor(bdata$group, levels = c(gb, ga))
+      bdata$group <- factor(bdata$group, levels = c(ga, gb))
       bdata$roi <- factor(bdata$roi)
       bdata$dv <- bdata[[power_type]]
 
@@ -147,7 +147,7 @@ run_posthoc_emmeans <- function(band_df, contrasts, bands, omnibus_df,
       bdata <- band_df %>% filter(band == band_name, group %in% c(ga, gb))
       if (nrow(bdata) == 0) next
 
-      bdata$group <- factor(bdata$group, levels = c(gb, ga))
+      bdata$group <- factor(bdata$group, levels = c(ga, gb))
       bdata$roi <- factor(bdata$roi)
       bdata$dv <- bdata[[power_type]]
 
@@ -254,7 +254,7 @@ run_omnibus_lmm_region <- function(band_df, contrasts, bands, roi_categories,
       n_b <- length(unique(bdata$subject[bdata$group == gb]))
       n_regions <- length(unique(bdata$region))
 
-      bdata$group <- factor(bdata$group, levels = c(gb, ga))
+      bdata$group <- factor(bdata$group, levels = c(ga, gb))
       bdata$region <- factor(bdata$region)
       bdata$dv <- bdata[[power_type]]
 
@@ -361,7 +361,7 @@ run_posthoc_emmeans_region <- function(band_df, contrasts, bands, roi_categories
       bdata <- region_df %>% filter(band == band_name, group %in% c(ga, gb))
       if (nrow(bdata) == 0) next
 
-      bdata$group <- factor(bdata$group, levels = c(gb, ga))
+      bdata$group <- factor(bdata$group, levels = c(ga, gb))
       bdata$region <- factor(bdata$region)
       bdata$dv <- bdata[[power_type]]
 
@@ -456,7 +456,7 @@ run_omnibus_lmm_region_nested <- function(band_df, contrasts, bands, roi_categor
       n_rois_total <- length(unique(bdata$roi))
       n_regions <- length(unique(bdata$region))
 
-      bdata$group <- factor(bdata$group, levels = c(gb, ga))
+      bdata$group <- factor(bdata$group, levels = c(ga, gb))
       bdata$region <- factor(bdata$region)
       bdata$dv <- bdata[[power_type]]
 
@@ -581,7 +581,7 @@ run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
     cdata <- data %>% filter(group %in% c(ga, gb))
     if (nrow(cdata) == 0) next
 
-    cdata$group <- factor(cdata$group, levels = c(gb, ga))
+    cdata$group <- factor(cdata$group, levels = c(ga, gb))
     cdata[[spatial_col]] <- factor(cdata[[spatial_col]])
     cdata$dv <- cdata[[dv_col]]
 
@@ -659,7 +659,7 @@ run_posthoc_emmeans_region_nested <- function(band_df, contrasts, bands, roi_cat
       bdata <- nested_df %>% filter(band == band_name, group %in% c(ga, gb))
       if (nrow(bdata) == 0) next
 
-      bdata$group <- factor(bdata$group, levels = c(gb, ga))
+      bdata$group <- factor(bdata$group, levels = c(ga, gb))
       bdata$region <- factor(bdata$region)
       bdata$dv <- bdata[[power_type]]
 

@@ -241,7 +241,7 @@ run_omnibus_lmm <- function(region_pair_df, contrasts, bands) {
       n_b <- length(unique(bdata$subject[bdata$group == gb]))
       n_pairs <- length(unique(bdata$region_pair))
 
-      bdata$group <- factor(bdata$group, levels = c(gb, ga))
+      bdata$group <- factor(bdata$group, levels = c(ga, gb))
       bdata$region_pair <- factor(bdata$region_pair)
 
       group_F <- NA; group_p <- NA
@@ -338,7 +338,7 @@ run_posthoc_emmeans <- function(region_pair_df, contrasts, bands, omnibus_df, ga
         filter(band == band_name, group %in% c(ga, gb))
       if (nrow(bdata) == 0) next
 
-      bdata$group <- factor(bdata$group, levels = c(gb, ga))
+      bdata$group <- factor(bdata$group, levels = c(ga, gb))
       bdata$region_pair <- factor(bdata$region_pair)
 
       tryCatch({

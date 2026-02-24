@@ -115,7 +115,7 @@ run_omnibus_lmm_aperiodic <- function(ap_df, contrasts, dv_name) {
     n_b <- length(unique(cdata$subject[cdata$group == gb]))
     n_rois <- length(unique(cdata$roi))
 
-    cdata$group <- factor(cdata$group, levels = c(gb, ga))
+    cdata$group <- factor(cdata$group, levels = c(ga, gb))
     cdata$roi <- factor(cdata$roi)
     cdata$dv <- cdata[[dv_name]]
 
@@ -203,7 +203,7 @@ run_posthoc_emmeans_aperiodic <- function(ap_df, contrasts, dv_name, omnibus_df,
     cdata <- ap_df %>% filter(group %in% c(ga, gb))
     if (nrow(cdata) == 0) next
 
-    cdata$group <- factor(cdata$group, levels = c(gb, ga))
+    cdata$group <- factor(cdata$group, levels = c(ga, gb))
     cdata$roi <- factor(cdata$roi)
     cdata$dv <- cdata[[dv_name]]
 
@@ -290,7 +290,7 @@ run_omnibus_lmm_region_aperiodic <- function(ap_df, contrasts, roi_categories, d
     n_b <- length(unique(cdata$subject[cdata$group == gb]))
     n_regions <- length(unique(cdata$region))
 
-    cdata$group <- factor(cdata$group, levels = c(gb, ga))
+    cdata$group <- factor(cdata$group, levels = c(ga, gb))
     cdata$region <- factor(cdata$region)
     cdata$dv <- cdata[[dv_name]]
 
@@ -378,7 +378,7 @@ run_posthoc_emmeans_region_aperiodic <- function(ap_df, contrasts, roi_categorie
     cdata <- region_df %>% filter(group %in% c(ga, gb))
     if (nrow(cdata) == 0) next
 
-    cdata$group <- factor(cdata$group, levels = c(gb, ga))
+    cdata$group <- factor(cdata$group, levels = c(ga, gb))
     cdata$region <- factor(cdata$region)
     cdata$dv <- cdata[[dv_name]]
 

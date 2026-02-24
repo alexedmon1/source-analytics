@@ -210,7 +210,7 @@ run_omnibus_lmm_region <- function(region_df, contrasts) {
       n_b <- length(unique(fpdata$subject[fpdata$group == gb]))
       n_regions <- length(unique(fpdata$region))
 
-      fpdata$group <- factor(fpdata$group, levels = c(gb, ga))
+      fpdata$group <- factor(fpdata$group, levels = c(ga, gb))
       fpdata$region <- factor(fpdata$region)
 
       group_F <- NA; group_p <- NA
@@ -315,7 +315,7 @@ run_posthoc_emmeans_region <- function(region_df, contrasts, omnibus_df, gate = 
         filter(freq_pair == fp, group %in% c(ga, gb))
       if (nrow(fpdata) == 0) next
 
-      fpdata$group <- factor(fpdata$group, levels = c(gb, ga))
+      fpdata$group <- factor(fpdata$group, levels = c(ga, gb))
       fpdata$region <- factor(fpdata$region)
 
       tryCatch({
