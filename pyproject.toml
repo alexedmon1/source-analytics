@@ -14,17 +14,17 @@ dependencies = [
     "scipy>=1.10",
     "pandas>=2.0",
     "pyyaml>=6.0",
+    "specparam>=2.0",
 ]
 
 [project.optional-dependencies]
 mne = ["mne>=1.5"]
-specparam = ["specparam>=2.0"]
 atlas = ["nibabel>=5.0"]
 mvpa = ["scikit-learn>=1.3"]
 network = ["networkx>=3.0"]
 render = ["markdown>=3.4"]
 dev = ["pytest>=7.0", "black", "ruff"]
-all = ["source-analytics[mne,specparam,atlas,mvpa,network,render,dev]"]
+all = ["source-analytics[mne,atlas,mvpa,network,render,dev]"]
 
 [project.scripts]
 source-analytics = "source_analytics.cli:main"
