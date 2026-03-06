@@ -72,7 +72,7 @@ message("Bands: ", paste(names(config$bands), collapse = ", "))
 message("Channels: ", length(unique(band_df$roi)))
 
 # --- Run LMMs for each power type ---
-power_types <- c("relative", "dB")
+power_types <- c("relative", "absolute")
 
 all_omnibus <- list()
 all_posthoc <- list()
@@ -180,7 +180,7 @@ if (nrow(posthoc_region_nested_df) > 0) {
 message("\nGenerating figures...")
 
 # Band power boxplots (electrode-level means per subject)
-for (ptype in c("relative", "absolute", "dB")) {
+for (ptype in c("relative", "absolute")) {
   # Subject-level means (average across channels)
   subj_means <- band_df %>%
     dplyr::filter(group %in% group_order) %>%
@@ -188,7 +188,7 @@ for (ptype in c("relative", "absolute", "dB")) {
     dplyr::summarise(value = mean(.data[[ptype]], na.rm = TRUE), .groups = "drop") %>%
     dplyr::mutate(
       group = factor(group, levels = group_order),
-      group_label = group_labels[as.character(group)]
+      group_label = factor(group_labels[as.character(group)], levels = group_labels[group_order])
     )
 
   color_vals <- group_colors[group_order]

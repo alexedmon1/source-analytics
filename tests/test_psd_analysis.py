@@ -30,7 +30,7 @@ def test_psd_csv_export(sample_config_yaml):
     # Check band_power.csv structure
     bp = pd.read_csv(psd_dir / "data" / "band_power.csv")
     assert len(bp) > 0
-    assert set(bp.columns) == {"subject", "group", "roi", "band", "absolute", "relative", "dB"}
+    assert set(bp.columns) == {"subject", "group", "roi", "band", "absolute", "relative"}
     assert set(bp["group"].unique()) == {"KO_VEH", "WT_VEH"}
 
     # Check psd_curves.csv structure

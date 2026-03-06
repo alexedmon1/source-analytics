@@ -23,7 +23,7 @@ from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.vertex import compute_psd_vertices, extract_band_power_vertices
 from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
-from ..viz.glass_brain import plot_glass_brain
+from ..viz.glass_brain import plot_glass_brain, plot_anatomical_glass_brain
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,6 @@ class SpatialLMMAnalysis(BaseAnalysis):
                     "z": float(coords[vi, 2]),
                     "band": band_name,
                     "relative": float(bp["relative"][vi]),
-                    "dB": float(bp["dB"][vi]),
                     "absolute": float(bp["absolute"][vi]),
                 })
 
@@ -152,7 +151,9 @@ class SpatialLMMAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Delegate to R (variograms, etc). Python generates residual maps if available."""
+        """Generate residual maps and per-vertex t-score brain figures."""
+        from scipy import stats as sp_stats
+
         tbl_dir = self.tbl_dir
         fig_dir = self.fig_dir
 
@@ -171,6 +172,73 @@ class SpatialLMMAnalysis(BaseAnalysis):
                         output_path=fig_dir / f"spatial_residuals_{safe_name}.png",
                         cmap="RdBu_r",
                     )
+
+        # Per-vertex t-score anatomical brain figures for gamma bands
+        data_csv = self.output_dir / "data" / "spatial_lmm_data.csv"
+        coords_csv = self.output_dir / "data" / "source_coords.csv"
+        if not data_csv.exists() or not coords_csv.exists():
+            return
+
+        df = pd.read_csv(data_csv)
+        coords_df = pd.read_csv(coords_csv)
+        coords = coords_df[["x", "y", "z"]].values
+        n_verts = len(coords)
+        vert_map = dict(zip(coords_df["vertex_idx"], range(n_verts)))
+
+        # Use gamma bands if available, otherwise skip
+        gamma_bands = [b for b in df["band"].unique()
+                       if "gamma" in b.lower()]
+        if not gamma_bands:
+            return
+
+        contrasts = self.config.contrasts
+        for contrast in contrasts:
+            ga, gb = contrast["groups"]
+            contrast_name = f"{ga}_vs_{gb}"
+
+            band_data = {}
+            for band in gamma_bands:
+                bdata = df[df["band"] == band]
+                t_values = np.zeros(n_verts)
+                for vidx in coords_df["vertex_idx"]:
+                    vdata = bdata[bdata["vertex_idx"] == vidx]
+                    a_vals = vdata[vdata["group"] == ga]["absolute"].values
+                    b_vals = vdata[vdata["group"] == gb]["absolute"].values
+                    if len(a_vals) >= 2 and len(b_vals) >= 2:
+                        t_stat, _ = sp_stats.ttest_ind(
+                            a_vals, b_vals, equal_var=False)
+                        t_values[vert_map[vidx]] = t_stat
+
+                n_sig = int((np.abs(t_values) > 2.0).sum())
+                band_data[band] = {
+                    "values": t_values,
+                    "n_sig": n_sig,
+                    "n_total": n_verts,
+                }
+                logger.info("  %s %s: %d/%d vertices |t|>2.0",
+                            contrast_name, band, n_sig, n_verts)
+
+            # Symmetric vlim for diverging colormap
+            all_t = np.concatenate([bd["values"] for bd in band_data.values()])
+            vmax = float(np.ceil(np.nanmax(np.abs(all_t)) * 10) / 10)
+            if vmax == 0:
+                continue
+            mean_dir = "lower" if np.mean(all_t) < 0 else "higher"
+
+            plot_anatomical_glass_brain(
+                coords=coords,
+                band_data=band_data,
+                output_path=fig_dir / f"gamma_tscores_{contrast_name}.png",
+                title=(f"Dorsal Vertex-Level Gamma Power: "
+                       f"{ga} vs {gb} (Spatial LMM posthoc)"),
+                subtitle=(f"Large circles = uncorrected |t| > 2.0; "
+                          f"Mean direction: {ga} {mean_dir} than {gb}"),
+                cmap="RdBu_r",
+                vlim=(-vmax, vmax),
+                sig_threshold=2.0,
+                colorbar_label=f"t-statistic ({ga} vs {gb})",
+                dpi=300,
+            )
 
     def summary(self) -> None:
         """Run R script for spatial GLS fitting + report generation."""

@@ -102,7 +102,6 @@ class PSDAnalysis(BaseAnalysis):
                     "band": band_name,
                     "absolute": power_vals["absolute"],
                     "relative": power_vals["relative"],
-                    "dB": power_vals["dB"],
                 })
 
     def aggregate(self) -> None:

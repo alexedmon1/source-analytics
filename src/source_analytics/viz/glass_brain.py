@@ -712,7 +712,11 @@ def plot_anatomical_glass_brain(
     if vlim is None:
         all_vals = np.concatenate([bd["values"] for bd in band_data.values()])
         vmax_val = float(np.ceil(np.nanmax(np.abs(all_vals)) * 10) / 10)
-        vlim = (0, vmax_val)
+        # Use symmetric range if data has both signs (e.g. t-statistics)
+        if np.nanmin(all_vals) < 0:
+            vlim = (-vmax_val, vmax_val)
+        else:
+            vlim = (0, vmax_val)
 
     # Figure size: scale by number of bands
     fig_w = 6.5 * n_bands + 1.0  # extra for colorbar

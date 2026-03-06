@@ -6,7 +6,7 @@
 #   - Omnibus: lmer(dv ~ group * spatial + (1|subject)), Type III ANOVA
 #   - Post-hoc: emmeans(fit, pairwise ~ group | spatial), Holm correction
 #   - FDR (BH) correction across bands per contrast
-#   - power_type: "relative", "absolute", or "dB"
+#   - power_type: "relative" or "absolute"
 
 library(dplyr)
 library(tidyr)
@@ -24,7 +24,7 @@ library(emmeans)
 #' @param band_df data.frame with columns: subject, group, roi, band, absolute, relative, dB
 #' @param contrasts list of lists, each with name, group_a, group_b
 #' @param bands named list of c(fmin, fmax) — used only for ordering
-#' @param power_type character — column to use as DV: "relative", "absolute", or "dB"
+#' @param power_type character — column to use as DV: "relative" or "absolute"
 #' @return data.frame (one row per contrast x band)
 run_omnibus_lmm <- function(band_df, contrasts, bands, power_type = "relative") {
   results <- list()
@@ -222,7 +222,6 @@ aggregate_to_regions <- function(band_df, roi_categories) {
     summarise(
       absolute = mean(absolute, na.rm = TRUE),
       relative = mean(relative, na.rm = TRUE),
-      dB = mean(dB, na.rm = TRUE),
       .groups = "drop"
     )
 }
@@ -565,7 +564,7 @@ sig_stars <- function(q) {
 #' @param contrasts list of lists, each with name, group_a, group_b
 #' @param spatial_col name of spatial grouping column (default "roi")
 #' @param dv_col name of dependent variable column (default "dv")
-#' @param dv_label character label for the DV in output (e.g., "dB", "relative", "exponent")
+#' @param dv_label character label for the DV in output (e.g., "absolute", "relative", "exponent")
 #' @param band_label optional band name (for multi-band analyses)
 #' @return data.frame with one row per contrast: contrast, dv, band, estimate, SE, df, t_ratio, p_value, q_value, hedges_g, significant, sig_label
 run_posthoc_global <- function(data, contrasts, spatial_col = "roi",

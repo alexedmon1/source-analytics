@@ -440,7 +440,7 @@ plot_aperiodic_boxplot <- function(ap_df, dv_name, group_colors, group_labels,
     summarise(value = mean(.data[[dv_name]], na.rm = TRUE), .groups = "drop") %>%
     mutate(
       group = factor(group, levels = group_order),
-      group_label = group_labels[as.character(group)]
+      group_label = factor(group_labels[as.character(group)], levels = group_labels[group_order])
     )
 
   color_vals <- group_colors[group_order]
@@ -535,7 +535,7 @@ plot_aperiodic_by_region <- function(ap_df, roi_categories, group_colors,
     summarise(exponent = mean(exponent, na.rm = TRUE), .groups = "drop") %>%
     mutate(
       group = factor(group, levels = group_order),
-      group_label = group_labels[as.character(group)],
+      group_label = factor(group_labels[as.character(group)], levels = group_labels[group_order]),
       area = area_map[category],
       area = factor(area, levels = c("Frontal / Prefrontal", "Sensory",
                                      "Association", "Limbic / Temporal",

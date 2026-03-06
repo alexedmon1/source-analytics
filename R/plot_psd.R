@@ -60,7 +60,7 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
     ) %>%
     mutate(
       group = factor(group, levels = group_order),
-      group_label = group_labels[as.character(group)]
+      group_label = factor(group_labels[as.character(group)], levels = group_labels[group_order])
     )
 
   if (nrow(plot_data) == 0) return(invisible(NULL))
@@ -90,7 +90,7 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
 #' @param band_df data.frame with columns: subject, group, roi, band, relative, absolute, dB
 #' @param group_colors, group_labels, group_order — study config
 #' @param output_dir path to figures/ directory
-#' @param power_type one of "relative", "absolute", "dB"
+#' @param power_type one of "relative" or "absolute"
 plot_band_power_box <- function(band_df, group_colors, group_labels,
                                  group_order, output_dir,
                                  power_type = "relative", sig_df = NULL) {
@@ -102,7 +102,7 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
     summarise(value = mean(.data[[power_type]], na.rm = TRUE), .groups = "drop") %>%
     mutate(
       group = factor(group, levels = group_order),
-      group_label = group_labels[as.character(group)]
+      group_label = factor(group_labels[as.character(group)], levels = group_labels[group_order])
     )
 
   color_vals <- group_colors[group_order]
@@ -112,7 +112,7 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
   band_order <- unique(band_df$band)
   subj_means$band <- factor(subj_means$band, levels = band_order)
 
-  show_jitter <- power_type == "dB"
+  show_jitter <- power_type == "absolute"
   p <- ggplot(subj_means, aes(x = group_label, y = value, fill = group_label)) +
     geom_boxplot(width = 0.5, outlier.shape = if (show_jitter) NA else 16,
                  alpha = 0.7) +
@@ -122,8 +122,8 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
     scale_color_manual(values = color_vals, name = NULL) +
     facet_wrap(~ band, scales = "free_y", nrow = 2) +
     labs(x = NULL,
-         y = if (power_type == "dB") "Absolute Power (dB)" else paste0(tools::toTitleCase(power_type), " Power"),
-         title = if (power_type == "dB") "Absolute Band Power (dB) by Group" else paste0("Band Power (", tools::toTitleCase(power_type), ") by Group")) +
+         y = if (power_type == "absolute") "Absolute Power (dB)" else paste0(tools::toTitleCase(power_type), " Power"),
+         title = if (power_type == "absolute") "Absolute Band Power (dB) by Group" else paste0("Band Power (", tools::toTitleCase(power_type), ") by Group")) +
     theme_pub() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           legend.position = "none")
@@ -181,7 +181,7 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
 #' @param roi_categories named list of ROI name vectors
 #' @param group_colors, group_labels, group_order — study config
 #' @param output_dir path to figures/ directory
-#' @param power_type one of "relative", "absolute", "dB"
+#' @param power_type one of "relative" or "absolute"
 plot_regional_heatmap <- function(band_df, roi_categories, group_colors,
                                    group_labels, group_order, output_dir,
                                    power_type = "relative") {

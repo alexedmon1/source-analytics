@@ -125,7 +125,6 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             .agg(
                 elec_absolute=("absolute", "mean"),
                 elec_relative=("relative", "mean"),
-                elec_dB=("dB", "mean"),
             )
             .reset_index()
         )
@@ -137,7 +136,6 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             .agg(
                 source_absolute=("absolute", "mean"),
                 source_relative=("relative", "mean"),
-                source_dB=("dB", "mean"),
             )
             .reset_index()
         )
@@ -173,7 +171,6 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                 .agg(
                     source_absolute=("absolute", "mean"),
                     source_relative=("relative", "mean"),
-                    source_dB=("dB", "mean"),
                 )
                 .reset_index()
             )
@@ -197,7 +194,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
         for band in self._comparison_df["band"].unique():
             bdata = self._comparison_df[self._comparison_df["band"] == band]
 
-            for power_type in ["relative", "dB"]:
+            for power_type in ["relative", "absolute"]:
                 elec_col = f"elec_{power_type}"
                 src_col = f"source_{power_type}"
 
@@ -247,7 +244,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             regional_rows = []
 
             for band in regional_src["band"].unique():
-                for power_type in ["relative", "dB"]:
+                for power_type in ["relative", "absolute"]:
                     src_col = f"source_{power_type}"
 
                     for contrast in self.config.contrasts:
@@ -329,7 +326,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
     ) -> None:
         import matplotlib.pyplot as plt
 
-        for power_type in ["relative", "dB"]:
+        for power_type in ["relative", "absolute"]:
             pt_stats = stats_df[stats_df["power_type"] == power_type]
             # Sort bands by ascending Hz order
             bands = [b for b in BAND_ORDER if b in pt_stats["band"].values]
@@ -384,7 +381,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
     def _plot_effect_size_comparison(self, stats_df: pd.DataFrame, fig_dir: Path) -> None:
         import matplotlib.pyplot as plt
 
-        for power_type in ["relative", "dB"]:
+        for power_type in ["relative", "absolute"]:
             pt_df = stats_df[stats_df["power_type"] == power_type].copy()
             if pt_df.empty:
                 continue
@@ -462,7 +459,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
         """Heatmap: which regions exceed electrode-level sensitivity."""
         import matplotlib.pyplot as plt
 
-        for power_type in ["relative", "dB"]:
+        for power_type in ["relative", "absolute"]:
             pt_df = regional_df[regional_df["power_type"] == power_type]
             if pt_df.empty:
                 continue

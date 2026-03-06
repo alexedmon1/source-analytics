@@ -94,8 +94,8 @@ def extract_band_power_vertices(
     Returns
     -------
     dict[str, dict[str, ndarray]]
-        band_name -> {"absolute": (n_vertices,), "relative": (n_vertices,),
-        "dB": (n_vertices,)}
+        band_name -> {"absolute": (n_vertices,), "relative": (n_vertices,)}
+        where absolute is 10*log10(integrated power) in dB.
     """
     # Total power (optionally excluding noise band)
     if noise_exclude is not None:
@@ -113,9 +113,8 @@ def extract_band_power_vertices(
         if not np.any(mask):
             n = psd.shape[0]
             result[band_name] = {
-                "absolute": np.zeros(n),
+                "absolute": np.full(n, -np.inf),
                 "relative": np.zeros(n),
-                "dB": np.full(n, -np.inf),
             }
             continue
 
@@ -127,9 +126,8 @@ def extract_band_power_vertices(
         db_power = np.where(abs_power > 0, 10.0 * np.log10(abs_power), -np.inf)
 
         result[band_name] = {
-            "absolute": abs_power,
+            "absolute": db_power,
             "relative": rel_power,
-            "dB": db_power,
         }
 
     return result

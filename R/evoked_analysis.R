@@ -553,7 +553,7 @@ for (mname in measure_names) {
     p <- ggplot(plot_data, aes(x = region, y = value, fill = group)) +
       geom_boxplot(width = 0.6, alpha = 0.7, position = position_dodge(0.8),
                    outlier.shape = NA) +
-      geom_jitter(aes(color = group), width = 0.15, size = 1.5, alpha = 0.5,
+      geom_jitter(aes(color = group), size = 1.5, alpha = 0.5,
                   position = position_jitterdodge(dodge.width = 0.8, jitter.width = 0.15),
                   show.legend = FALSE) +
       scale_fill_manual(values = group_colors, labels = group_labels) +

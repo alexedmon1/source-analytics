@@ -179,7 +179,6 @@ class WholebrainAnalysis(BaseAnalysis):
                     "band": band_name,
                     "absolute": float(bp["absolute"][vi]),
                     "relative": float(bp["relative"][vi]),
-                    "dB": float(bp["dB"][vi]),
                 })
 
         for vi in range(n_vertices):
@@ -295,7 +294,7 @@ class WholebrainAnalysis(BaseAnalysis):
             # --- Band power metrics ---
             band_cluster_results = {}
             for band_name in self.config.bands:
-                for metric in ["relative", "dB", "absolute"]:
+                for metric in ["relative", "absolute"]:
                     data_a = np.array([
                         self._subject_data[uid]["band_power"][band_name][metric]
                         for uid in group_a_uids

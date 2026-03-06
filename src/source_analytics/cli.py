@@ -278,6 +278,88 @@ def cmd_list(args):
             print()
 
 
+def cmd_figure(args):
+    """Generate on-demand summary figures from pre-computed stats tables."""
+    from .viz.figure_registry import generate_figure, list_figure_types, TABLE_SCHEMAS
+
+    config = StudyConfig.from_yaml(args.study)
+
+    # --list mode
+    if args.list:
+        fig_types = list_figure_types()
+        if config.has_paradigms:
+            print(f"Study: {config.name}\n")
+            for pname, pdata in config.paradigms.items():
+                analyses = pdata.get("analyses", [])
+                print(f"  {pname}:")
+                for aname in analyses:
+                    types = fig_types.get(aname, [])
+                    if types:
+                        print(f"    {aname:<24s} {', '.join(types)}")
+                    else:
+                        print(f"    {aname:<24s} (no figure types)")
+                print()
+        else:
+            print("Available figure types:\n")
+            for aname, types in sorted(fig_types.items()):
+                print(f"  {aname:<24s} {', '.join(types)}")
+        return
+
+    # Generate mode — require paradigm + analysis + type
+    if not args.paradigm:
+        print("ERROR: --paradigm is required (or use --list to see options)")
+        sys.exit(1)
+    if not args.analysis:
+        print("ERROR: --analysis is required")
+        sys.exit(1)
+    if not args.type:
+        fig_types = list_figure_types(args.analysis)
+        available = fig_types.get(args.analysis, [])
+        print(f"ERROR: --type is required. Available for '{args.analysis}': {', '.join(available)}")
+        sys.exit(1)
+
+    # Resolve directories from config
+    if config.has_paradigms:
+        aconfig = config.for_paradigm_analysis(args.paradigm, args.analysis)
+    else:
+        aconfig = config
+
+    tbl_dir = aconfig.results_dir / "tables" / args.paradigm / args.analysis
+    fig_dir = Path(args.output) if args.output else (
+        aconfig.results_dir / "figures" / args.paradigm / args.analysis
+    )
+
+    if not tbl_dir.exists():
+        print(f"ERROR: Stats table directory not found: {tbl_dir}")
+        sys.exit(1)
+
+    # Build kwargs (analysis passed separately to generate_figure)
+    gen_kwargs = {}
+    if args.contrast:
+        gen_kwargs["contrast"] = args.contrast
+    if args.band:
+        gen_kwargs["band"] = args.band
+    if hasattr(aconfig, "roi_categories"):
+        gen_kwargs["config"] = aconfig
+    # Pass data_dir for glass_brain
+    data_dir = aconfig.output_dir / args.analysis / "data"
+    if data_dir.exists():
+        gen_kwargs["data_dir"] = data_dir
+
+    print(f"Generating {args.type} for {args.paradigm}/{args.analysis}...")
+    print(f"  Tables: {tbl_dir}")
+    print(f"  Output: {fig_dir}")
+
+    paths = generate_figure(args.analysis, args.type, tbl_dir, fig_dir, **gen_kwargs)
+
+    if paths:
+        print(f"\nGenerated {len(paths)} figure(s):")
+        for p in paths:
+            print(f"  {p}")
+    else:
+        print("\nNo figures generated (no data matched filters or no significant results).")
+
+
 def cmd_init(args):
     """Scaffold a source-analytics YAML config from a paradigm directory."""
     paradigm_dir = Path(args.paradigm_dir).resolve()
@@ -377,56 +459,6 @@ def cmd_init(args):
         print(f"  UNKNOWN: n={n_unknown} (edit config to assign groups)")
 
 
-def cmd_report(args):
-    """Generate a results report from completed analyses."""
-    from .report import generate_report, ColorMode
-
-    config = StudyConfig.from_yaml(args.study)
-
-    if not config.has_paradigms:
-        print("ERROR: report requires a multi-paradigm study config.")
-        sys.exit(1)
-
-    output_path = Path(args.output).resolve() if args.output else None
-
-    no_figures = getattr(args, "no_figures", False)
-    color_mode = ColorMode(args.color_mode)
-
-    try:
-        out = generate_report(config, output_path=output_path,
-                              max_figures=args.max_figures,
-                              no_figures=no_figures,
-                              color_mode=color_mode)
-        print(f"Report generated: {out}")
-    except Exception as e:
-        print(f"ERROR: {e}")
-        sys.exit(1)
-
-    if args.render:
-        from .render import render_report
-        try:
-            rendered = render_report(out, output_format=args.format)
-            print(f"Rendered: {rendered}")
-        except Exception as e:
-            print(f"WARNING: Render failed: {e}")
-            print("The .qmd file was still generated successfully.")
-
-
-def cmd_render(args):
-    """Render a report file (.md or .qmd) to PDF or HTML."""
-    from .render import render_report
-
-    input_path = Path(args.input).resolve()
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else None
-
-    try:
-        out = render_report(input_path, output_format=args.format, output_dir=output_dir)
-        print(f"Rendered: {out}")
-    except Exception as e:
-        print(f"ERROR: {e}")
-        sys.exit(1)
-
-
 def main():
     parser = argparse.ArgumentParser(
         prog="source-analytics",
@@ -458,49 +490,24 @@ def main():
     p_list.add_argument("--study", type=Path, help="Study YAML (shows paradigm-aware listing)")
     p_list.set_defaults(func=cmd_list)
 
+    # figure
+    p_fig = subparsers.add_parser("figure", help="Generate on-demand summary figures")
+    p_fig.add_argument("--study", required=True, type=Path, help="Path to study YAML config")
+    p_fig.add_argument("--paradigm", help="Paradigm name")
+    p_fig.add_argument("--analysis", help="Analysis name")
+    p_fig.add_argument("--type", help="Figure type (effect_heatmap, volcano, circos, glass_brain)")
+    p_fig.add_argument("--list", action="store_true", help="List available figure types")
+    p_fig.add_argument("--contrast", help="Filter to specific contrast")
+    p_fig.add_argument("--band", help="Filter to specific band")
+    p_fig.add_argument("--output", type=Path, help="Custom output directory")
+    p_fig.set_defaults(func=cmd_figure)
+
     # init
     p_init = subparsers.add_parser("init", help="Scaffold analysis config from paradigm directory")
     p_init.add_argument("paradigm_dir", type=Path, help="Paradigm directory (contains derivatives/)")
     p_init.add_argument("--name", help="Study name (default: directory name)")
     p_init.add_argument("--groups-from", type=Path, help="source-localization study_config.yaml for group mappings")
     p_init.set_defaults(func=cmd_init)
-
-    # report
-    p_report = subparsers.add_parser("report", help="Generate results report from completed analyses")
-    p_report.add_argument("--study", required=True, type=Path, help="Path to study YAML config")
-    p_report.add_argument("--output", type=Path, help="Output .qmd path (default: results_dir/reports/results_report.qmd)")
-    p_report.add_argument("--render", action="store_true", help="Also render via Quarto after generating")
-    p_report.add_argument(
-        "-f", "--format", choices=["pdf", "html"], default="html",
-        help="Render format when --render is used (default: html)",
-    )
-    p_report.add_argument(
-        "--no-figures", action="store_true", default=False,
-        help="Skip on-demand figure generation; use only pre-existing figures",
-    )
-    p_report.add_argument(
-        "--max-figures", type=int, default=4,
-        help="Maximum figures per analysis section (default: 4)",
-    )
-    p_report.add_argument(
-        "--color-mode", choices=["analysis", "publication"], default="analysis",
-        help="Color scheme: 'analysis' uses per-analysis themes, "
-        "'publication' uses uniform colors from config (default: analysis)",
-    )
-    p_report.set_defaults(func=cmd_report)
-
-    # render
-    p_render = subparsers.add_parser("render", help="Render a report (.md/.qmd) to PDF or HTML")
-    p_render.add_argument("input", type=Path, help="Input .md or .qmd file")
-    p_render.add_argument(
-        "-f", "--format", choices=["pdf", "html"], default="pdf",
-        help="Output format (default: pdf)",
-    )
-    p_render.add_argument(
-        "-o", "--output-dir", type=Path,
-        help="Output directory (default: same as input file)",
-    )
-    p_render.set_defaults(func=cmd_render)
 
     args = parser.parse_args()
     setup_logging(args.verbose)

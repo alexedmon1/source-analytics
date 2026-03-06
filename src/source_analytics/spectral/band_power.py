@@ -11,7 +11,7 @@ def extract_band_power(
     psd: np.ndarray,
     bands: dict[str, tuple[float, float]],
 ) -> dict[str, dict[str, float]]:
-    """Extract absolute, relative, and dB band power from a PSD.
+    """Extract absolute (dB) and relative band power from a PSD.
 
     Parameters
     ----------
@@ -25,7 +25,8 @@ def extract_band_power(
     Returns
     -------
     dict[str, dict[str, float]]
-        For each band: {"absolute": ..., "relative": ..., "dB": ...}
+        For each band: {"absolute": ..., "relative": ...}
+        where absolute is 10*log10(integrated power) in dB.
     """
     total_power = trapezoid(psd, freqs)
     if total_power <= 0:
@@ -35,7 +36,7 @@ def extract_band_power(
     for band_name, (fmin, fmax) in bands.items():
         mask = (freqs >= fmin) & (freqs <= fmax)
         if not np.any(mask):
-            result[band_name] = {"absolute": 0.0, "relative": 0.0, "dB": -np.inf}
+            result[band_name] = {"absolute": -np.inf, "relative": 0.0}
             continue
 
         band_freqs = freqs[mask]
@@ -46,9 +47,8 @@ def extract_band_power(
         db_power = 10 * np.log10(abs_power) if abs_power > 0 else -np.inf
 
         result[band_name] = {
-            "absolute": abs_power,
+            "absolute": float(db_power),
             "relative": rel_power,
-            "dB": float(db_power),
         }
 
     return result
@@ -63,7 +63,7 @@ def extract_band_power_multiroi(
     Returns
     -------
     dict[str, dict[str, dict[str, float]]]
-        roi_name -> band_name -> {"absolute", "relative", "dB"}
+        roi_name -> band_name -> {"absolute", "relative"}
     """
     return {
         roi_name: extract_band_power(freqs, psd, bands)

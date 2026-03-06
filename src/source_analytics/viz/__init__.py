@@ -33,6 +33,13 @@ from .palettes import (
     get_r_gradient2,
 )
 from .radar import plot_radar
+from .figure_registry import (
+    generate_figure,
+    list_figure_types,
+    FIGURE_REGISTRY,
+    FIGURE_TYPES,
+    TABLE_SCHEMAS,
+)
 
 __all__ = [
     "BAND_ORDER",
@@ -62,4 +69,9 @@ __all__ = [
     "get_diverging_cmap_name",
     "get_r_gradient2",
     "plot_radar",
+    "generate_figure",
+    "list_figure_types",
+    "FIGURE_REGISTRY",
+    "FIGURE_TYPES",
+    "TABLE_SCHEMAS",
 ]

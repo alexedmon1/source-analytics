@@ -89,7 +89,7 @@ message("Bands: ", paste(names(config$bands), collapse = ", "))
 
 if (!figures_only) {
   # --- Run LMMs for each power type ---
-  power_types <- c("relative", "dB")
+  power_types <- c("relative", "absolute")
 
   all_omnibus <- list()
   all_posthoc <- list()
@@ -283,7 +283,7 @@ if (!figures_only) {
 message("\nGenerating figures...")
 
 # Band power boxplots (with significance brackets)
-for (ptype in c("relative", "dB")) {
+for (ptype in c("relative", "absolute")) {
   ptype_sig <- if (nrow(global_posthoc_df) > 0) {
     global_posthoc_df %>% filter(dv == ptype)
   } else NULL

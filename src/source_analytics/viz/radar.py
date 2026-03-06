@@ -34,7 +34,7 @@ def plot_radar(
     region_df: pd.DataFrame,
     output_path: str | Path,
     *,
-    value_col: str = "dB",
+    value_col: str = "absolute",
     reference_group: str = "Vehicle",
     treatment_groups: list[str] | None = None,
     bands: list[str] | None = None,
@@ -55,7 +55,7 @@ def plot_radar(
     output_path : str or Path
         Output PNG path.
     value_col : str
-        Column name for the measure to plot (default ``"dB"``).
+        Column name for the measure to plot (default ``"absolute"``).
     reference_group : str
         Group to normalize against (dashed zero line).
     treatment_groups : list[str], optional
