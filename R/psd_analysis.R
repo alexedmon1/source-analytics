@@ -312,6 +312,34 @@ if (nrow(posthoc_region_df) > 0) {
   plot_region_significance_heatmap(posthoc_region_df, fig_dir)
 }
 
+# Band-by-region figure for significant bands
+if (length(config$roi_categories) > 0) {
+  # Combine region posthoc from both figures_only and normal path
+  region_ph <- if (exists("posthoc_region_df") && nrow(posthoc_region_df) > 0) {
+    posthoc_region_df
+  } else {
+    tryCatch(read_csv(file.path(tbl_dir, "psd_posthoc_region.csv"), show_col_types = FALSE),
+             error = function(e) data.frame())
+  }
+
+  if (nrow(region_ph) > 0) {
+    sig_bands <- region_ph %>%
+      filter(significant == TRUE) %>%
+      distinct(band, power_type, contrast)
+
+    for (i in seq_len(nrow(sig_bands))) {
+      b <- sig_bands$band[i]
+      pt <- sig_bands$power_type[i]
+      ctr <- sig_bands$contrast[i]
+      message("  Plotting band-by-region: ", b, " (", pt, ", ", ctr, ")")
+      plot_band_by_region(band_df, config$roi_categories, group_colors,
+                          group_labels, group_order, fig_dir,
+                          target_band = b, power_type = pt,
+                          posthoc_region_df = region_ph, contrast = ctr)
+    }
+  }
+}
+
 if (!figures_only) {
   # --- Summary report ---
   message("\nWriting summary...")

@@ -36,7 +36,9 @@ theme_pub <- function(base_size = 14) {
 #' @param fmax maximum frequency to display
 plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
                                 group_labels, group_order, output_dir,
-                                fmax = 110) {
+                                fmax = 80, notch_lo = 55, notch_hi = 65) {
+
+  notch_width <- notch_hi - notch_lo
 
   # Map ROIs to categories
   roi_to_cat <- data.frame(
@@ -47,11 +49,10 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
 
   plot_data <- psd_df %>%
     inner_join(roi_to_cat, by = "roi") %>%
-    filter(freq_hz <= fmax, group %in% group_order) %>%
-    # Average across ROIs within category per subject
+    filter(freq_hz <= fmax, group %in% group_order,
+           !(freq_hz >= notch_lo & freq_hz <= notch_hi)) %>%
     group_by(subject, group, category, freq_hz) %>%
     summarise(psd = mean(psd, na.rm = TRUE), .groups = "drop") %>%
-    # Group-level mean and SEM
     group_by(group, category, freq_hz) %>%
     summarise(
       mean_psd = mean(psd, na.rm = TRUE),
@@ -60,7 +61,10 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
     ) %>%
     mutate(
       group = factor(group, levels = group_order),
-      group_label = factor(group_labels[as.character(group)], levels = group_labels[group_order])
+      group_label = factor(group_labels[as.character(group)], levels = group_labels[group_order]),
+      # Shift frequencies above notch leftward to close the gap
+      freq_plot = ifelse(freq_hz > notch_hi, freq_hz - notch_width, freq_hz),
+      segment = ifelse(freq_hz < notch_lo, "low", "high")
     )
 
   if (nrow(plot_data) == 0) return(invisible(NULL))
@@ -68,16 +72,60 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
   color_vals <- group_colors[group_order]
   names(color_vals) <- group_labels[group_order]
 
-  p <- ggplot(plot_data, aes(x = freq_hz, y = mean_psd, color = group_label, fill = group_label)) +
-    geom_ribbon(aes(ymin = mean_psd - sem_psd, ymax = mean_psd + sem_psd), alpha = 0.2, color = NA) +
-    geom_line(linewidth = 0.8) +
-    scale_y_log10(labels = label_scientific()) +
+  # Custom x-axis breaks and labels (show true Hz values)
+  breaks_low <- seq(0, notch_lo, by = 10)
+  breaks_high_real <- seq(notch_hi + 5, fmax, by = 10)
+  breaks_high_plot <- breaks_high_real - notch_width
+  all_breaks <- c(breaks_low, breaks_high_plot)
+  all_labels <- c(as.character(breaks_low), as.character(breaks_high_real))
+
+  # Position of the break marker (in plot coords)
+  break_x <- notch_lo
+
+  # Frequency band definitions (in real Hz) and their plot-space boundaries
+  to_plot_x <- function(hz) ifelse(hz > notch_hi, hz - notch_width, pmin(hz, notch_lo))
+  fmax_plot <- to_plot_x(fmax)
+
+  bands <- data.frame(
+    label = c("\u03b4", "\u03b8", "\u03b1", "\u03b2", "\u03b3L", "\u03b3H"),
+    xmin  = c(  1,   4,  10,  13,  30, to_plot_x(65)),
+    xmax  = c(  4,  10,  13,  30,  55, to_plot_x(80)),
+    stringsAsFactors = FALSE
+  )
+  bands$xmax <- pmin(bands$xmax, fmax_plot)
+  bands <- bands[bands$xmin < bands$xmax, ]
+  bands$xmid <- (bands$xmin + bands$xmax) / 2
+
+  p <- ggplot(plot_data, aes(x = freq_plot, y = mean_psd,
+                              color = group_label, fill = group_label))
+
+  # Band Greek labels at top of each panel
+  for (i in seq_len(nrow(bands))) {
+    p <- p + annotate("text",
+                       x = bands$xmid[i], y = Inf,
+                       label = bands$label[i],
+                       vjust = 1.5, size = 3.5,
+                       color = "grey40", fontface = "bold.italic")
+  }
+
+  p <- p +
+    geom_ribbon(aes(ymin = mean_psd - sem_psd, ymax = mean_psd + sem_psd,
+                    group = interaction(group_label, segment)),
+                alpha = 0.2, color = NA) +
+    geom_line(aes(group = interaction(group_label, segment)), linewidth = 0.8) +
+    geom_vline(xintercept = break_x, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    scale_x_continuous(breaks = all_breaks, labels = all_labels,
+                       expand = expansion(mult = c(0.02, 0.02))) +
+    scale_y_log10(labels = label_scientific(),
+                  expand = expansion(mult = c(0.05, 0.15))) +
     scale_color_manual(values = color_vals, name = NULL) +
     scale_fill_manual(values = color_vals, name = NULL) +
     facet_wrap(~ category, scales = "free_y") +
     labs(x = "Frequency (Hz)", y = "PSD (log scale)",
-         title = "Power Spectral Density by Region") +
-    theme_pub()
+         title = "Power Spectral Density by Region",
+         caption = "Dashed line: 55\u201365 Hz notch excluded") +
+    theme_pub() +
+    theme(plot.caption = element_text(hjust = 0.5, size = 10, color = "grey40"))
 
   ggsave(file.path(output_dir, "psd_by_region.png"), p,
          width = 12, height = 8, dpi = 300)
@@ -333,4 +381,103 @@ plot_region_significance_heatmap <- function(posthoc_region_df, output_dir) {
       message("  Saved: ", fname)
     }
   }
+}
+
+
+#' Band power by region for a single band, with significance markers
+#'
+#' @param band_df data.frame with columns: subject, group, roi, band, relative, absolute
+#' @param roi_categories named list of ROI name vectors
+#' @param group_colors, group_labels, group_order — study config
+#' @param output_dir path to figures/ directory
+#' @param target_band character: band name to plot
+#' @param power_type one of "relative" or "absolute"
+#' @param posthoc_region_df data.frame from run_posthoc_emmeans_region() (optional)
+#' @param contrast character: which contrast to show significance for (optional)
+plot_band_by_region <- function(band_df, roi_categories, group_colors,
+                                 group_labels, group_order, output_dir,
+                                 target_band, power_type = "absolute",
+                                 posthoc_region_df = NULL, contrast = NULL) {
+
+  roi_to_cat <- data.frame(
+    roi = unlist(roi_categories),
+    category = rep(names(roi_categories), lengths(roi_categories)),
+    stringsAsFactors = FALSE
+  )
+
+  # Subject-level region means
+  subj_region <- band_df %>%
+    filter(band == target_band, group %in% group_order) %>%
+    inner_join(roi_to_cat, by = "roi") %>%
+    group_by(subject, group, category) %>%
+    summarise(value = mean(.data[[power_type]], na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      group = factor(group, levels = group_order),
+      group_label = factor(group_labels[as.character(group)], levels = group_labels[group_order]),
+      category = factor(category, levels = names(roi_categories))
+    )
+
+  if (nrow(subj_region) == 0) return(invisible(NULL))
+
+  color_vals <- group_colors[group_order]
+  names(color_vals) <- group_labels[group_order]
+
+  y_label <- if (power_type == "absolute") "Absolute Power (dB)" else "Relative Power"
+  band_label <- gsub("_", " ", tools::toTitleCase(target_band))
+
+  p <- ggplot(subj_region, aes(x = category, y = value, fill = group_label)) +
+    geom_boxplot(width = 0.6, outlier.shape = NA, alpha = 0.7,
+                 position = position_dodge(width = 0.7)) +
+    geom_jitter(aes(color = group_label),
+                position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.7),
+                size = 1.5, alpha = 0.6, show.legend = FALSE) +
+    scale_fill_manual(values = color_vals, name = NULL) +
+    scale_color_manual(values = color_vals, name = NULL) +
+    labs(x = NULL, y = y_label,
+         title = paste0(band_label, " Power by Region")) +
+    theme_pub() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+  # Add significance markers for specific contrast
+  if (!is.null(posthoc_region_df) && nrow(posthoc_region_df) > 0 && !is.null(contrast)) {
+    sig_regions <- posthoc_region_df %>%
+      filter(band == target_band, power_type == !!power_type,
+             contrast == !!contrast, significant == TRUE)
+
+    if (nrow(sig_regions) > 0) {
+      # Get y positions for brackets
+      y_ranges <- subj_region %>%
+        group_by(category) %>%
+        summarise(y_max = max(value, na.rm = TRUE),
+                  y_range = diff(range(value, na.rm = TRUE)),
+                  .groups = "drop")
+
+      # Extract group labels for the contrast
+      parts <- strsplit(contrast, "_vs_")[[1]]
+      label_a <- group_labels[parts[1]]
+      label_b <- group_labels[parts[2]]
+
+      for (i in seq_len(nrow(sig_regions))) {
+        row <- sig_regions[i, ]
+        reg_range <- y_ranges %>% filter(category == row$region)
+        if (nrow(reg_range) == 0) next
+
+        y_pos <- reg_range$y_max[1] + reg_range$y_range[1] * 0.12
+
+        sig_label <- if ("sig_label" %in% names(sig_regions) && nchar(row$sig_label) > 0) {
+          row$sig_label
+        } else {
+          "*"
+        }
+
+        p <- p + annotate("text", x = row$region, y = y_pos,
+                           label = sig_label, size = 7, fontface = "bold")
+      }
+    }
+  }
+
+  fname <- paste0("band_by_region_", target_band, "_", power_type, ".png")
+  ggsave(file.path(output_dir, fname), p,
+         width = 12, height = 6, dpi = 300)
+  message("  Saved: ", fname)
 }

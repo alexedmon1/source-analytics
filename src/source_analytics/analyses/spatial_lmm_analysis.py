@@ -193,7 +193,7 @@ class SpatialLMMAnalysis(BaseAnalysis):
 
         contrasts = self.config.contrasts
         for contrast in contrasts:
-            ga, gb = contrast["groups"]
+            ga, gb = contrast.group_a, contrast.group_b
             contrast_name = f"{ga}_vs_{gb}"
 
             band_data = {}
