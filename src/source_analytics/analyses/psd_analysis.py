@@ -172,6 +172,7 @@ class PSDAnalysis(BaseAnalysis):
             "--fig-dir", str(self.fig_dir),
             "--tbl-dir", str(self.tbl_dir),
         ]
+        cmd.extend(self._r_no_figures_flags())
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:
@@ -196,7 +197,8 @@ class PSDAnalysis(BaseAnalysis):
             logger.error("R script timed out after 600 seconds")
 
         # Render brain mosaics from posthoc effect sizes
-        self._render_brain_mosaics()
+        if self._generate_figures:
+            self._render_brain_mosaics()
 
     def _render_brain_mosaics(self) -> None:
         """Render brain ROI mosaics from PSD posthoc CSVs."""

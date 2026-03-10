@@ -232,6 +232,7 @@ class EvokedAnalysis(BaseAnalysis):
             "--fig-dir", str(self.fig_dir),
             "--tbl-dir", str(self.tbl_dir),
         ]
+        cmd.extend(self._r_no_figures_flags())
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:

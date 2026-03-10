@@ -14,9 +14,17 @@ option_list <- list(
   make_option("--fig-dir", type = "character", default = NULL,
               help = "Directory for figures (default: output-dir/figures)"),
   make_option("--tbl-dir", type = "character", default = NULL,
-              help = "Directory for tables (default: output-dir/tables)")
+              help = "Directory for tables (default: output-dir/tables)"),
+  make_option("--no-figures", action = "store_true", default = FALSE,
+              help = "Skip all figure generation")
 )
 opts <- parse_args(OptionParser(option_list = option_list))
+
+no_figures <- isTRUE(opts[["no-figures"]])
+
+if (no_figures) {
+  ggsave <- function(...) invisible(NULL)
+}
 
 data_dir    <- opts[["data-dir"]]
 config_path <- opts[["config"]]

@@ -338,6 +338,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
                     "--fig-dir", str(self.fig_dir),
                     "--tbl-dir", str(self.tbl_dir),
                 ]
+                cmd.extend(self._r_no_figures_flags())
                 result = subprocess.run(
                     cmd, capture_output=True, text=True, timeout=600,
                 )

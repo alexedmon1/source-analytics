@@ -10,9 +10,17 @@ suppressPackageStartupMessages({
 option_list <- list(
   make_option("--data-dir", type = "character", help = "Path to data/ directory"),
   make_option("--config",   type = "character", help = "Path to study_config.yaml"),
-  make_option("--output-dir", type = "character", help = "Path to output directory")
+  make_option("--output-dir", type = "character", help = "Path to output directory"),
+  make_option("--no-figures", action = "store_true", default = FALSE,
+              help = "Skip all figure generation")
 )
 opts <- parse_args(OptionParser(option_list = option_list))
+
+no_figures <- isTRUE(opts[["no-figures"]])
+
+if (no_figures) {
+  ggsave <- function(...) invisible(NULL)
+}
 
 data_dir    <- opts[["data-dir"]]
 config_path <- opts[["config"]]

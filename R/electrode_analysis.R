@@ -41,11 +41,18 @@ parser$add_argument("--fig-dir", default = NULL,
                     help = "Directory for figures (default: output-dir/figures)")
 parser$add_argument("--tbl-dir", default = NULL,
                     help = "Directory for tables (default: output-dir/tables)")
+parser$add_argument("--no-figures", action = "store_true", default = FALSE,
+                    help = "Skip all figure generation (stats/tables only)")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
 config_path <- args$config
 output_dir <- args$output_dir
+no_figures <- args$no_figures
+
+if (no_figures) {
+  ggsave <- function(...) invisible(NULL)
+}
 
 fig_dir <- if (!is.null(args$fig_dir)) args$fig_dir else file.path(output_dir, "figures")
 tbl_dir <- if (!is.null(args$tbl_dir)) args$tbl_dir else file.path(output_dir, "tables")

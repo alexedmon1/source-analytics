@@ -13,6 +13,7 @@ from ..io.discovery import SubjectInfo
 logger = logging.getLogger(__name__)
 
 VALID_STEPS = {"setup", "process", "aggregate", "statistics", "figures", "summary"}
+DEFAULT_RUN_STEPS = VALID_STEPS - {"figures"}
 
 
 def find_r_script_dir() -> Path:
@@ -44,6 +45,7 @@ class BaseAnalysis(ABC):
     def __init__(self, config: StudyConfig, output_dir: Path):
         self.config = config
         self.output_dir = output_dir
+        self._generate_figures = True
         self.output_dir.mkdir(parents=True, exist_ok=True)
         (self.output_dir / "data").mkdir(exist_ok=True)
         # figures and tables go under results_dir
@@ -168,6 +170,12 @@ class BaseAnalysis(ABC):
             logger.error("R figures-only timed out after 300s")
             return False
 
+    def _r_no_figures_flags(self) -> list[str]:
+        """Return ['--no-figures'] if figure generation is disabled, else []."""
+        if not self._generate_figures:
+            return ["--no-figures"]
+        return []
+
     def run(self, subjects: list[SubjectInfo], steps: set[str] | None = None) -> None:
         """Execute the analysis lifecycle.
 
@@ -177,14 +185,17 @@ class BaseAnalysis(ABC):
             Subjects to process.
         steps : set[str] | None
             If provided, only run these steps (from VALID_STEPS).
-            ``setup`` always runs. If None, run all steps.
+            ``setup`` always runs. If None, run DEFAULT_RUN_STEPS
+            (all steps except ``figures``).
         """
         logger.info("=== %s Analysis ===", self.name)
-        if steps is not None:
-            logger.info("Running steps: %s", ", ".join(sorted(steps)))
+        if steps is None:
+            steps = DEFAULT_RUN_STEPS
+        self._generate_figures = "figures" in steps
+        logger.info("Running steps: %s", ", ".join(sorted(steps)))
 
         def _should_run(step: str) -> bool:
-            return steps is None or step in steps
+            return step in steps
 
         logger.info("Step 1/6: Setup")
         self.setup()
