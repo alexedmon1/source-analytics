@@ -2,7 +2,6 @@
 
 Computes PSD once per subject for all 154 shell vertices, then extracts:
 - Relative and absolute band power per vertex per band
-- fALFF (high-gamma / total power ratio)
 - Spectral slope (1/f exponent)
 - Peak alpha frequency
 
@@ -27,7 +26,6 @@ from ..io.loader import SubjectLoader
 from ..spectral.vertex import (
     compute_psd_vertices,
     extract_band_power_vertices,
-    compute_falff,
     compute_spectral_slope,
     compute_peak_frequency,
 )
@@ -156,7 +154,6 @@ class WholebrainAnalysis(BaseAnalysis):
         )
 
         # Compute additional features
-        falff = compute_falff(freqs, psd)
         slope = compute_spectral_slope(freqs, psd)
         peak_alpha = compute_peak_frequency(freqs, psd, search_range=(6, 13))
 
@@ -164,7 +161,6 @@ class WholebrainAnalysis(BaseAnalysis):
         self._subject_groups[uid] = subject.group
         self._subject_data[uid] = {
             "band_power": band_power,
-            "falff": falff,
             "slope": slope,
             "peak_alpha": peak_alpha,
         }
@@ -186,7 +182,6 @@ class WholebrainAnalysis(BaseAnalysis):
                 "subject": uid,
                 "group": subject.group,
                 "vertex_idx": int(self._vertex_indices[vi]),
-                "falff": float(falff[vi]),
                 "spectral_slope": float(slope[vi]),
                 "peak_alpha_freq": float(peak_alpha[vi]),
             })
@@ -362,10 +357,9 @@ class WholebrainAnalysis(BaseAnalysis):
                                 "p_corrected": float(cp),
                             })
 
-            # --- Feature metrics (falff, slope, peak_alpha) ---
+            # --- Feature metrics (slope, peak_alpha) ---
             feature_cluster_results = {}
             for feat_name, feat_key in [
-                ("falff", "falff"),
                 ("spectral_slope", "slope"),
                 ("peak_alpha", "peak_alpha"),
             ]:
@@ -680,7 +674,7 @@ class WholebrainAnalysis(BaseAnalysis):
         lines.extend(["", "## Methods", ""])
         lines.append(
             "Power spectral density was computed for each source vertex using Welch's method "
-            "(2-second windows, 50% overlap). Band power (absolute and relative), fALFF, "
+            "(2-second windows, 50% overlap). Band power (absolute and relative), "
             "spectral slope, and peak alpha frequency were extracted per vertex. "
             + correction_desc
         )
@@ -739,7 +733,7 @@ class WholebrainAnalysis(BaseAnalysis):
         lines.append("## Output Files")
         lines.append("")
         lines.append("- `data/wholebrain_values.csv` — per-subject per-vertex band power")
-        lines.append("- `data/wholebrain_features.csv` — per-subject per-vertex fALFF, slope, peak alpha")
+        lines.append("- `data/wholebrain_features.csv` — per-subject per-vertex slope, peak alpha")
         lines.append("- `data/source_coords.csv` — vertex coordinates (mm)")
         lines.append("- `tables/voxelwise_stats.csv` — per-vertex statistics")
         if not is_tfce:
