@@ -10,7 +10,19 @@ from .cluster_permutation import (
 )
 from .tfce import TFCEResult, compute_tfce_scores, tfce_permutation_test
 from .mvpa import MVPAResult, run_mvpa
-from .graph_metrics import GraphMetrics, NBSResult, compute_graph_metrics, nbs_permutation_test
+from .graph_metrics import (
+    GlobalMetrics,
+    GraphMetrics,
+    ROIGraphMetrics,
+    NBSResult,
+    AUCResult,
+    GLOBAL_METRIC_NAMES,
+    compute_global_metrics,
+    compute_graph_metrics,
+    compute_auc,
+    auc_permutation_test,
+    nbs_permutation_test,
+)
 
 __all__ = [
     "ClusterResult",
@@ -24,8 +36,15 @@ __all__ = [
     "tfce_permutation_test",
     "MVPAResult",
     "run_mvpa",
+    "GlobalMetrics",
     "GraphMetrics",
+    "ROIGraphMetrics",
     "NBSResult",
+    "AUCResult",
+    "GLOBAL_METRIC_NAMES",
+    "compute_global_metrics",
     "compute_graph_metrics",
+    "compute_auc",
+    "auc_permutation_test",
     "nbs_permutation_test",
 ]

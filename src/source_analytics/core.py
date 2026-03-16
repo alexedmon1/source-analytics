@@ -47,16 +47,16 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
 
 # Metadata for grouping and display
 ANALYSIS_METADATA: dict[str, dict[str, str]] = {
-    "psd":                  {"category": "resting", "level": "roi",        "description": "Power spectral density"},
+    "psd":                  {"category": "resting", "level": "roi",        "description": "PSD (power spectral density)"},
     "aperiodic":            {"category": "resting", "level": "roi",        "description": "1/f aperiodic decomposition"},
     "roi_connectivity":     {"category": "resting", "level": "roi",        "description": "ROI pairwise connectivity"},
-    "pac":                  {"category": "resting", "level": "roi",        "description": "Phase-amplitude coupling"},
+    "pac":                  {"category": "resting", "level": "roi",        "description": "PAC (phase-amplitude coupling)"},
     "roi_network":          {"category": "resting", "level": "roi",        "description": "ROI-level graph theory network metrics"},
     "vertex_network":       {"category": "resting", "level": "wholebrain", "description": "Vertex-level graph theory network metrics"},
     "transfer_entropy":     {"category": "resting", "level": "roi",        "description": "Directed information flow"},
-    "mvpa":                 {"category": "resting", "level": "wholebrain", "description": "SVM pattern classification"},
+    "mvpa":                 {"category": "resting", "level": "wholebrain", "description": "MVPA (SVM pattern classification)"},
     "wholebrain":           {"category": "resting", "level": "wholebrain", "description": "Vertex-level cluster permutation"},
-    "spatial_lmm":          {"category": "resting", "level": "wholebrain", "description": "Vertex-level LMM statistics"},
+    "spatial_lmm":          {"category": "resting", "level": "wholebrain", "description": "Spatial LMM (vertex-level linear mixed models)"},
     "specparam_vertex":     {"category": "resting", "level": "wholebrain", "description": "Vertex-level spectral parameterization"},
     "vertex_connectivity":  {"category": "resting", "level": "wholebrain", "description": "Vertex pairwise connectivity"},
     "electrode":            {"category": "resting", "level": "electrode",  "description": "Sensor-level PSD analysis"},

@@ -254,10 +254,10 @@ def cmd_list(args):
 
     # Display headers
     category_labels = {
-        "resting|roi": "Resting State (ROI level)",
-        "resting|wholebrain": "Resting State (Wholebrain level)",
-        "resting|electrode": "Resting State (Electrode level)",
-        "evoked|roi": "Evoked Response",
+        "resting|roi": "Resting State (ROI Level)",
+        "resting|wholebrain": "Resting State (Wholebrain Level)",
+        "resting|electrode": "Resting State (Electrode Level)",
+        "evoked|roi": "Evoked Response (ROI Level)",
     }
 
     print("Available analyses:\n")
