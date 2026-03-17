@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
-# aperiodic_analysis.R — Main R entry point for aperiodic (1/f) statistical analysis
+# roi_aperiodic_analysis.R — Main R entry point for aperiodic (1/f) statistical analysis
 #
-# Called by Python: Rscript R/aperiodic_analysis.R --data-dir ... --config ... --output-dir ...
+# Called by Python: Rscript R/roi_aperiodic_analysis.R --data-dir ... --config ... --output-dir ...
 #
 # Reads aperiodic_params.csv exported by Python,
 # runs omnibus LMM + emmeans post-hoc for exponent and offset DVs,
@@ -498,7 +498,7 @@ plot_aperiodic_boxplot <- function(ap_df, dv_name, group_colors, group_labels,
     }
   }
 
-  fname <- paste0("aperiodic_", dv_name, "_boxplot.png")
+  fname <- paste0("roi_aperiodic_", dv_name, "_boxplot.png")
   ggsave(file.path(output_dir, fname), p, width = 5, height = 5, dpi = 300)
   message("  Saved: ", fname)
 }
@@ -607,9 +607,9 @@ plot_aperiodic_by_region <- function(ap_df, roi_categories, group_colors,
     }
   }
 
-  ggsave(file.path(output_dir, "aperiodic_by_region.png"), p,
+  ggsave(file.path(output_dir, "roi_aperiodic_by_region.png"), p,
          width = 14, height = 10, dpi = 300)
-  message("  Saved: aperiodic_by_region.png")
+  message("  Saved: roi_aperiodic_by_region.png")
 }
 
 
@@ -662,7 +662,7 @@ plot_aperiodic_significance_heatmap <- function(posthoc_df, output_dir) {
         axis.text.x = element_text(size = 11)
       )
 
-    fname <- paste0("aperiodic_significance_heatmap_", cname, ".png")
+    fname <- paste0("roi_aperiodic_significance_heatmap_", cname, ".png")
     ggsave(file.path(output_dir, fname), p,
            width = 6, height = max(6, n_rois * 0.22 + 2),
            dpi = 300, limitsize = FALSE)
@@ -974,20 +974,20 @@ if (!figures_only) {
   # --- Export tables ---
   message("\nExporting tables...")
   if (nrow(omnibus_df) > 0) {
-    write_csv(omnibus_df, file.path(tbl_dir, "aperiodic_omnibus.csv"))
-    message("  Saved: tables/aperiodic_omnibus.csv")
+    write_csv(omnibus_df, file.path(tbl_dir, "roi_aperiodic_omnibus.csv"))
+    message("  Saved: tables/roi_aperiodic_omnibus.csv")
   }
   if (nrow(posthoc_df) > 0) {
-    write_csv(posthoc_df, file.path(tbl_dir, "aperiodic_posthoc_roi.csv"))
-    message("  Saved: tables/aperiodic_posthoc_roi.csv")
+    write_csv(posthoc_df, file.path(tbl_dir, "roi_aperiodic_posthoc_roi.csv"))
+    message("  Saved: tables/roi_aperiodic_posthoc_roi.csv")
   }
   if (nrow(omnibus_region_df) > 0) {
-    write_csv(omnibus_region_df, file.path(tbl_dir, "aperiodic_omnibus_region.csv"))
-    message("  Saved: tables/aperiodic_omnibus_region.csv")
+    write_csv(omnibus_region_df, file.path(tbl_dir, "roi_aperiodic_omnibus_region.csv"))
+    message("  Saved: tables/roi_aperiodic_omnibus_region.csv")
   }
   if (nrow(posthoc_region_df) > 0) {
-    write_csv(posthoc_region_df, file.path(tbl_dir, "aperiodic_posthoc_region.csv"))
-    message("  Saved: tables/aperiodic_posthoc_region.csv")
+    write_csv(posthoc_region_df, file.path(tbl_dir, "roi_aperiodic_posthoc_region.csv"))
+    message("  Saved: tables/roi_aperiodic_posthoc_region.csv")
   }
 
   # --- Global posthoc (marginal group comparisons averaged over ROIs) ---
@@ -1005,18 +1005,18 @@ if (!figures_only) {
   global_posthoc_df <- bind_rows(global_posthoc_list)
 
   if (nrow(global_posthoc_df) > 0) {
-    write_csv(global_posthoc_df, file.path(tbl_dir, "aperiodic_posthoc_global.csv"))
-    message("  Saved: tables/aperiodic_posthoc_global.csv")
+    write_csv(global_posthoc_df, file.path(tbl_dir, "roi_aperiodic_posthoc_global.csv"))
+    message("  Saved: tables/roi_aperiodic_posthoc_global.csv")
     sig_global <- global_posthoc_df %>% filter(significant == TRUE)
     message("  ", nrow(global_posthoc_df), " global contrasts, ", nrow(sig_global), " significant")
   }
 } else {
   message("Figures-only mode: loading existing tables...")
-  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "aperiodic_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "aperiodic_posthoc_roi.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  omnibus_region_df <- tryCatch(read_csv(file.path(tbl_dir, "aperiodic_omnibus_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  posthoc_region_df <- tryCatch(read_csv(file.path(tbl_dir, "aperiodic_posthoc_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  global_posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "aperiodic_posthoc_global.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_aperiodic_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_aperiodic_posthoc_roi.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_region_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_aperiodic_omnibus_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_region_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_aperiodic_posthoc_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  global_posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_aperiodic_posthoc_global.csv"), show_col_types = FALSE), error = function(e) data.frame())
 }
 
 # --- Figures ---

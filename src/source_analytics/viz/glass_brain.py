@@ -460,7 +460,7 @@ def plot_band_comparison(
     logger.info("Saved band comparison: %s", output_path)
 
 
-def plot_wholebrain_summary(
+def plot_vertex_cluster_summary(
     band_results: dict[str, dict],
     coords: np.ndarray,
     output_path: str | Path,

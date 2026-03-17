@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
-# psd_analysis.R — Main R entry point for PSD statistical analysis
+# roi_psd_analysis.R — Main R entry point for PSD statistical analysis
 #
-# Called by Python: Rscript R/psd_analysis.R --data-dir ... --config ... --output-dir ...
+# Called by Python: Rscript R/roi_psd_analysis.R --data-dir ... --config ... --output-dir ...
 #
 # Reads CSVs exported by Python (band_power.csv, psd_curves.csv),
 # runs omnibus LMM + emmeans post-hoc for both relative and absolute power,
@@ -217,28 +217,28 @@ if (!figures_only) {
   # --- Export tables ---
   message("\nExporting tables...")
   if (nrow(omnibus_df) > 0) {
-    write_csv(omnibus_df, file.path(tbl_dir, "psd_omnibus.csv"))
-    message("  Saved: tables/psd_omnibus.csv")
+    write_csv(omnibus_df, file.path(tbl_dir, "roi_psd_omnibus.csv"))
+    message("  Saved: tables/roi_psd_omnibus.csv")
   }
   if (nrow(posthoc_df) > 0) {
-    write_csv(posthoc_df, file.path(tbl_dir, "psd_posthoc_roi.csv"))
-    message("  Saved: tables/psd_posthoc_roi.csv")
+    write_csv(posthoc_df, file.path(tbl_dir, "roi_psd_posthoc_roi.csv"))
+    message("  Saved: tables/roi_psd_posthoc_roi.csv")
   }
   if (nrow(omnibus_region_df) > 0) {
-    write_csv(omnibus_region_df, file.path(tbl_dir, "psd_omnibus_region.csv"))
-    message("  Saved: tables/psd_omnibus_region.csv")
+    write_csv(omnibus_region_df, file.path(tbl_dir, "roi_psd_omnibus_region.csv"))
+    message("  Saved: tables/roi_psd_omnibus_region.csv")
   }
   if (nrow(posthoc_region_df) > 0) {
-    write_csv(posthoc_region_df, file.path(tbl_dir, "psd_posthoc_region.csv"))
-    message("  Saved: tables/psd_posthoc_region.csv")
+    write_csv(posthoc_region_df, file.path(tbl_dir, "roi_psd_posthoc_region.csv"))
+    message("  Saved: tables/roi_psd_posthoc_region.csv")
   }
   if (nrow(omnibus_region_nested_df) > 0) {
-    write_csv(omnibus_region_nested_df, file.path(tbl_dir, "psd_omnibus_region_nested.csv"))
-    message("  Saved: tables/psd_omnibus_region_nested.csv")
+    write_csv(omnibus_region_nested_df, file.path(tbl_dir, "roi_psd_omnibus_region_nested.csv"))
+    message("  Saved: tables/roi_psd_omnibus_region_nested.csv")
   }
   if (nrow(posthoc_region_nested_df) > 0) {
-    write_csv(posthoc_region_nested_df, file.path(tbl_dir, "psd_posthoc_region_nested.csv"))
-    message("  Saved: tables/psd_posthoc_region_nested.csv")
+    write_csv(posthoc_region_nested_df, file.path(tbl_dir, "roi_psd_posthoc_region_nested.csv"))
+    message("  Saved: tables/roi_psd_posthoc_region_nested.csv")
   }
 
   # --- Global posthoc (marginal group comparisons averaged over ROIs) ---
@@ -272,18 +272,18 @@ if (!figures_only) {
       ) %>%
       ungroup()
 
-    write_csv(global_posthoc_df, file.path(tbl_dir, "psd_posthoc_global.csv"))
-    message("  Saved: tables/psd_posthoc_global.csv")
+    write_csv(global_posthoc_df, file.path(tbl_dir, "roi_psd_posthoc_global.csv"))
+    message("  Saved: tables/roi_psd_posthoc_global.csv")
     sig_global <- global_posthoc_df %>% filter(significant == TRUE)
     message("  ", nrow(global_posthoc_df), " global contrasts, ", nrow(sig_global), " significant")
   }
 } else {
   message("Figures-only mode: loading existing tables...")
-  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "psd_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "psd_posthoc_roi.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  omnibus_region_df <- tryCatch(read_csv(file.path(tbl_dir, "psd_omnibus_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  posthoc_region_df <- tryCatch(read_csv(file.path(tbl_dir, "psd_posthoc_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  global_posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "psd_posthoc_global.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_psd_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_psd_posthoc_roi.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_region_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_psd_omnibus_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_region_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_psd_posthoc_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  global_posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_psd_posthoc_global.csv"), show_col_types = FALSE), error = function(e) data.frame())
 }
 
 # --- Figures ---
@@ -325,7 +325,7 @@ if (length(config$roi_categories) > 0) {
   region_ph <- if (exists("posthoc_region_df") && nrow(posthoc_region_df) > 0) {
     posthoc_region_df
   } else {
-    tryCatch(read_csv(file.path(tbl_dir, "psd_posthoc_region.csv"), show_col_types = FALSE),
+    tryCatch(read_csv(file.path(tbl_dir, "roi_psd_posthoc_region.csv"), show_col_types = FALSE),
              error = function(e) data.frame())
   }
 

@@ -1,4 +1,4 @@
-"""Spatial Linear Mixed Effects Model analysis.
+"""Vertex-level spatial analysis.
 
 Fits a single model per band using nlme::gls with exponential spatial
 correlation structure, accounting for spatial autocorrelation and avoiding
@@ -40,10 +40,10 @@ def _find_r_script_dir() -> Path:
     raise FileNotFoundError("Cannot find R/ scripts directory")
 
 
-class SpatialLMMAnalysis(BaseAnalysis):
-    """Spatial mixed effects model analysis (R-primary)."""
+class VertexSpatialAnalysis(BaseAnalysis):
+    """Vertex-level spatial analysis (R-primary)."""
 
-    name = "spatial_lmm"
+    name = "vertex_spatial"
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -53,11 +53,11 @@ class SpatialLMMAnalysis(BaseAnalysis):
         self._sfreq: float | None = None
 
         # Config
-        slmm_cfg = config.raw.get("spatial_lmm", {})
+        slmm_cfg = config.raw.get("vertex_spatial", config.raw.get("spatial_lmm", {}))
         self._correlation_structure = slmm_cfg.get("correlation_structure", "exponential")
         self._spatial_range_mm = float(slmm_cfg.get("spatial_range_mm", 3.0))
 
-        wb_cfg = config.wholebrain
+        wb_cfg = config.vertex
         self._noise_exclude = wb_cfg.get("noise_exclude_hz")
         if self._noise_exclude is not None:
             self._noise_exclude = tuple(self._noise_exclude)
@@ -136,10 +136,10 @@ class SpatialLMMAnalysis(BaseAnalysis):
 
         power_df = pd.DataFrame(self._power_rows)
         if power_df.empty:
-            logger.warning("No spatial LMM data collected")
+            logger.warning("No vertex spatial data collected")
             return
-        power_df.to_csv(data_dir / "spatial_lmm_data.csv", index=False)
-        logger.info("Exported spatial_lmm_data.csv (%d rows)", len(power_df))
+        power_df.to_csv(data_dir / "vertex_spatial_data.csv", index=False)
+        logger.info("Exported vertex_spatial_data.csv (%d rows)", len(power_df))
 
         if self._source_coords is not None:
             coords_df = pd.DataFrame(self._source_coords, columns=["x", "y", "z"])
@@ -174,7 +174,7 @@ class SpatialLMMAnalysis(BaseAnalysis):
                     )
 
         # Per-vertex t-score anatomical brain figures for gamma bands
-        data_csv = self.output_dir / "data" / "spatial_lmm_data.csv"
+        data_csv = self.output_dir / "data" / "vertex_spatial_data.csv"
         coords_csv = self.output_dir / "data" / "source_coords.csv"
         if not data_csv.exists() or not coords_csv.exists():
             return
@@ -230,7 +230,7 @@ class SpatialLMMAnalysis(BaseAnalysis):
                 band_data=band_data,
                 output_path=fig_dir / f"gamma_tscores_{contrast_name}.png",
                 title=(f"Dorsal Vertex-Level Gamma Power: "
-                       f"{ga} vs {gb} (Spatial LMM posthoc)"),
+                       f"{ga} vs {gb} (vertex spatial posthoc)"),
                 subtitle=(f"Large circles = uncorrected |t| > 2.0; "
                           f"Mean direction: {ga} {mean_dir} than {gb}"),
                 cmap="RdBu_r",
@@ -258,7 +258,7 @@ class SpatialLMMAnalysis(BaseAnalysis):
             self._write_python_summary()
             return
 
-        r_script = r_dir / "spatial_lmm_analysis.R"
+        r_script = r_dir / "vertex_spatial_analysis.R"
         if not r_script.exists():
             logger.warning("R script not found: %s", r_script)
             self._write_python_summary()
@@ -298,10 +298,10 @@ class SpatialLMMAnalysis(BaseAnalysis):
 
     def _write_python_summary(self) -> None:
         lines = [
-            "# Spatial LMM Analysis Summary",
+            "# Vertex Spatial Analysis Summary",
             "",
             f"**Study**: {self.config.name}",
-            "**Analysis**: Spatial Linear Mixed Effects Model",
+            "**Analysis**: Vertex Spatial Analysis",
             f"**Correlation structure**: {self._correlation_structure}",
             f"**Spatial range**: {self._spatial_range_mm} mm",
             "",
@@ -315,7 +315,7 @@ class SpatialLMMAnalysis(BaseAnalysis):
             "",
             "## Status",
             "",
-            "R analysis not available. Data exported to `data/spatial_lmm_data.csv` "
+            "R analysis not available. Data exported to `data/vertex_spatial_data.csv` "
             "for manual R analysis.",
             "",
         ]
@@ -329,7 +329,7 @@ class SpatialLMMAnalysis(BaseAnalysis):
         lines.extend([
             "## Output Files",
             "",
-            "- `data/spatial_lmm_data.csv` — per-subject per-vertex band power with coordinates",
+            "- `data/vertex_spatial_data.csv` — per-subject per-vertex band power with coordinates",
             "- `data/source_coords.csv` — vertex coordinates (mm)",
             "",
         ])

@@ -1,27 +1,21 @@
-"""Phase-Amplitude Coupling (PAC) Analysis: Modulation Index with surrogate z-scoring.
-
-Uses signed (phase-preserving) ROI timeseries to compute PAC for all ROIs
-across valid cross-frequency pairs. Z-scored MI normalizes for spectral
-differences across subjects.
-
-Python computes PAC z-scores and exports per-subject CSV.
-R (lme4, ggplot2) handles global t-tests, region-level LMM, figures,
-and summary report.
-"""
+"""ROI PSD Analysis module: computes PSD, exports CSVs, calls R for stats/viz."""
 
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
-import yaml
 
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
-from ..spectral.pac import compute_pac_multiroi, get_valid_pac_pairs
+from ..spectral.psd import compute_psd_multiroi
+from ..spectral.band_power import extract_band_power_multiroi
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -29,10 +23,12 @@ logger = logging.getLogger(__name__)
 
 def _find_r_script_dir() -> Path:
     """Locate the R/ directory relative to this package."""
+    # Walk up from this file to find the R/ directory
     pkg_root = Path(__file__).resolve().parent.parent.parent.parent  # src/../..
     r_dir = pkg_root / "R"
     if r_dir.is_dir():
         return r_dir
+    # Fallback: check common locations
     for candidate in [Path.cwd() / "R", Path(__file__).parent.parent.parent / "R"]:
         if candidate.is_dir():
             return candidate
@@ -41,32 +37,30 @@ def _find_r_script_dir() -> Path:
     )
 
 
-class PACAnalysis(BaseAnalysis):
-    """Phase-Amplitude Coupling analysis via Modulation Index with surrogate z-scoring.
+class ROIPsdAnalysis(BaseAnalysis):
+    """ROI-level power spectral density analysis with group comparisons.
 
-    Computes z-scored MI for all ROIs across valid cross-frequency pairs
-    (e.g., theta-gamma, delta-gamma, alpha-gamma). Uses signed timeseries
-    to preserve oscillatory phase information.
-
-    Python computes PAC values and exports CSV. R handles statistics
-    (global t-tests, region-level LMM), figures (bar charts, comodulograms,
-    forest plots), and summary report.
+    Python computes PSD and band power, exports CSVs.
+    R (lme4, ggplot2) handles statistics and visualization.
     """
 
-    name = "pac"
+    name = "roi_psd"
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
-        self._pac_rows: list[dict] = []
+        self._subject_band_power: list[dict] = []
+        self._subject_psd_curves: list[dict] = []
+        self._subject_groups: dict[str, str] = {}
         self._sfreq: float | None = None
 
     def setup(self) -> None:
-        self._pac_rows.clear()
+        self._subject_band_power.clear()
+        self._subject_psd_curves.clear()
+        self._subject_groups.clear()
 
     def process_subject(self, subject: SubjectInfo) -> None:
         loader = SubjectLoader(subject.data_dir)
 
-        # Use signed timeseries to preserve oscillatory phase
         roi_ts = loader.load_roi_timeseries(signed=True)
         sfreq = loader.load_sfreq()
 
@@ -80,65 +74,70 @@ class PACAnalysis(BaseAnalysis):
 
         uid = f"{subject.group}_{subject.subject_id}"
 
-        # Build valid PAC pairs from config bands
-        pac_pairs = get_valid_pac_pairs(self.config.bands)
+        # Compute PSD for all ROIs
+        fmax = max(hi for _, hi in self.config.bands.values()) + 10
+        roi_psds = compute_psd_multiroi(roi_ts, sfreq, fmax=fmax)
+        self._subject_groups[uid] = subject.group
 
-        if not pac_pairs:
-            logger.warning(
-                "No valid PAC pairs found for subject %s with bands: %s",
-                subject.subject_id, list(self.config.bands.keys()),
-            )
-            return
+        # Collect PSD curves for export
+        for roi_name, (freqs, psd) in roi_psds.items():
+            for i, freq in enumerate(freqs):
+                self._subject_psd_curves.append({
+                    "subject": uid,
+                    "group": subject.group,
+                    "roi": roi_name,
+                    "freq_hz": float(freq),
+                    "psd": float(psd[i]),
+                })
 
-        logger.info(
-            "Computing PAC for %s: %d ROIs x %d pairs",
-            subject.subject_id, len(roi_ts), len(pac_pairs),
-        )
+        # Extract band power
+        band_power = extract_band_power_multiroi(roi_psds, self.config.bands)
 
-        # Compute PAC z-scores for all ROIs x all pairs
-        results = compute_pac_multiroi(
-            roi_ts, sfreq, pac_pairs, self.config.bands,
-        )
-
-        # Append subject/group info to each row
-        for row in results:
-            row["subject"] = uid
-            row["group"] = subject.group
-            self._pac_rows.append(row)
+        for roi_name, bp_dict in band_power.items():
+            for band_name, power_vals in bp_dict.items():
+                self._subject_band_power.append({
+                    "subject": uid,
+                    "group": subject.group,
+                    "roi": roi_name,
+                    "band": band_name,
+                    "absolute": power_vals["absolute"],
+                    "relative": power_vals["relative"],
+                })
 
     def aggregate(self) -> None:
-        """Export PAC values CSV for R consumption."""
+        """Export CSVs for R consumption."""
         data_dir = self.output_dir / "data"
 
-        pac_df = pd.DataFrame(self._pac_rows)
-        if pac_df.empty:
-            logger.warning("No PAC data collected")
+        # Band power CSV
+        band_df = pd.DataFrame(self._subject_band_power)
+        if band_df.empty:
+            logger.warning("No band power data collected")
             return
 
-        # Reorder columns for clarity
-        col_order = [
-            "subject", "group", "roi", "phase_band", "amp_band",
-            "freq_pair", "mi", "z_score", "surr_mean", "surr_std",
-        ]
-        pac_df = pac_df[[c for c in col_order if c in pac_df.columns]]
+        band_df.to_csv(data_dir / "band_power.csv", index=False)
+        logger.info("Exported band_power.csv (%d rows)", len(band_df))
 
-        pac_df.to_csv(data_dir / "pac_values.csv", index=False)
-        logger.info("Exported pac_values.csv (%d rows)", len(pac_df))
+        # PSD curves CSV
+        psd_df = pd.DataFrame(self._subject_psd_curves)
+        if not psd_df.empty:
+            psd_df.to_csv(data_dir / "psd_curves.csv", index=False)
+            logger.info("Exported psd_curves.csv (%d rows)", len(psd_df))
 
     def statistics(self) -> None:
-        """Delegated to R."""
+        """Delegated to R — this is a no-op in Python."""
         pass
 
     def figures(self) -> None:
         """Regenerate R figures from existing data/tables."""
-        self._call_r_figures_only("pac_analysis.R", "pac_values.csv")
+        self._call_r_figures_only("roi_psd_analysis.R", "band_power.csv")
 
     def summary(self) -> None:
-        """Call Rscript for statistics, figures, and summary report."""
+        """Call Rscript for statistics, figures, and summary."""
         data_dir = self.output_dir / "data"
 
-        if not (data_dir / "pac_values.csv").exists():
-            logger.error("pac_values.csv not found -- skipping R analysis")
+        # Verify CSVs exist
+        if not (data_dir / "band_power.csv").exists():
+            logger.error("band_power.csv not found — skipping R analysis")
             return
 
         # Find R scripts
@@ -148,13 +147,16 @@ class PACAnalysis(BaseAnalysis):
             logger.error(str(e))
             return
 
-        r_script = r_dir / "pac_analysis.R"
+        r_script = r_dir / "roi_psd_analysis.R"
         if not r_script.exists():
             logger.error("R script not found: %s", r_script)
             return
 
-        # Write study config YAML for R
+        # Find the study config YAML path
+        # Copy config to data dir so R can read it
         config_path = data_dir / "study_config.yaml"
+        import yaml
+        # Always write config so sfreq is up-to-date
         config_data = dict(self.config.raw)
         if self._sfreq is not None:
             config_data["sfreq"] = self._sfreq
@@ -190,9 +192,7 @@ class PACAnalysis(BaseAnalysis):
             if result.returncode != 0:
                 logger.error("R script failed with exit code %d", result.returncode)
         except FileNotFoundError:
-            logger.error(
-                "Rscript not found. Install R to enable statistics and visualization."
-            )
+            logger.error("Rscript not found. Install R to enable statistics and visualization.")
         except subprocess.TimeoutExpired:
             logger.error("R script timed out after 600 seconds")
 
@@ -201,15 +201,15 @@ class PACAnalysis(BaseAnalysis):
             self._render_brain_mosaics()
 
     def _render_brain_mosaics(self) -> None:
-        """Render brain ROI mosaics from PAC region-level posthoc CSVs."""
+        """Render brain ROI mosaics from ROI PSD posthoc CSVs."""
         from ..viz.brain_roi import render_posthoc_mosaics
 
         tbl_dir = self.tbl_dir
         fig_dir = self.fig_dir
 
-        posthoc_csv = tbl_dir / "pac_posthoc_region.csv"
+        posthoc_csv = tbl_dir / "roi_psd_posthoc_roi.csv"
         if not posthoc_csv.exists():
-            logger.info("No PAC posthoc region CSV — skipping brain mosaics")
+            logger.info("No ROI PSD posthoc ROI CSV — skipping brain mosaics")
             return
 
         roi_cats = self.config.roi_categories
@@ -221,9 +221,9 @@ class PACAnalysis(BaseAnalysis):
             posthoc_csv,
             roi_cats,
             fig_dir,
-            analysis_name="pac",
+            analysis_name="roi_psd",
             effect_col="hedges_g",
-            roi_col="region",
-            facet_cols=["contrast", "freq_pair"],
+            roi_col="roi",
+            facet_cols=["contrast", "band", "power_type"],
             colorbar_label="Hedges' g",
         )

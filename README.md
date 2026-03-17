@@ -4,8 +4,8 @@ Statistical analysis toolkit for source-localized EEG data. Reads pipeline outpu
 
 13 analysis modules spanning spectral power, connectivity, cross-frequency coupling, graph theory, machine learning, and spatial modeling -- organized across three data levels:
 
-- **ROI-level** (46 ROIs): PSD, aperiodic, ROI connectivity (6 metrics), transfer entropy, PAC
-- **Vertex-level** (154 vertices): wholebrain spectral, vertex connectivity (FCD), specparam vertex, MVPA, network (graph theory + NBS), spatial LMM
+- **ROI-level** (46 ROIs): ROI PSD, ROI aperiodic, ROI connectivity (6 metrics), ROI transfer entropy, ROI PAC
+- **Vertex-level** (154 vertices): vertex cluster spectral, vertex connectivity (FCD), vertex specparam, vertex MVPA, network (graph theory + NBS), vertex spatial
 - **Electrode-level** (validation): electrode PSD, electrode vs source comparison
 
 **Python** handles orchestration, signal processing, and data I/O. **R** handles statistics (linear mixed models via lme4) and visualization (ggplot2). Vertex-level modules use Python for statistics (cluster permutation) and visualization (glass brain plots), with R for report generation.
@@ -36,7 +36,7 @@ install.packages(c(
 
 ```bash
 # Run PSD analysis
-source-analytics run --study /path/to/analysis.yaml --analysis psd
+source-analytics run --study /path/to/analysis.yaml --analysis roi_psd
 
 # Validate study config and data discovery
 source-analytics validate --study /path/to/analysis.yaml
@@ -90,7 +90,7 @@ discovery:
 
 source-analytics reads output files produced by the source_localization pipeline. Each subject directory contains:
 
-**ROI-level analyses** (psd, aperiodic, roi_connectivity, transfer_entropy, pac) -- default discovery:
+**ROI-level analyses** (roi_psd, roi_aperiodic, roi_connectivity, roi_transfer_entropy, roi_pac) -- default discovery:
 
 | File | Format | Contents |
 |------|--------|----------|
@@ -98,7 +98,7 @@ source-analytics reads output files produced by the source_localization pipeline
 | `step6_roi_timeseries_signed.pkl` | Python pickle | Dict[str, ndarray] -- ROI timeseries (signed, for connectivity) |
 | `roi_timeseries_magnitude.set` | EEGLAB .set | Same data + metadata (sfreq) |
 
-**Vertex-level analyses** (wholebrain, vertex_connectivity, specparam_vertex, mvpa, network, spatial_lmm) -- uses `discovery.required_files` in config:
+**Vertex-level analyses** (vertex_cluster, vertex_connectivity, vertex_specparam, vertex_mvpa, network, vertex_spatial) -- uses `discovery.required_files` in config:
 
 | File | Format | Contents |
 |------|--------|----------|
@@ -145,7 +145,7 @@ Python calls `Rscript` automatically -- no manual R interaction needed.
 
 These analyses operate on 46 source-localized ROI timeseries (`step6_roi_timeseries_*.pkl`). They use the standard `analysis.yaml` config pointing to the `roi_based_ellipsoid/` pipeline output.
 
-#### PSD (Power Spectral Density)
+#### ROI PSD (Power Spectral Density)
 
 Computes power spectral density via Welch's method and extracts band power across ROIs.
 
@@ -166,7 +166,7 @@ Computes power spectral density via Welch's method and extracts band power acros
 **Output:**
 
 ```
-output_dir/psd/
+output_dir/roi_psd/
   ANALYSIS_SUMMARY.md
   data/
     band_power.csv
@@ -185,7 +185,7 @@ output_dir/psd/
     roi_significance_heatmap_*.png  # ROI x band heatmap (Hedges' g)
 ```
 
-#### Aperiodic (1/f Spectral Decomposition)
+#### ROI Aperiodic (1/f Spectral Decomposition)
 
 Decomposes PSD into periodic and aperiodic (1/f) components using specparam (FOOOF) with linear regression fallback.
 
@@ -204,7 +204,7 @@ Decomposes PSD into periodic and aperiodic (1/f) components using specparam (FOO
 **Output:**
 
 ```
-output_dir/aperiodic/
+output_dir/roi_aperiodic/
   ANALYSIS_SUMMARY.md
   data/
     aperiodic.csv
@@ -263,7 +263,7 @@ output_dir/roi_connectivity/
     roi_connectivity_region_pair_forest_*.png
 ```
 
-#### Transfer Entropy (Directed Information-Theoretic Connectivity)
+#### ROI Transfer Entropy (Directed Information-Theoretic Connectivity)
 
 Directed transfer entropy between all ROI pairs, quantifying how much past activity in one ROI reduces uncertainty about future activity in another. Uses **signed** (phase-preserving) ROI timeseries.
 
@@ -283,7 +283,7 @@ Directed transfer entropy between all ROI pairs, quantifying how much past activ
 **Output:**
 
 ```
-output_dir/transfer_entropy/
+output_dir/roi_transfer_entropy/
   ANALYSIS_SUMMARY.md
   data/
     transfer_entropy_edges.csv    # subject x directed roi_pair x band (TE + net TE)
@@ -298,7 +298,7 @@ output_dir/transfer_entropy/
     transfer_entropy_region_pair_forest_*.png
 ```
 
-#### PAC (Phase-Amplitude Coupling)
+#### ROI PAC (Phase-Amplitude Coupling)
 
 Cross-frequency phase-amplitude coupling via the Modulation Index (Tort et al., 2010) with surrogate-based z-scoring. Uses **signed** (phase-preserving) ROI timeseries.
 
@@ -321,7 +321,7 @@ Cross-frequency phase-amplitude coupling via the Modulation Index (Tort et al., 
 **Output:**
 
 ```
-output_dir/pac/
+output_dir/roi_pac/
   ANALYSIS_SUMMARY.md
   data/
     pac_values.csv              # subject x roi x freq_pair (z-scored MI)
@@ -340,7 +340,7 @@ output_dir/pac/
 
 These analyses operate on 154-vertex source estimates from the `shell_ellipsoid/` pipeline. They **require a separate study config** with `discovery.required_files` pointing to `step5_stc.pkl` and `step3_source_coords_mm.npy`.
 
-#### Wholebrain (Vertex-Level Spectral Analysis)
+#### Vertex Cluster (Vertex-Level Spectral Analysis)
 
 Vertex-level spectral analysis with cluster-based permutation testing (Maris & Oostenveld, 2007). All metrics derived from a single PSD computation per subject.
 
@@ -356,7 +356,7 @@ Vertex-level spectral analysis with cluster-based permutation testing (Maris & O
 - Effect size summary table
 - Formatted ANALYSIS_SUMMARY.md with methods, results tables, figure references
 
-**Study config (`analysis_wholebrain.yaml`):**
+**Study config (`analysis_vertex_cluster.yaml`):**
 
 ```yaml
 discovery:
@@ -368,7 +368,7 @@ discovery:
     - "step5_stc.pkl"
     - "step3_source_coords_mm.npy"
 
-wholebrain:
+vertex:
   correction_method: cluster  # "cluster" (default) or "tfce"
   cluster_threshold: 2.0      # only used when correction_method: cluster
   n_permutations: 1000
@@ -383,34 +383,34 @@ wholebrain:
 **Output:**
 
 ```
-output_dir/wholebrain/
+output_dir/vertex_cluster/
   ANALYSIS_SUMMARY.md
   data/
-    wholebrain_values.csv       # subject x vertex x band (relative, absolute, dB)
-    wholebrain_features.csv     # subject x vertex (fALFF, spectral slope, peak alpha)
+    vertex_cluster_values.csv       # subject x vertex x band (relative, absolute, dB)
+    vertex_cluster_features.csv     # subject x vertex (fALFF, spectral slope, peak alpha)
     source_coords.csv           # vertex coordinates in mm
-    wholebrain_results.pkl      # full results dict for reuse
+    vertex_cluster_results.pkl      # full results dict for reuse
     study_config.yaml
   tables/
     voxelwise_stats.csv         # per-vertex t, p, Hedges' g per contrast x metric
     cluster_results.csv         # cluster summaries with permutation-corrected p-values
     effect_size_summary.csv     # aggregated effect sizes (from R)
   figures/
-    wholebrain_delta.png
-    wholebrain_theta.png
-    wholebrain_alpha.png
-    wholebrain_beta.png
-    wholebrain_low_gamma.png
-    wholebrain_high_gamma.png
-    wholebrain_falff.png
-    wholebrain_spectral_slope.png
-    wholebrain_peak_alpha.png
-    wholebrain_summary.png
+    vertex_cluster_delta.png
+    vertex_cluster_theta.png
+    vertex_cluster_alpha.png
+    vertex_cluster_beta.png
+    vertex_cluster_low_gamma.png
+    vertex_cluster_high_gamma.png
+    vertex_cluster_falff.png
+    vertex_cluster_spectral_slope.png
+    vertex_cluster_peak_alpha.png
+    vertex_cluster_summary.png
 ```
 
 ##### TFCE Correction Option
 
-The wholebrain analysis supports TFCE (Smith & Nichols, 2009) as an alternative to cluster-based permutation testing. Set `correction_method: tfce` in the wholebrain config section. TFCE eliminates the arbitrary cluster-forming threshold by integrating cluster extent and height across all thresholds: `TFCE(v) = sum_h { e(h)^E * h^H * dh }`. When using TFCE, additional output includes `tfce_scores_*.png` glass brains and per-vertex corrected p-values in `voxelwise_stats.csv`.
+The vertex_cluster analysis supports TFCE (Smith & Nichols, 2009) as an alternative to cluster-based permutation testing. Set `correction_method: tfce` in the vertex config section. TFCE eliminates the arbitrary cluster-forming threshold by integrating cluster extent and height across all thresholds: `TFCE(v) = sum_h { e(h)^E * h^H * dh }`. When using TFCE, additional output includes `tfce_scores_*.png` glass brains and per-vertex corrected p-values in `voxelwise_stats.csv`.
 
 #### Vertex Connectivity (Functional Connectivity Density)
 
@@ -443,7 +443,7 @@ output_dir/vertex_connectivity/
   figures/fcd_*.png
 ```
 
-#### Specparam Vertex (Vertex-Level Spectral Parameterization)
+#### Vertex Specparam (Vertex-Level Spectral Parameterization)
 
 Determines whether gamma elevation is a true oscillatory peak vs. broadband shift by fitting aperiodic (1/f) models at each vertex using specparam (FOOOF) or linear regression fallback.
 
@@ -460,7 +460,7 @@ Determines whether gamma elevation is a true oscillatory peak vs. broadband shif
 
 **Config:**
 ```yaml
-specparam_vertex:
+vertex_specparam:
   freq_range: [1, 100]
   peak_width_limits: [1.0, 12.0]
   max_n_peaks: 6
@@ -468,14 +468,14 @@ specparam_vertex:
 
 **Output:**
 ```
-output_dir/specparam_vertex/
+output_dir/vertex_specparam/
   ANALYSIS_SUMMARY.md
-  data/specparam_vertex.csv, source_coords.csv
-  tables/specparam_vertex_stats.csv, gamma_peak_chi2.csv
+  data/vertex_specparam.csv, source_coords.csv
+  tables/vertex_specparam_stats.csv, gamma_peak_chi2.csv
   figures/specparam_*.png, gamma_peak_presence.png
 ```
 
-#### MVPA (Multivariate Pattern Analysis)
+#### Vertex MVPA (Multivariate Pattern Analysis)
 
 Single omnibus test per band: can the whole-brain spatial pattern classify KO vs WT? Uses linear SVM + Leave-One-Out Cross-Validation with permutation testing.
 
@@ -493,7 +493,7 @@ Single omnibus test per band: can the whole-brain spatial pattern classify KO vs
 
 **Config:**
 ```yaml
-mvpa:
+vertex_mvpa:
   classifier: svm_linear
   cv_method: loocv
   n_permutations: 1000
@@ -501,11 +501,11 @@ mvpa:
 
 **Output:**
 ```
-output_dir/mvpa/
+output_dir/vertex_mvpa/
   ANALYSIS_SUMMARY.md
-  data/mvpa_features.csv, source_coords.csv
-  tables/mvpa_results.csv
-  figures/mvpa_importance_*.png, mvpa_null_*.png, mvpa_confusion_*.png
+  data/vertex_mvpa_features.csv, source_coords.csv
+  tables/vertex_mvpa_results.csv
+  figures/vertex_mvpa_importance_*.png, vertex_mvpa_null_*.png, vertex_mvpa_confusion_*.png
 ```
 
 #### Network (Graph-Theoretic Analysis + NBS)
@@ -541,7 +541,7 @@ output_dir/network/
   figures/network_*.png
 ```
 
-#### Spatial LMM (Spatial Mixed Effects Models)
+#### Vertex Spatial (Spatial Mixed Effects Models)
 
 Single model per band accounting for spatial correlation, avoiding the multiple comparison problem entirely. Primary computation in R using `nlme::gls` with exponential spatial correlation.
 
@@ -559,26 +559,26 @@ Single model per band accounting for spatial correlation, avoiding the multiple 
 
 **Config:**
 ```yaml
-spatial_lmm:
+vertex_spatial:
   correlation_structure: exponential
   spatial_range_mm: 3.0
 ```
 
 **Output:**
 ```
-output_dir/spatial_lmm/
+output_dir/vertex_spatial/
   ANALYSIS_SUMMARY.md
-  data/spatial_lmm_data.csv, source_coords.csv
-  tables/spatial_lmm_results.csv, spatial_residuals.csv
+  data/vertex_spatial_data.csv, source_coords.csv
+  tables/vertex_spatial_results.csv, spatial_residuals.csv
   figures/variogram_*.png, spatial_residuals_*.png
 ```
 
 ##### Cross-Cutting: Random Epoch Sampling
 
-All vertex-level analyses support optional random epoch sampling. Instead of computing PSD/connectivity on full continuous recordings, randomly sample non-overlapping epochs of fixed duration. Enable in the wholebrain config section:
+All vertex-level analyses support optional random epoch sampling. Instead of computing PSD/connectivity on full continuous recordings, randomly sample non-overlapping epochs of fixed duration. Enable in the vertex config section:
 
 ```yaml
-wholebrain:
+vertex:
   epoch_sampling:
     enabled: true
     epoch_duration_sec: 2.0
@@ -631,7 +631,7 @@ output_dir/electrode/
 
 #### Electrode Comparison (Electrode vs Source Validation)
 
-Compares electrode-level and source-localized analysis results to validate that source localization provides spatial specificity beyond scalp-level recordings. Requires both `electrode` and `psd` analyses to be run first.
+Compares electrode-level and source-localized analysis results to validate that source localization provides spatial specificity beyond scalp-level recordings. Requires both `electrode` and `roi_psd` analyses to be run first.
 
 **Python side:**
 - Merges per-subject mean power from electrode and source analyses

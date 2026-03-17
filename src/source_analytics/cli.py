@@ -241,7 +241,10 @@ def cmd_list(args):
 
     # Default: group analyses by category and level
     groups: dict[str, list[tuple[str, str]]] = {}
+    from .core import _DEPRECATED_NAMES
     for name in sorted(ANALYSIS_REGISTRY.keys()):
+        if name in _DEPRECATED_NAMES:
+            continue  # hide deprecated aliases from listing
         meta = ANALYSIS_METADATA.get(name, {})
         category = meta.get("category", "other")
         level = meta.get("level", "")
@@ -255,7 +258,7 @@ def cmd_list(args):
     # Display headers
     category_labels = {
         "resting|roi": "Resting State (ROI Level)",
-        "resting|wholebrain": "Resting State (Wholebrain Level)",
+        "resting|vertex": "Resting State (Vertex Level)",
         "resting|electrode": "Resting State (Electrode Level)",
         "evoked|roi": "Evoked Response (ROI Level)",
     }

@@ -1,4 +1,4 @@
-"""Aperiodic analysis module: fits 1/f spectral parameters, exports CSV, calls R."""
+"""ROI Aperiodic analysis module: fits 1/f spectral parameters, exports CSV, calls R."""
 
 from __future__ import annotations
 
@@ -33,14 +33,14 @@ def _find_r_script_dir() -> Path:
     )
 
 
-class AperiodicAnalysis(BaseAnalysis):
-    """Aperiodic (1/f) spectral analysis with group comparisons.
+class ROIAperiodicAnalysis(BaseAnalysis):
+    """ROI-level aperiodic (1/f) spectral analysis with group comparisons.
 
     Python fits specparam/FOOOF per ROI per subject, exports CSV.
     R runs LMM statistics (exponent, offset) and generates figures.
     """
 
-    name = "aperiodic"
+    name = "roi_aperiodic"
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -120,7 +120,7 @@ class AperiodicAnalysis(BaseAnalysis):
 
     def figures(self) -> None:
         """Regenerate R figures from existing data/tables."""
-        self._call_r_figures_only("aperiodic_analysis.R", "aperiodic_params.csv")
+        self._call_r_figures_only("roi_aperiodic_analysis.R", "aperiodic_params.csv")
 
     def summary(self) -> None:
         """Call Rscript for statistics, figures, and summary."""
@@ -136,7 +136,7 @@ class AperiodicAnalysis(BaseAnalysis):
             logger.error(str(e))
             return
 
-        r_script = r_dir / "aperiodic_analysis.R"
+        r_script = r_dir / "roi_aperiodic_analysis.R"
         if not r_script.exists():
             logger.error("R script not found: %s", r_script)
             return
@@ -188,15 +188,15 @@ class AperiodicAnalysis(BaseAnalysis):
             self._render_brain_mosaics()
 
     def _render_brain_mosaics(self) -> None:
-        """Render brain ROI mosaics from aperiodic posthoc CSVs."""
+        """Render brain ROI mosaics from ROI aperiodic posthoc CSVs."""
         from ..viz.brain_roi import render_posthoc_mosaics
 
         tbl_dir = self.tbl_dir
         fig_dir = self.fig_dir
 
-        posthoc_csv = tbl_dir / "aperiodic_posthoc_roi.csv"
+        posthoc_csv = tbl_dir / "roi_aperiodic_posthoc_roi.csv"
         if not posthoc_csv.exists():
-            logger.info("No aperiodic posthoc ROI CSV — skipping brain mosaics")
+            logger.info("No ROI aperiodic posthoc ROI CSV — skipping brain mosaics")
             return
 
         roi_cats = self.config.roi_categories
@@ -208,7 +208,7 @@ class AperiodicAnalysis(BaseAnalysis):
             posthoc_csv,
             roi_cats,
             fig_dir,
-            analysis_name="aperiodic",
+            analysis_name="roi_aperiodic",
             effect_col="hedges_g",
             roi_col="roi",
             facet_cols=["contrast", "dv"],

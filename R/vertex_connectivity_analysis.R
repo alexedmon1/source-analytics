@@ -45,7 +45,7 @@ metric <- vc_cfg$metric %||% "imag_coherence"
 fcd_threshold <- vc_cfg$fcd_threshold %||% 0.05
 n_perm <- vc_cfg$n_permutations %||% 1000
 
-wb_cfg <- config$wholebrain %||% list()
+wb_cfg <- config$vertex %||% list()
 adj_dist <- wb_cfg$adjacency_distance_mm %||% 5.0
 
 # --- Summaries ----------------------------------------------------------------

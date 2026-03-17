@@ -116,7 +116,7 @@ class VertexNetworkAnalysis(BaseAnalysis):
         self._density_max = float(net_cfg.get("density_max", 0.40))
         self._density_step = float(net_cfg.get("density_step", 0.01))
 
-        wb_cfg = config.wholebrain
+        wb_cfg = config.vertex
         self._epoch_config = get_epoch_config(wb_cfg)
         self._nbs_results: dict = {}
 

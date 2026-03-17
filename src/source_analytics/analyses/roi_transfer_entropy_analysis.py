@@ -34,7 +34,7 @@ def _find_r_script_dir() -> Path:
     )
 
 
-class TransferEntropyAnalysis(BaseAnalysis):
+class ROITransferEntropyAnalysis(BaseAnalysis):
     """Directed transfer entropy analysis between ROI pairs.
 
     Uses **signed** (phase-preserving) ROI timeseries to compute binned
@@ -46,7 +46,7 @@ class TransferEntropyAnalysis(BaseAnalysis):
     region-pair LMM, and summary report.
     """
 
-    name = "transfer_entropy"
+    name = "roi_transfer_entropy"
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -110,8 +110,8 @@ class TransferEntropyAnalysis(BaseAnalysis):
             logger.warning("No transfer entropy data collected")
             return
 
-        edge_df.to_csv(data_dir / "transfer_entropy_edges.csv", index=False)
-        logger.info("Exported transfer_entropy_edges.csv (%d rows)", len(edge_df))
+        edge_df.to_csv(data_dir / "roi_transfer_entropy_edges.csv", index=False)
+        logger.info("Exported roi_transfer_entropy_edges.csv (%d rows)", len(edge_df))
 
     def statistics(self) -> None:
         """Delegated to R."""
@@ -120,15 +120,15 @@ class TransferEntropyAnalysis(BaseAnalysis):
     def figures(self) -> None:
         """Regenerate R figures from existing data/tables."""
         self._call_r_figures_only(
-            "transfer_entropy_analysis.R", "transfer_entropy_edges.csv",
+            "roi_transfer_entropy_analysis.R", "roi_transfer_entropy_edges.csv",
         )
 
     def summary(self) -> None:
         """Call Rscript for statistics and summary report."""
         data_dir = self.output_dir / "data"
 
-        if not (data_dir / "transfer_entropy_edges.csv").exists():
-            logger.error("transfer_entropy_edges.csv not found -- skipping R analysis")
+        if not (data_dir / "roi_transfer_entropy_edges.csv").exists():
+            logger.error("roi_transfer_entropy_edges.csv not found -- skipping R analysis")
             return
 
         # Find R scripts
@@ -138,7 +138,7 @@ class TransferEntropyAnalysis(BaseAnalysis):
             logger.error(str(e))
             return
 
-        r_script = r_dir / "transfer_entropy_analysis.R"
+        r_script = r_dir / "roi_transfer_entropy_analysis.R"
         if not r_script.exists():
             logger.error("R script not found: %s", r_script)
             return

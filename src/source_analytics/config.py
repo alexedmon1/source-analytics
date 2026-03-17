@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings as _warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -64,7 +65,7 @@ class StudyConfig:
     roi_categories: dict[str, list[str]]
     discovery: dict[str, Any]
     vertex_filter: dict[str, Any] = field(default_factory=dict)
-    wholebrain: dict[str, Any] = field(default_factory=dict)
+    vertex: dict[str, Any] = field(default_factory=dict)
     electrode: dict[str, Any] = field(default_factory=dict)
     evoked: dict[str, Any] = field(default_factory=dict)
     paradigms: dict[str, dict] = field(default_factory=dict, repr=False)
@@ -140,7 +141,7 @@ class StudyConfig:
             roi_categories=data.get("roi_categories", {}),
             discovery=discovery,
             vertex_filter=data.get("vertex_filter", {}),
-            wholebrain=data.get("wholebrain", {}),
+            vertex=_resolve_vertex_config(data),
             electrode=data.get("electrode", {}),
             evoked=data.get("evoked", {}),
             paradigms=paradigms,
@@ -165,7 +166,7 @@ class StudyConfig:
     def for_paradigm(self, name: str) -> StudyConfig:
         """Return a paradigm-scoped config suitable for StudyAnalyzer.
 
-        Merges paradigm-specific fields (discovery, evoked, wholebrain,
+        Merges paradigm-specific fields (discovery, evoked, vertex,
         output_dir) over the shared top-level fields.  The returned config
         has ``paradigms={}`` so downstream code sees a plain single-paradigm
         config.
@@ -203,7 +204,7 @@ class StudyConfig:
             roi_categories=self.roi_categories,
             discovery=discovery,
             vertex_filter=pdata.get("vertex_filter", self.vertex_filter),
-            wholebrain=pdata.get("wholebrain", self.wholebrain),
+            vertex=_resolve_vertex_config(pdata, self.vertex),
             electrode=pdata.get("electrode", self.electrode),
             evoked=pdata.get("evoked", self.evoked),
             paradigm_name=name,
@@ -281,7 +282,7 @@ class StudyConfig:
 
         # Dedicated config attributes: read from raw (which now has
         # analysis config merged in) falling back to paradigm then top-level
-        wholebrain = raw.get("wholebrain", self.wholebrain)
+        wholebrain = _resolve_vertex_config(raw, self.vertex)
         evoked = raw.get("evoked", self.evoked)
         electrode = raw.get("electrode", self.electrode)
 
@@ -297,7 +298,7 @@ class StudyConfig:
             roi_categories=self.roi_categories,
             discovery=discovery,
             vertex_filter=vertex_filter,
-            wholebrain=wholebrain if isinstance(wholebrain, dict) else {},
+            vertex=wholebrain if isinstance(wholebrain, dict) else {},
             electrode=electrode if isinstance(electrode, dict) else {},
             evoked=evoked if isinstance(evoked, dict) else {},
             paradigm_name=paradigm,
@@ -343,6 +344,16 @@ class StudyConfig:
         """True if any vertex filter is configured."""
         return bool(self.vertex_filter)
 
+    @property
+    def wholebrain(self) -> dict[str, Any]:
+        """Backward-compatible alias for ``vertex``."""
+        _warnings.warn(
+            "StudyConfig.wholebrain is deprecated, use .vertex instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.vertex
+
     def validate(self) -> list[str]:
         """Check configuration for common errors. Returns list of warnings."""
         warnings = []
@@ -361,3 +372,14 @@ class StudyConfig:
         if discovery_root and not Path(discovery_root).exists():
             warnings.append(f"Discovery root_dir does not exist: {discovery_root}")
         return warnings
+
+
+def _resolve_vertex_config(
+    data: dict, fallback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Read the vertex config section, accepting both 'vertex' and legacy 'wholebrain' keys."""
+    if "vertex" in data:
+        return data["vertex"]
+    if "wholebrain" in data:
+        return data["wholebrain"]
+    return fallback if fallback is not None else {}

@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Spatial LMM Analysis — primary computation module
+# vertex_spatial_analysis.R — primary computation module
 # Fits nlme::gls with exponential spatial correlation per contrast x band x metric,
 # compares to non-spatial, generates variograms, exports residuals, writes ANALYSIS_SUMMARY.md
 #
@@ -34,15 +34,15 @@ output_dir  <- opts[["output-dir"]]
 config <- read_yaml(config_path)
 
 # --- Load data ----------------------------------------------------------------
-data_path <- file.path(data_dir, "spatial_lmm_data.csv")
+data_path <- file.path(data_dir, "vertex_spatial_data.csv")
 if (!file.exists(data_path)) {
-  cat("No spatial_lmm_data.csv found.\n")
+  cat("No vertex_spatial_data.csv found.\n")
   quit(status = 0)
 }
 
 dat <- read.csv(data_path, stringsAsFactors = FALSE)
 
-slmm_cfg <- config$spatial_lmm %||% list()
+slmm_cfg <- config$vertex_spatial %||% config$spatial_lmm %||% list()
 corr_struct <- slmm_cfg$correlation_structure %||% "exponential"
 range_mm    <- slmm_cfg$spatial_range_mm %||% 3.0
 
@@ -52,7 +52,7 @@ contrasts <- config$contrasts
 n_subjects_total <- length(unique(dat$subject))
 n_vertices <- length(unique(dat$vertex_idx))
 
-cat(sprintf("Spatial LMM: %d subjects total, %d bands, %d metrics, %d vertices per subject\n",
+cat(sprintf("Vertex spatial: %d subjects total, %d bands, %d metrics, %d vertices per subject\n",
             n_subjects_total, length(bands), length(metrics), n_vertices))
 cat(sprintf("Contrasts: %d\n", length(contrasts)))
 
@@ -281,18 +281,18 @@ if (nrow(results_df) > 0) {
   rownames(results_df) <- NULL
 }
 
-write.csv(results_df, file.path(tbl_dir, "spatial_lmm_results.csv"), row.names = FALSE)
-cat(sprintf("\nExported spatial_lmm_results.csv (%d rows)\n", nrow(results_df)))
+write.csv(results_df, file.path(tbl_dir, "vertex_spatial_results.csv"), row.names = FALSE)
+cat(sprintf("\nExported vertex_spatial_results.csv (%d rows)\n", nrow(results_df)))
 
 if (nrow(all_residuals) > 0) {
-  write.csv(all_residuals, file.path(tbl_dir, "spatial_residuals.csv"), row.names = FALSE)
-  cat(sprintf("Exported spatial_residuals.csv (%d rows)\n", nrow(all_residuals)))
+  write.csv(all_residuals, file.path(tbl_dir, "vertex_spatial_residuals.csv"), row.names = FALSE)
+  cat(sprintf("Exported vertex_spatial_residuals.csv (%d rows)\n", nrow(all_residuals)))
 }
 
 # --- Write ANALYSIS_SUMMARY.md -----------------------------------------------
 groups_all <- unique(dat$group)
 lines <- c(
-  "# Spatial LMM Analysis Summary",
+  "# Vertex Spatial Analysis Summary",
   "",
   sprintf("**Study**: %s", config$name),
   "**Analysis**: Spatial Linear Mixed Effects Model (per-contrast)",
@@ -376,9 +376,9 @@ lines <- c(lines,
   "",
   "## Output Files",
   "",
-  "- `data/spatial_lmm_data.csv` — per-subject per-vertex band power with coordinates",
-  "- `tables/spatial_lmm_results.csv` — GLS model results per contrast x band x metric",
-  "- `tables/spatial_residuals.csv` — spatial model residuals",
+  "- `data/vertex_spatial_data.csv` — per-subject per-vertex band power with coordinates",
+  "- `tables/vertex_spatial_results.csv` — GLS model results per contrast x band x metric",
+  "- `tables/vertex_spatial_residuals.csv` — spatial model residuals",
   "- `figures/variogram_*.png` — empirical vs fitted variograms",
   ""
 )

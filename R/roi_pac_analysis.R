@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
-# pac_analysis.R — Phase-Amplitude Coupling statistics, figures, and report
+# roi_pac_analysis.R — Phase-Amplitude Coupling statistics, figures, and report
 #
-# Called by Python: Rscript R/pac_analysis.R --data-dir ... --config ... --output-dir ...
+# Called by Python: Rscript R/roi_pac_analysis.R --data-dir ... --config ... --output-dir ...
 #
 # Reads pac_values.csv exported by Python.
 # Two analysis tiers:
@@ -441,9 +441,9 @@ plot_global_pac_bar <- function(global_df, group_colors, group_labels,
   }
 
   n_pairs <- length(unique(summary_data$freq_pair))
-  ggsave(file.path(output_dir, "pac_global_bar.png"), p,
+  ggsave(file.path(output_dir, "roi_pac_global_bar.png"), p,
          width = max(8, 1.5 * n_pairs), height = 5, dpi = 300)
-  message("  Saved: pac_global_bar.png")
+  message("  Saved: roi_pac_global_bar.png")
 }
 
 #' Comodulogram heatmap: phase band vs amp band, mean z-score
@@ -515,7 +515,7 @@ plot_comodulogram <- function(pac, contrasts, group_colors, group_labels,
         aspect.ratio = 1
       )
 
-    fname <- paste0("pac_comodulogram_", cname, ".png")
+    fname <- paste0("roi_pac_comodulogram_", cname, ".png")
     n_panels <- length(panel_levels)
     ggsave(file.path(output_dir, fname), p,
            width = 4 * n_panels + 1, height = 5, dpi = 300)
@@ -572,7 +572,7 @@ plot_pac_significance_heatmap <- function(posthoc_df, output_dir) {
         axis.text.x = element_text(angle = 45, hjust = 1)
       )
 
-    fname <- paste0("pac_significance_heatmap_", cname, ".png")
+    fname <- paste0("roi_pac_significance_heatmap_", cname, ".png")
     ggsave(file.path(output_dir, fname), p,
            width = max(8, n_pairs * 1.2 + 2), height = max(5, n_regions * 0.5 + 2),
            dpi = 300, limitsize = FALSE)
@@ -913,46 +913,46 @@ if (!figures_only) {
   message("\nExporting tables...")
 
   if (nrow(global_ttest_df) > 0) {
-    write_csv(global_ttest_df, file.path(tbl_dir, "pac_global.csv"))
-    message("  Saved: tables/pac_global.csv")
+    write_csv(global_ttest_df, file.path(tbl_dir, "roi_pac_global.csv"))
+    message("  Saved: tables/roi_pac_global.csv")
   }
   if (nrow(omnibus_region_df) > 0) {
-    write_csv(omnibus_region_df, file.path(tbl_dir, "pac_omnibus_region.csv"))
-    message("  Saved: tables/pac_omnibus_region.csv")
+    write_csv(omnibus_region_df, file.path(tbl_dir, "roi_pac_omnibus_region.csv"))
+    message("  Saved: tables/roi_pac_omnibus_region.csv")
   }
   if (nrow(posthoc_region_df) > 0) {
-    write_csv(posthoc_region_df, file.path(tbl_dir, "pac_posthoc_region.csv"))
-    message("  Saved: tables/pac_posthoc_region.csv")
+    write_csv(posthoc_region_df, file.path(tbl_dir, "roi_pac_posthoc_region.csv"))
+    message("  Saved: tables/roi_pac_posthoc_region.csv")
   }
 
 } else {
   # --figures-only: load existing tables from disk
   message("\n=== Figures-only mode: loading existing tables from ", tbl_dir, " ===")
 
-  global_ttest_path <- file.path(tbl_dir, "pac_global.csv")
+  global_ttest_path <- file.path(tbl_dir, "roi_pac_global.csv")
   global_ttest_df <- if (file.exists(global_ttest_path)) {
-    message("  Loading: pac_global.csv")
+    message("  Loading: roi_pac_global.csv")
     read_csv(global_ttest_path, show_col_types = FALSE)
   } else {
-    message("  Not found: pac_global.csv -- significance annotations will be omitted")
+    message("  Not found: roi_pac_global.csv -- significance annotations will be omitted")
     data.frame()
   }
 
-  omnibus_path <- file.path(tbl_dir, "pac_omnibus_region.csv")
+  omnibus_path <- file.path(tbl_dir, "roi_pac_omnibus_region.csv")
   omnibus_region_df <- if (file.exists(omnibus_path)) {
-    message("  Loading: pac_omnibus_region.csv")
+    message("  Loading: roi_pac_omnibus_region.csv")
     read_csv(omnibus_path, show_col_types = FALSE)
   } else {
-    message("  Not found: pac_omnibus_region.csv")
+    message("  Not found: roi_pac_omnibus_region.csv")
     data.frame()
   }
 
-  posthoc_path <- file.path(tbl_dir, "pac_posthoc_region.csv")
+  posthoc_path <- file.path(tbl_dir, "roi_pac_posthoc_region.csv")
   posthoc_region_df <- if (file.exists(posthoc_path)) {
-    message("  Loading: pac_posthoc_region.csv")
+    message("  Loading: roi_pac_posthoc_region.csv")
     read_csv(posthoc_path, show_col_types = FALSE)
   } else {
-    message("  Not found: pac_posthoc_region.csv")
+    message("  Not found: roi_pac_posthoc_region.csv")
     data.frame()
   }
 }

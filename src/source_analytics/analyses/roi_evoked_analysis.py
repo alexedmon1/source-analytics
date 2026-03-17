@@ -1,4 +1,4 @@
-"""Evoked response analysis: ITC, ERSP, STP for trial-based paradigms."""
+"""ROI Evoked response analysis: ITC, ERSP, STP for trial-based paradigms."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ from .base import BaseAnalysis, find_r_script_dir
 logger = logging.getLogger(__name__)
 
 
-class EvokedAnalysis(BaseAnalysis):
-    """ITC, ERSP, and STP analysis for evoked (trial-based) paradigms.
+class ROIEvokedAnalysis(BaseAnalysis):
+    """ROI-level ITC, ERSP, and STP analysis for evoked (trial-based) paradigms.
 
     Requires an ``evoked`` section in the study YAML config specifying
     epoch_samples, sfreq, baseline, tf_params, and measures.
@@ -33,7 +33,7 @@ class EvokedAnalysis(BaseAnalysis):
     R (lme4, ggplot2) handles statistics and visualization.
     """
 
-    name = "evoked"
+    name = "roi_evoked"
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -177,17 +177,17 @@ class EvokedAnalysis(BaseAnalysis):
         # Scalar measures CSV
         measures_df = pd.DataFrame(self._measure_rows)
         if measures_df.empty:
-            logger.warning("No evoked measure data collected")
+            logger.warning("No ROI evoked measure data collected")
             return
 
-        measures_df.to_csv(data_dir / "evoked_measures.csv", index=False)
-        logger.info("Exported evoked_measures.csv (%d rows)", len(measures_df))
+        measures_df.to_csv(data_dir / "roi_evoked_measures.csv", index=False)
+        logger.info("Exported roi_evoked_measures.csv (%d rows)", len(measures_df))
 
         # Optional full TF maps CSV
         if self._tfr_rows:
             tfr_df = pd.DataFrame(self._tfr_rows)
-            tfr_df.to_csv(data_dir / "evoked_tfr.csv", index=False)
-            logger.info("Exported evoked_tfr.csv (%d rows)", len(tfr_df))
+            tfr_df.to_csv(data_dir / "roi_evoked_tfr.csv", index=False)
+            logger.info("Exported roi_evoked_tfr.csv (%d rows)", len(tfr_df))
 
     def statistics(self) -> None:
         """Delegated to R."""
@@ -195,14 +195,14 @@ class EvokedAnalysis(BaseAnalysis):
 
     def figures(self) -> None:
         """Regenerate R figures from existing data/tables."""
-        self._call_r_figures_only("evoked_analysis.R", "evoked_measures.csv")
+        self._call_r_figures_only("roi_evoked_analysis.R", "roi_evoked_measures.csv")
 
     def summary(self) -> None:
         """Call Rscript for statistics, figures, and summary."""
         data_dir = self.output_dir / "data"
 
-        if not (data_dir / "evoked_measures.csv").exists():
-            logger.error("evoked_measures.csv not found — skipping R analysis")
+        if not (data_dir / "roi_evoked_measures.csv").exists():
+            logger.error("roi_evoked_measures.csv not found — skipping R analysis")
             return
 
         try:
@@ -211,7 +211,7 @@ class EvokedAnalysis(BaseAnalysis):
             logger.error(str(e))
             return
 
-        r_script = r_dir / "evoked_analysis.R"
+        r_script = r_dir / "roi_evoked_analysis.R"
         if not r_script.exists():
             logger.error("R script not found: %s", r_script)
             return

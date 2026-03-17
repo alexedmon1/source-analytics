@@ -3,66 +3,106 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from pathlib import Path
 
 from .config import StudyConfig
 from .io.discovery import SubjectInfo, discover_subjects
 from .analyses.base import BaseAnalysis
-from .analyses.psd_analysis import PSDAnalysis
-from .analyses.aperiodic_analysis import AperiodicAnalysis
+from .analyses.roi_psd_analysis import ROIPsdAnalysis
+from .analyses.roi_aperiodic_analysis import ROIAperiodicAnalysis
 from .analyses.roi_connectivity_analysis import ConnectivityAnalysis
-from .analyses.pac_analysis import PACAnalysis
-from .analyses.wholebrain_analysis import WholebrainAnalysis
+from .analyses.roi_pac_analysis import ROIPacAnalysis
+from .analyses.vertex_cluster_analysis import VertexClusterAnalysis
 from .analyses.electrode_analysis import ElectrodeAnalysis
 from .analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
 from .analyses.vertex_connectivity_analysis import VertexConnectivityAnalysis
-from .analyses.specparam_vertex_analysis import SpecparamVertexAnalysis
-from .analyses.mvpa_analysis import MVPAAnalysis
+from .analyses.vertex_specparam_analysis import VertexSpecparamAnalysis
+from .analyses.vertex_mvpa_analysis import VertexMVPAAnalysis
 from .analyses.roi_network_analysis import ROINetworkAnalysis
 from .analyses.vertex_network_analysis import VertexNetworkAnalysis
-from .analyses.spatial_lmm_analysis import SpatialLMMAnalysis
-from .analyses.transfer_entropy_analysis import TransferEntropyAnalysis
-from .analyses.evoked_analysis import EvokedAnalysis
+from .analyses.vertex_spatial_analysis import VertexSpatialAnalysis
+from .analyses.roi_transfer_entropy_analysis import ROITransferEntropyAnalysis
+from .analyses.roi_evoked_analysis import ROIEvokedAnalysis
 
 logger = logging.getLogger(__name__)
 
 # Registry of available analyses
 ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
-    "psd": PSDAnalysis,
-    "aperiodic": AperiodicAnalysis,
+    "roi_psd": ROIPsdAnalysis,
+    "roi_aperiodic": ROIAperiodicAnalysis,
     "roi_connectivity": ConnectivityAnalysis,
-    "pac": PACAnalysis,
-    "wholebrain": WholebrainAnalysis,
+    "roi_pac": ROIPacAnalysis,
+    "vertex_cluster": VertexClusterAnalysis,
     "electrode": ElectrodeAnalysis,
     "electrode_comparison": ElectrodeComparisonAnalysis,
     "vertex_connectivity": VertexConnectivityAnalysis,
-    "specparam_vertex": SpecparamVertexAnalysis,
-    "mvpa": MVPAAnalysis,
+    "vertex_specparam": VertexSpecparamAnalysis,
+    "vertex_mvpa": VertexMVPAAnalysis,
     "roi_network": ROINetworkAnalysis,
     "vertex_network": VertexNetworkAnalysis,
-    "spatial_lmm": SpatialLMMAnalysis,
-    "transfer_entropy": TransferEntropyAnalysis,
-    "evoked": EvokedAnalysis,
+    "vertex_spatial": VertexSpatialAnalysis,
+    "roi_transfer_entropy": ROITransferEntropyAnalysis,
+    "roi_evoked": ROIEvokedAnalysis,
 }
+
+# Backward-compatibility aliases (old name -> new name)
+_DEPRECATED_NAMES: dict[str, str] = {
+    "psd": "roi_psd",
+    "aperiodic": "roi_aperiodic",
+    "pac": "roi_pac",
+    "wholebrain": "vertex_cluster",
+    "spatial_lmm": "vertex_spatial",
+    "specparam_vertex": "vertex_specparam",
+    "mvpa": "vertex_mvpa",
+    "transfer_entropy": "roi_transfer_entropy",
+    "evoked": "roi_evoked",
+}
+
+# Register aliases so old YAML configs still work
+for _old, _new in _DEPRECATED_NAMES.items():
+    ANALYSIS_REGISTRY[_old] = ANALYSIS_REGISTRY[_new]
+
+
+def resolve_analysis_name(name: str) -> str:
+    """Resolve a possibly-deprecated analysis name to the canonical name.
+
+    Emits a deprecation warning if an old name is used.
+    """
+    if name in _DEPRECATED_NAMES:
+        canonical = _DEPRECATED_NAMES[name]
+        warnings.warn(
+            f"Analysis name '{name}' is deprecated, use '{canonical}' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return canonical
+    return name
+
 
 # Metadata for grouping and display
 ANALYSIS_METADATA: dict[str, dict[str, str]] = {
-    "psd":                  {"category": "resting", "level": "roi",        "description": "PSD (power spectral density)"},
-    "aperiodic":            {"category": "resting", "level": "roi",        "description": "1/f aperiodic decomposition"},
+    "roi_psd":              {"category": "resting", "level": "roi",        "description": "PSD (power spectral density)"},
+    "roi_aperiodic":        {"category": "resting", "level": "roi",        "description": "1/f aperiodic decomposition"},
     "roi_connectivity":     {"category": "resting", "level": "roi",        "description": "ROI pairwise connectivity"},
-    "pac":                  {"category": "resting", "level": "roi",        "description": "PAC (phase-amplitude coupling)"},
+    "roi_pac":              {"category": "resting", "level": "roi",        "description": "PAC (phase-amplitude coupling)"},
     "roi_network":          {"category": "resting", "level": "roi",        "description": "ROI-level graph theory network metrics"},
-    "vertex_network":       {"category": "resting", "level": "wholebrain", "description": "Vertex-level graph theory network metrics"},
-    "transfer_entropy":     {"category": "resting", "level": "roi",        "description": "Directed information flow"},
-    "mvpa":                 {"category": "resting", "level": "wholebrain", "description": "MVPA (SVM pattern classification)"},
-    "wholebrain":           {"category": "resting", "level": "wholebrain", "description": "Vertex-level cluster permutation"},
-    "spatial_lmm":          {"category": "resting", "level": "wholebrain", "description": "Spatial LMM (vertex-level linear mixed models)"},
-    "specparam_vertex":     {"category": "resting", "level": "wholebrain", "description": "Vertex-level spectral parameterization"},
-    "vertex_connectivity":  {"category": "resting", "level": "wholebrain", "description": "Vertex pairwise connectivity"},
+    "vertex_network":       {"category": "resting", "level": "vertex",     "description": "Vertex-level graph theory network metrics"},
+    "roi_transfer_entropy": {"category": "resting", "level": "roi",        "description": "Directed information flow"},
+    "vertex_mvpa":          {"category": "resting", "level": "vertex",     "description": "MVPA (SVM pattern classification)"},
+    "vertex_cluster":       {"category": "resting", "level": "vertex",     "description": "Vertex-level cluster permutation"},
+    "vertex_spatial":       {"category": "resting", "level": "vertex",     "description": "Spatial GLS (vertex-level generalized least squares)"},
+    "vertex_specparam":     {"category": "resting", "level": "vertex",     "description": "Vertex-level spectral parameterization"},
+    "vertex_connectivity":  {"category": "resting", "level": "vertex",     "description": "Vertex pairwise connectivity"},
     "electrode":            {"category": "resting", "level": "electrode",  "description": "Sensor-level PSD analysis"},
     "electrode_comparison": {"category": "resting", "level": "electrode",  "description": "Source vs electrode comparison"},
-    "evoked":               {"category": "evoked",  "level": "roi",        "description": "ITC, ERSP, STP for trial-based paradigms"},
+    "roi_evoked":           {"category": "evoked",  "level": "roi",        "description": "ITC, ERSP, STP for trial-based paradigms"},
 }
+
+# Add metadata entries for deprecated aliases (point to same metadata)
+for _old, _new in _DEPRECATED_NAMES.items():
+    if _new in ANALYSIS_METADATA:
+        ANALYSIS_METADATA[_old] = ANALYSIS_METADATA[_new]
 
 
 class StudyAnalyzer:
@@ -116,11 +156,16 @@ class StudyAnalyzer:
             If provided, only run these lifecycle steps.
         """
         if analysis_name not in ANALYSIS_REGISTRY:
-            available = ", ".join(ANALYSIS_REGISTRY.keys())
+            available = ", ".join(
+                k for k in ANALYSIS_REGISTRY.keys() if k not in _DEPRECATED_NAMES
+            )
             raise ValueError(f"Unknown analysis '{analysis_name}'. Available: {available}")
 
+        # Resolve deprecated name (with warning) and use canonical output dir
+        canonical_name = resolve_analysis_name(analysis_name)
+
         cls = ANALYSIS_REGISTRY[analysis_name]
-        output_dir = self.config.output_dir / analysis_name
+        output_dir = self.config.output_dir / canonical_name
         analysis = cls(self.config, output_dir)
 
         # Filter subjects to only groups referenced in contrasts
@@ -136,7 +181,7 @@ class StudyAnalyzer:
 
         logger.info(
             "Running '%s' on %d subjects (%d groups)",
-            analysis_name, len(subjects), len(set(s.group for s in subjects)),
+            canonical_name, len(subjects), len(set(s.group for s in subjects)),
         )
         analysis.run(subjects, steps=steps)
 

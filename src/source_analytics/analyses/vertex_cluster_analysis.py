@@ -1,4 +1,4 @@
-"""Whole-brain vertex-level spectral analysis with cluster-based permutation testing.
+"""Vertex cluster spectral analysis with cluster-based permutation testing.
 
 Computes PSD once per subject for all 154 shell vertices, then extracts:
 - Relative and absolute band power per vertex per band
@@ -38,7 +38,7 @@ from ..stats.tfce import tfce_permutation_test
 from ..viz.glass_brain import (
     plot_band_comparison,
     plot_glass_brain,
-    plot_wholebrain_summary,
+    plot_vertex_cluster_summary,
 )
 from .base import BaseAnalysis
 
@@ -59,15 +59,15 @@ def _find_r_script_dir() -> Path:
     )
 
 
-class WholebrainAnalysis(BaseAnalysis):
-    """Whole-brain vertex-level spectral analysis with cluster permutation testing.
+class VertexClusterAnalysis(BaseAnalysis):
+    """Vertex cluster spectral analysis with cluster permutation testing.
 
     Processes shell_ellipsoid source data (154 vertices), computes spectral
     metrics, runs voxel-wise statistics with cluster correction, and generates
     glass brain visualizations.
     """
 
-    name = "wholebrain"
+    name = "vertex_cluster"
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -80,8 +80,8 @@ class WholebrainAnalysis(BaseAnalysis):
         self._subject_data: dict[str, dict] = {}
         self._subject_groups: dict[str, str] = {}
 
-        # Wholebrain-specific config
-        wb_cfg = config.wholebrain
+        # Vertex cluster-specific config
+        wb_cfg = config.vertex
         self._cluster_threshold = float(wb_cfg.get("cluster_threshold", 2.0))
         self._n_permutations = int(wb_cfg.get("n_permutations", 1000))
         self._adjacency_distance = float(wb_cfg.get("adjacency_distance_mm", 5.0))
@@ -193,16 +193,16 @@ class WholebrainAnalysis(BaseAnalysis):
         # Band power CSV
         band_df = pd.DataFrame(self._band_power_rows)
         if band_df.empty:
-            logger.warning("No wholebrain band power data collected")
+            logger.warning("No vertex cluster band power data collected")
             return
-        band_df.to_csv(data_dir / "wholebrain_values.csv", index=False)
-        logger.info("Exported wholebrain_values.csv (%d rows)", len(band_df))
+        band_df.to_csv(data_dir / "vertex_cluster_values.csv", index=False)
+        logger.info("Exported vertex_cluster_values.csv (%d rows)", len(band_df))
 
         # Features CSV
         feat_df = pd.DataFrame(self._feature_rows)
         if not feat_df.empty:
-            feat_df.to_csv(data_dir / "wholebrain_features.csv", index=False)
-            logger.info("Exported wholebrain_features.csv (%d rows)", len(feat_df))
+            feat_df.to_csv(data_dir / "vertex_cluster_features.csv", index=False)
+            logger.info("Exported vertex_cluster_features.csv (%d rows)", len(feat_df))
 
         # Source coordinates CSV
         if self._source_coords is not None:
@@ -485,13 +485,13 @@ class WholebrainAnalysis(BaseAnalysis):
             results_pkl["config"]["tfce_dh"] = self._tfce_dh
         else:
             results_pkl["config"]["cluster_threshold"] = self._cluster_threshold
-        with open(data_dir / "wholebrain_results.pkl", "wb") as f:
+        with open(data_dir / "vertex_cluster_results.pkl", "wb") as f:
             pickle.dump(results_pkl, f)
-        logger.info("Saved wholebrain_results.pkl")
+        logger.info("Saved vertex_cluster_results.pkl")
 
     def _load_state_from_disk(self) -> bool:
         """Load saved state from pickle for --steps figures/summary support."""
-        pkl_path = self.output_dir / "data" / "wholebrain_results.pkl"
+        pkl_path = self.output_dir / "data" / "vertex_cluster_results.pkl"
         if not pkl_path.exists():
             logger.warning("No saved state at %s; skipping figures", pkl_path)
             return False
@@ -507,7 +507,7 @@ class WholebrainAnalysis(BaseAnalysis):
                 self.config.get_group_label(c.group_a),
                 self.config.get_group_label(c.group_b),
             )
-        logger.info("Loaded wholebrain state from %s", pkl_path)
+        logger.info("Loaded vertex cluster state from %s", pkl_path)
         return True
 
     def figures(self) -> None:
@@ -539,7 +539,7 @@ class WholebrainAnalysis(BaseAnalysis):
                 cluster_pvalues=res.get("cluster_pvalues"),
                 band_name=band_name,
                 group_labels=group_labels,
-                output_path=fig_dir / f"wholebrain_{safe_name}.png",
+                output_path=fig_dir / f"vertex_cluster_{safe_name}.png",
                 p_corrected=res.get("p_corrected"),
             )
             # TFCE score maps
@@ -564,7 +564,7 @@ class WholebrainAnalysis(BaseAnalysis):
                 cluster_pvalues=res.get("cluster_pvalues"),
                 band_name=feat_name,
                 group_labels=group_labels,
-                output_path=fig_dir / f"wholebrain_{feat_name}.png",
+                output_path=fig_dir / f"vertex_cluster_{feat_name}.png",
                 p_corrected=res.get("p_corrected"),
             )
 
@@ -573,10 +573,10 @@ class WholebrainAnalysis(BaseAnalysis):
         all_results.update(band_results)
         all_results.update(feature_results)
         if all_results:
-            plot_wholebrain_summary(
+            plot_vertex_cluster_summary(
                 band_results=all_results,
                 coords=coords,
-                output_path=fig_dir / "wholebrain_summary.png",
+                output_path=fig_dir / "vertex_cluster_summary.png",
                 group_labels=group_labels,
             )
 
@@ -600,7 +600,7 @@ class WholebrainAnalysis(BaseAnalysis):
             self._write_python_summary()
             return
 
-        r_script = r_dir / "wholebrain_analysis.R"
+        r_script = r_dir / "vertex_cluster_analysis.R"
         if not r_script.exists():
             logger.warning("R script not found: %s — writing Python summary", r_script)
             self._write_python_summary()
@@ -661,7 +661,7 @@ class WholebrainAnalysis(BaseAnalysis):
             method_label = "Vertex-level spectral analysis with cluster permutation testing"
 
         lines = [
-            "# Whole-Brain Analysis Summary",
+            "# Vertex Cluster Analysis Summary",
             "",
             f"**Study**: {self.config.name}",
             f"**Analysis**: {method_label}",
@@ -732,13 +732,13 @@ class WholebrainAnalysis(BaseAnalysis):
 
         lines.append("## Output Files")
         lines.append("")
-        lines.append("- `data/wholebrain_values.csv` — per-subject per-vertex band power")
-        lines.append("- `data/wholebrain_features.csv` — per-subject per-vertex slope, peak alpha")
+        lines.append("- `data/vertex_cluster_values.csv` — per-subject per-vertex band power")
+        lines.append("- `data/vertex_cluster_features.csv` — per-subject per-vertex slope, peak alpha")
         lines.append("- `data/source_coords.csv` — vertex coordinates (mm)")
         lines.append("- `tables/voxelwise_stats.csv` — per-vertex statistics")
         if not is_tfce:
             lines.append("- `tables/cluster_results.csv` — cluster summaries with corrected p-values")
-        lines.append("- `figures/wholebrain_*.png` — glass brain visualizations")
+        lines.append("- `figures/vertex_cluster_*.png` — glass brain visualizations")
         if is_tfce:
             lines.append("- `figures/tfce_scores_*.png` — TFCE score glass brains")
         lines.append("")

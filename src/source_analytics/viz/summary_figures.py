@@ -426,7 +426,7 @@ def plot_summary_circos(
     return outputs
 
 
-# ── Summary glass brain (wholebrain / spatial_lmm) ───────────────────
+# ── Summary glass brain (vertex_cluster / vertex_spatial) ────────────
 
 def plot_summary_glass_brain(
     tbl_dir: Path,
@@ -435,9 +435,9 @@ def plot_summary_glass_brain(
 ) -> list[Path]:
     """Glass-brain showing significant clusters/vertices.
 
-    For wholebrain: reads cluster_results.csv + voxelwise_stats.csv
-    For spatial_lmm: reads spatial_lmm_results.csv
-    For specparam_vertex: reads specparam_vertex_stats.csv
+    For vertex_cluster: reads cluster_results.csv + voxelwise_stats.csv
+    For vertex_spatial: reads vertex_spatial_results.csv
+    For vertex_specparam: reads vertex_specparam_stats.csv
     """
     from .glass_brain import plot_glass_brain
 
@@ -454,12 +454,12 @@ def plot_summary_glass_brain(
 
     outputs = []
 
-    if analysis == "wholebrain":
-        outputs.extend(_glass_brain_wholebrain(tbl_dir, fig_dir, coords, **kwargs))
-    elif analysis == "spatial_lmm":
-        outputs.extend(_glass_brain_spatial_lmm(tbl_dir, fig_dir, coords, **kwargs))
-    elif analysis == "specparam_vertex":
-        outputs.extend(_glass_brain_specparam(tbl_dir, fig_dir, coords, **kwargs))
+    if analysis in ("vertex_cluster", "wholebrain"):
+        outputs.extend(_glass_brain_vertex_cluster(tbl_dir, fig_dir, coords, **kwargs))
+    elif analysis in ("vertex_spatial", "spatial_lmm"):
+        outputs.extend(_glass_brain_vertex_spatial(tbl_dir, fig_dir, coords, **kwargs))
+    elif analysis in ("vertex_specparam", "specparam_vertex"):
+        outputs.extend(_glass_brain_vertex_specparam(tbl_dir, fig_dir, coords, **kwargs))
 
     return outputs
 
@@ -481,7 +481,7 @@ def _find_coords(tbl_dir: Path, data_dir: Path | None, analysis: str) -> np.ndar
     paradigm = tbl_dir.parent.name
     search_paths.extend([
         analytics_root / paradigm / analysis / "data" / "source_coords.csv",
-        analytics_root / paradigm / "wholebrain" / "data" / "source_coords.csv",
+        analytics_root / paradigm / "vertex_cluster" / "data" / "source_coords.csv",
     ])
 
     for p in search_paths:
@@ -492,10 +492,10 @@ def _find_coords(tbl_dir: Path, data_dir: Path | None, analysis: str) -> np.ndar
     return None
 
 
-def _glass_brain_wholebrain(
+def _glass_brain_vertex_cluster(
     tbl_dir: Path, fig_dir: Path, coords: np.ndarray, **kwargs,
 ) -> list[Path]:
-    """Glass brain from wholebrain cluster + voxelwise stats."""
+    """Glass brain from vertex cluster + voxelwise stats."""
     from .glass_brain import plot_glass_brain
 
     cluster_file = tbl_dir / "cluster_results.csv"
@@ -522,7 +522,7 @@ def _glass_brain_wholebrain(
         sig_clusters = pd.DataFrame()
 
     if sig_clusters.empty:
-        logger.info("No significant wholebrain clusters; plotting top uncorrected t-map")
+        logger.info("No significant vertex clusters; plotting top uncorrected t-map")
 
     # Group by contrast x band x metric and plot the t-map
     if contrast_filter:
@@ -548,13 +548,13 @@ def _glass_brain_wholebrain(
     return outputs
 
 
-def _glass_brain_spatial_lmm(
+def _glass_brain_vertex_spatial(
     tbl_dir: Path, fig_dir: Path, coords: np.ndarray, **kwargs,
 ) -> list[Path]:
-    """Glass brain from spatial LMM results (significant bands/metrics only)."""
+    """Glass brain from vertex spatial results (significant bands/metrics only)."""
     from .glass_brain import plot_glass_brain
 
-    lmm_file = tbl_dir / "spatial_lmm_results.csv"
+    lmm_file = tbl_dir / "vertex_spatial_results.csv"
     if not lmm_file.exists():
         return []
 
@@ -577,13 +577,13 @@ def _glass_brain_spatial_lmm(
 
     sig_df = df[df["_sig"]]
     if sig_df.empty:
-        logger.info("No significant spatial LMM results for glass brain")
+        logger.info("No significant vertex spatial results for glass brain")
         return []
 
     # For each significant result, try to find per-vertex residuals or use coefficient
     # Since spatial_lmm is a single coefficient per band/metric, we show an info plot
     outputs = []
-    residual_file = tbl_dir / "spatial_residuals.csv"
+    residual_file = tbl_dir / "vertex_spatial_residuals.csv"
     if residual_file.exists():
         resid = pd.read_csv(residual_file)
         for _, row in sig_df.iterrows():
@@ -597,23 +597,23 @@ def _glass_brain_spatial_lmm(
             vals = sub.iloc[:, -1].values  # last column is residual
             if len(vals) != len(coords):
                 continue
-            title = f"Spatial LMM | {cname} | {band} | {metric}"
+            title = f"Vertex Spatial | {cname} | {band} | {metric}"
             fname = f"glass_brain_slmm_{cname}_{band}_{metric}.png"
             out = fig_dir / fname
             plot_glass_brain(coords, vals, title=title, output_path=out, cmap="RdBu_r")
             outputs.append(out)
-            logger.info("Saved spatial LMM glass brain: %s", out)
+            logger.info("Saved vertex spatial glass brain: %s", out)
 
     return outputs
 
 
-def _glass_brain_specparam(
+def _glass_brain_vertex_specparam(
     tbl_dir: Path, fig_dir: Path, coords: np.ndarray, **kwargs,
 ) -> list[Path]:
     """Glass brain from specparam vertex stats (t-values per vertex)."""
     from .glass_brain import plot_glass_brain
 
-    stats_file = tbl_dir / "specparam_vertex_stats.csv"
+    stats_file = tbl_dir / "vertex_specparam_stats.csv"
     if not stats_file.exists():
         return []
 

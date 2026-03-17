@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
-# evoked_analysis.R — R entry point for evoked response statistical analysis
+# roi_evoked_analysis.R — R entry point for evoked response statistical analysis
 #
-# Called by Python: Rscript R/evoked_analysis.R --data-dir ... --config ... --output-dir ...
+# Called by Python: Rscript R/roi_evoked_analysis.R --data-dir ... --config ... --output-dir ...
 #
 # Reads evoked_measures.csv (scalar ITC/ERSP/STP values per subject/ROI/measure),
 # runs LMM + emmeans for each measure, generates figures, writes summary.
@@ -462,27 +462,27 @@ if (length(config$roi_categories) > 0) {
 
 # --- Export tables (clean up stale files first) ---
 message("\nExporting tables...")
-for (f in c("evoked_omnibus.csv", "evoked_posthoc_roi.csv",
-            "evoked_omnibus_region.csv", "evoked_posthoc_region.csv")) {
+for (f in c("roi_evoked_omnibus.csv", "roi_evoked_posthoc_roi.csv",
+            "roi_evoked_omnibus_region.csv", "roi_evoked_posthoc_region.csv")) {
   fp <- file.path(tbl_dir, f)
   if (file.exists(fp)) file.remove(fp)
 }
 
 if (nrow(omnibus_df) > 0) {
-  write_csv(omnibus_df, file.path(tbl_dir, "evoked_omnibus.csv"))
-  message("  Saved: tables/evoked_omnibus.csv")
+  write_csv(omnibus_df, file.path(tbl_dir, "roi_evoked_omnibus.csv"))
+  message("  Saved: tables/roi_evoked_omnibus.csv")
 }
 if (nrow(posthoc_df) > 0) {
-  write_csv(posthoc_df, file.path(tbl_dir, "evoked_posthoc_roi.csv"))
-  message("  Saved: tables/evoked_posthoc_roi.csv")
+  write_csv(posthoc_df, file.path(tbl_dir, "roi_evoked_posthoc_roi.csv"))
+  message("  Saved: tables/roi_evoked_posthoc_roi.csv")
 }
 if (nrow(omnibus_region_df) > 0) {
-  write_csv(omnibus_region_df, file.path(tbl_dir, "evoked_omnibus_region.csv"))
-  message("  Saved: tables/evoked_omnibus_region.csv")
+  write_csv(omnibus_region_df, file.path(tbl_dir, "roi_evoked_omnibus_region.csv"))
+  message("  Saved: tables/roi_evoked_omnibus_region.csv")
 }
 if (nrow(posthoc_region_df) > 0) {
-  write_csv(posthoc_region_df, file.path(tbl_dir, "evoked_posthoc_region.csv"))
-  message("  Saved: tables/evoked_posthoc_region.csv")
+  write_csv(posthoc_region_df, file.path(tbl_dir, "roi_evoked_posthoc_region.csv"))
+  message("  Saved: tables/roi_evoked_posthoc_region.csv")
 }
 
 # --- Global posthoc (marginal group comparisons averaged over ROIs) ---
@@ -510,19 +510,19 @@ if (nrow(global_posthoc_df) > 0) {
       sig_label = sig_stars(q_value)
     )
 
-  write_csv(global_posthoc_df, file.path(tbl_dir, "evoked_posthoc_global.csv"))
-  message("  Saved: tables/evoked_posthoc_global.csv")
+  write_csv(global_posthoc_df, file.path(tbl_dir, "roi_evoked_posthoc_global.csv"))
+  message("  Saved: tables/roi_evoked_posthoc_global.csv")
   sig_global <- global_posthoc_df %>% filter(significant == TRUE)
   message("  ", nrow(global_posthoc_df), " global contrasts, ", nrow(sig_global), " significant")
 }
 
 } else {
   message("Figures-only mode: loading existing tables...")
-  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "evoked_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "evoked_posthoc_roi.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  omnibus_region_df <- tryCatch(read_csv(file.path(tbl_dir, "evoked_omnibus_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  posthoc_region_df <- tryCatch(read_csv(file.path(tbl_dir, "evoked_posthoc_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  global_posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "evoked_posthoc_global.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_evoked_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_evoked_posthoc_roi.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_region_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_evoked_omnibus_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_region_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_evoked_posthoc_region.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  global_posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_evoked_posthoc_global.csv"), show_col_types = FALSE), error = function(e) data.frame())
 }
 
 # --- Figures ---
@@ -570,7 +570,7 @@ for (mname in measure_names) {
       theme_minimal(base_size = 14) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-    fname <- file.path(fig_dir, paste0("evoked_", mname, "_by_region.png"))
+    fname <- file.path(fig_dir, paste0("roi_evoked_", mname, "_by_region.png"))
     ggsave(fname, p, width = 14, height = 6, dpi = 150)
     message("  Saved: ", basename(fname))
   }
@@ -626,7 +626,7 @@ for (mname in measure_names) {
     }
   }
 
-  fname2 <- file.path(fig_dir, paste0("evoked_", mname, "_group.png"))
+  fname2 <- file.path(fig_dir, paste0("roi_evoked_", mname, "_group.png"))
   ggsave(fname2, p2, width = 6, height = 5, dpi = 150)
   message("  Saved: ", basename(fname2))
 }
@@ -683,9 +683,9 @@ if (nrow(posthoc_df) > 0) {
            x = "Hedges' g", y = "", color = "Measure") +
       theme_minimal(base_size = 10)
 
-    ggsave(file.path(fig_dir, "evoked_posthoc_forest.png"), p,
+    ggsave(file.path(fig_dir, "roi_evoked_posthoc_forest.png"), p,
            width = 10, height = max(4, nrow(sig_ph) * 0.25), dpi = 150)
-    message("  Saved: evoked_posthoc_forest.png")
+    message("  Saved: roi_evoked_posthoc_forest.png")
   }
 }
 

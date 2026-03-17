@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
-# transfer_entropy_analysis.R — Transfer entropy statistics and report
+# roi_transfer_entropy_analysis.R — Transfer entropy statistics and report
 #
-# Called by Python: Rscript R/transfer_entropy_analysis.R --data-dir ... --config ... --output-dir ...
+# Called by Python: Rscript R/roi_transfer_entropy_analysis.R --data-dir ... --config ... --output-dir ...
 #
 # Reads transfer_entropy_edges.csv exported by Python.
 # Three analysis tiers:
@@ -430,9 +430,9 @@ plot_global_te_bar <- function(global_df, group_colors, group_labels,
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
   n_bands <- length(unique(summary_data$band))
-  ggsave(file.path(output_dir, "te_global_bar.png"), p,
+  ggsave(file.path(output_dir, "roi_transfer_entropy_global_bar.png"), p,
          width = max(8, 2 * n_bands), height = 5, dpi = 300)
-  message("  Saved: te_global_bar.png")
+  message("  Saved: roi_transfer_entropy_global_bar.png")
 }
 
 # ===========================================================================
@@ -780,27 +780,27 @@ if (!figures_only) {
   message("\nExporting tables...")
 
   if (nrow(global_ttest_df) > 0) {
-    write_csv(global_ttest_df, file.path(tbl_dir, "te_global_ttest.csv"))
-    message("  Saved: tables/te_global_ttest.csv")
+    write_csv(global_ttest_df, file.path(tbl_dir, "roi_transfer_entropy_global_ttest.csv"))
+    message("  Saved: tables/roi_transfer_entropy_global_ttest.csv")
   }
   if (nrow(directional_df) > 0) {
-    write_csv(directional_df, file.path(tbl_dir, "te_directional_ttest.csv"))
-    message("  Saved: tables/te_directional_ttest.csv")
+    write_csv(directional_df, file.path(tbl_dir, "roi_transfer_entropy_directional_ttest.csv"))
+    message("  Saved: tables/roi_transfer_entropy_directional_ttest.csv")
   }
   if (nrow(omnibus_df) > 0) {
-    write_csv(omnibus_df, file.path(tbl_dir, "te_omnibus_lmm.csv"))
-    message("  Saved: tables/te_omnibus_lmm.csv")
+    write_csv(omnibus_df, file.path(tbl_dir, "roi_transfer_entropy_omnibus_lmm.csv"))
+    message("  Saved: tables/roi_transfer_entropy_omnibus_lmm.csv")
   }
   if (nrow(posthoc_df) > 0) {
-    write_csv(posthoc_df, file.path(tbl_dir, "te_posthoc.csv"))
-    message("  Saved: tables/te_posthoc.csv")
+    write_csv(posthoc_df, file.path(tbl_dir, "roi_transfer_entropy_posthoc.csv"))
+    message("  Saved: tables/roi_transfer_entropy_posthoc.csv")
   }
 } else {
   message("Figures-only mode: loading existing tables...")
-  global_ttest_df <- tryCatch(read_csv(file.path(tbl_dir, "te_global_ttest.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  directional_df <- tryCatch(read_csv(file.path(tbl_dir, "te_directional_ttest.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "te_omnibus_lmm.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "te_posthoc.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  global_ttest_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_transfer_entropy_global_ttest.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  directional_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_transfer_entropy_directional_ttest.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_transfer_entropy_omnibus_lmm.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_transfer_entropy_posthoc.csv"), show_col_types = FALSE), error = function(e) data.frame())
 }
 
 # ===========================================================================

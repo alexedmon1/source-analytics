@@ -46,22 +46,22 @@ class TableSchema:
 
 
 TABLE_SCHEMAS: dict[str, TableSchema] = {
-    "psd": TableSchema(
-        posthoc_file="psd_posthoc_global.csv",
+    "roi_psd": TableSchema(
+        posthoc_file="roi_psd_posthoc_global.csv",
         estimate_col="estimate",
         label_col="dv",
         band_col="band",
         estimate_label="Difference",
     ),
-    "aperiodic": TableSchema(
-        posthoc_file="aperiodic_posthoc_global.csv",
+    "roi_aperiodic": TableSchema(
+        posthoc_file="roi_aperiodic_posthoc_global.csv",
         estimate_col="estimate",
         label_col="dv",
         band_col=None,
         estimate_label="Difference",
     ),
-    "evoked": TableSchema(
-        posthoc_file="evoked_posthoc_global.csv",
+    "roi_evoked": TableSchema(
+        posthoc_file="roi_evoked_posthoc_global.csv",
         estimate_col="estimate",
         label_col="dv",
         band_col=None,
@@ -74,8 +74,8 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
         band_col="band",
         estimate_label="Mean Difference",
     ),
-    "pac": TableSchema(
-        posthoc_file="pac_global.csv",
+    "roi_pac": TableSchema(
+        posthoc_file="roi_pac_global.csv",
         estimate_col=None,  # computed as mean_a - mean_b
         label_col="freq_pair",
         band_col=None,
@@ -90,7 +90,7 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
         q_col="q_value",
         estimate_label="Difference",
     ),
-    "wholebrain": TableSchema(
+    "vertex_cluster": TableSchema(
         posthoc_file="cluster_results.csv",
         estimate_col="cluster_stat",
         label_col="metric",
@@ -102,8 +102,8 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
         contrast_col="contrast",
         estimate_label="Cluster Stat",
     ),
-    "spatial_lmm": TableSchema(
-        posthoc_file="spatial_lmm_results.csv",
+    "vertex_spatial": TableSchema(
+        posthoc_file="vertex_spatial_results.csv",
         estimate_col="coefficient",
         label_col="metric",
         band_col="band",
@@ -112,8 +112,8 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
         q_col="q_value",
         estimate_label="Coefficient",
     ),
-    "specparam_vertex": TableSchema(
-        posthoc_file="specparam_vertex_stats.csv",
+    "vertex_specparam": TableSchema(
+        posthoc_file="vertex_specparam_stats.csv",
         estimate_col=None,
         label_col="parameter",
         band_col=None,
@@ -122,8 +122,8 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
         q_col="p",
         estimate_label="Hedges g",
     ),
-    "mvpa": TableSchema(
-        posthoc_file="mvpa_results.csv",
+    "vertex_mvpa": TableSchema(
+        posthoc_file="vertex_mvpa_results.csv",
         estimate_col="accuracy",
         label_col="band",
         band_col="band",
@@ -133,6 +133,15 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
         estimate_label="Accuracy",
     ),
 }
+
+# Backward-compatible aliases for old analysis names
+for _old, _new in [
+    ("psd", "roi_psd"), ("aperiodic", "roi_aperiodic"), ("evoked", "roi_evoked"),
+    ("pac", "roi_pac"), ("wholebrain", "vertex_cluster"), ("spatial_lmm", "vertex_spatial"),
+    ("specparam_vertex", "vertex_specparam"), ("mvpa", "vertex_mvpa"),
+]:
+    if _new in TABLE_SCHEMAS:
+        TABLE_SCHEMAS[_old] = TABLE_SCHEMAS[_new]
 
 
 # ── Figure type registry ─────────────────────────────────────────────
@@ -223,12 +232,12 @@ def _register_all() -> None:
 
     # Analyses that support the standard heatmap + volcano
     heatmap_analyses = [
-        "psd", "aperiodic", "evoked", "roi_connectivity", "pac",
-        "spatial_lmm",
+        "roi_psd", "roi_aperiodic", "roi_evoked", "roi_connectivity", "roi_pac",
+        "vertex_spatial",
     ]
     volcano_analyses = [
-        "psd", "aperiodic", "evoked", "roi_connectivity", "pac",
-        "spatial_lmm",
+        "roi_psd", "roi_aperiodic", "roi_evoked", "roi_connectivity", "roi_pac",
+        "vertex_spatial",
     ]
 
     for a in heatmap_analyses:
@@ -239,8 +248,8 @@ def _register_all() -> None:
     # Connectivity gets circos
     register("roi_connectivity", "circos", sf.plot_summary_circos)
 
-    # Wholebrain / spatial_lmm / specparam_vertex get glass_brain
-    for a in ("wholebrain", "spatial_lmm", "specparam_vertex"):
+    # Vertex-level analyses get glass_brain
+    for a in ("vertex_cluster", "vertex_spatial", "vertex_specparam"):
         register(a, "glass_brain", sf.plot_summary_glass_brain)
 
 

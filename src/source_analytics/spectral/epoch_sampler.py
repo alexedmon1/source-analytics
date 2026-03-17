@@ -93,12 +93,12 @@ def sample_epochs(
 
 
 def get_epoch_config(config_dict: dict) -> dict | None:
-    """Extract epoch sampling config from wholebrain config.
+    """Extract epoch sampling config from vertex config.
 
     Parameters
     ----------
     config_dict : dict
-        The wholebrain config section.
+        The vertex config section.
 
     Returns
     -------

@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Specparam Vertex Analysis Report Generator
+# vertex_specparam_analysis.R — Report Generator
 # Reads vertex-level spectral parameterization results, generates ANALYSIS_SUMMARY.md
 
 suppressPackageStartupMessages({
@@ -29,15 +29,15 @@ output_dir  <- opts[["output-dir"]]
 config <- read_yaml(config_path)
 
 # --- Load data ----------------------------------------------------------------
-param_path <- file.path(data_dir, "specparam_vertex.csv")
+param_path <- file.path(data_dir, "vertex_specparam.csv")
 if (!file.exists(param_path)) {
-  cat("No specparam_vertex.csv found.\n")
+  cat("No vertex_specparam.csv found.\n")
   quit(status = 0)
 }
 
 params <- read.csv(param_path, stringsAsFactors = FALSE)
 
-sp_cfg <- config$specparam_vertex %||% list()
+sp_cfg <- config$vertex_specparam %||% list()
 freq_range <- sp_cfg$freq_range %||% c(1, 100)
 max_peaks  <- sp_cfg$max_n_peaks %||% 6
 
@@ -78,7 +78,7 @@ lines <- c(
 )
 
 # Epoch info
-wb_cfg <- config$wholebrain %||% list()
+wb_cfg <- config$vertex %||% list()
 epoch_cfg <- wb_cfg$epoch_sampling
 if (!is.null(epoch_cfg) && isTRUE(epoch_cfg$enabled)) {
   lines <- c(lines,
@@ -118,7 +118,7 @@ for (i in seq_len(nrow(group_summary))) {
 }
 
 # Cluster stats
-stats_path <- file.path(output_dir, "tables", "specparam_vertex_stats.csv")
+stats_path <- file.path(output_dir, "tables", "vertex_specparam_stats.csv")
 if (file.exists(stats_path)) {
   stats <- read.csv(stats_path, stringsAsFactors = FALSE)
   lines <- c(lines, "", "## Cluster Permutation Results", "")
@@ -148,10 +148,10 @@ if (file.exists(chi2_path)) {
 lines <- c(lines,
   "## Output Files",
   "",
-  "- `data/specparam_vertex.csv` — per-subject per-vertex specparam fit parameters",
-  "- `tables/specparam_vertex_stats.csv` — cluster permutation statistics",
+  "- `data/vertex_specparam.csv` — per-subject per-vertex specparam fit parameters",
+  "- `tables/vertex_specparam_stats.csv` — cluster permutation statistics",
   "- `tables/gamma_peak_chi2.csv` — gamma peak presence chi-squared tests",
-  "- `figures/specparam_*.png` — aperiodic parameter glass brain maps",
+  "- `figures/vertex_specparam_*.png` — aperiodic parameter glass brain maps",
   "- `figures/gamma_peak_presence.png` — gamma peak prevalence map",
   ""
 )

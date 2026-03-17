@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# MVPA Analysis Report Generator
+# vertex_mvpa_analysis.R — Report Generator
 # Reads MVPA classification results and generates ANALYSIS_SUMMARY.md
 
 suppressPackageStartupMessages({
@@ -29,21 +29,21 @@ output_dir  <- opts[["output-dir"]]
 config <- read_yaml(config_path)
 
 # --- Load data ----------------------------------------------------------------
-results_path <- file.path(output_dir, "tables", "mvpa_results.csv")
+results_path <- file.path(output_dir, "tables", "vertex_mvpa_results.csv")
 if (!file.exists(results_path)) {
-  cat("No mvpa_results.csv found.\n")
+  cat("No vertex_mvpa_results.csv found.\n")
   quit(status = 0)
 }
 
 results <- read.csv(results_path, stringsAsFactors = FALSE)
 
-mvpa_cfg <- config$mvpa %||% list()
+mvpa_cfg <- config$vertex_mvpa %||% list()
 classifier <- mvpa_cfg$classifier %||% "svm_linear"
 cv_method  <- mvpa_cfg$cv_method %||% "loocv"
 n_perm     <- mvpa_cfg$n_permutations %||% 1000
 
 # --- Features info -----------------------------------------------------------
-features_path <- file.path(data_dir, "mvpa_features.csv")
+features_path <- file.path(data_dir, "vertex_mvpa_features.csv")
 n_subjects <- 0
 n_features <- 0
 if (file.exists(features_path)) {
@@ -73,7 +73,7 @@ lines <- c(
 )
 
 # Epoch info
-wb_cfg <- config$wholebrain %||% list()
+wb_cfg <- config$vertex %||% list()
 epoch_cfg <- wb_cfg$epoch_sampling
 if (!is.null(epoch_cfg) && isTRUE(epoch_cfg$enabled)) {
   lines <- c(lines,
@@ -114,11 +114,11 @@ lines <- c(lines,
   "",
   "## Output Files",
   "",
-  "- `data/mvpa_features.csv` — feature matrix",
-  "- `tables/mvpa_results.csv` — classification accuracy per band",
-  "- `figures/mvpa_importance_*.png` — feature importance glass brains",
-  "- `figures/mvpa_null_*.png` — permutation null distributions",
-  "- `figures/mvpa_confusion_*.png` — confusion matrices",
+  "- `data/vertex_mvpa_features.csv` — feature matrix",
+  "- `tables/vertex_mvpa_results.csv` — classification accuracy per band",
+  "- `figures/vertex_mvpa_importance_*.png` — feature importance glass brains",
+  "- `figures/vertex_mvpa_null_*.png` — permutation null distributions",
+  "- `figures/vertex_mvpa_confusion_*.png` — confusion matrices",
   ""
 )
 

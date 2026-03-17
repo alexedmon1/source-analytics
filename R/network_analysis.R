@@ -116,7 +116,7 @@ lines <- c(
 )
 
 # Epoch info
-wb_cfg <- config$wholebrain %||% list()
+wb_cfg <- config$vertex %||% list()
 epoch_cfg <- wb_cfg$epoch_sampling
 if (!is.null(epoch_cfg) && isTRUE(epoch_cfg$enabled)) {
   lines <- c(lines,

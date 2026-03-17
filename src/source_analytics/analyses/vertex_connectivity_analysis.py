@@ -62,7 +62,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         self._fcd_threshold = float(vc_cfg.get("fcd_threshold", 0.05))
         self._n_permutations = int(vc_cfg.get("n_permutations", 1000))
 
-        wb_cfg = config.wholebrain
+        wb_cfg = config.vertex
         self._adjacency_distance = float(wb_cfg.get("adjacency_distance_mm", 5.0))
         self._cluster_threshold = float(wb_cfg.get("cluster_threshold", 2.0))
 

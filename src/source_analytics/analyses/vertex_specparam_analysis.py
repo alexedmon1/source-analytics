@@ -42,10 +42,10 @@ def _find_r_script_dir() -> Path:
     raise FileNotFoundError("Cannot find R/ scripts directory")
 
 
-class SpecparamVertexAnalysis(BaseAnalysis):
+class VertexSpecparamAnalysis(BaseAnalysis):
     """Vertex-level spectral parameterization analysis."""
 
-    name = "specparam_vertex"
+    name = "vertex_specparam"
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -56,12 +56,12 @@ class SpecparamVertexAnalysis(BaseAnalysis):
         self._subject_groups: dict[str, str] = {}
 
         # Config
-        sp_cfg = config.raw.get("specparam_vertex", {})
+        sp_cfg = config.raw.get("vertex_specparam", {})
         self._freq_range = tuple(sp_cfg.get("freq_range", [1, 100]))
         self._peak_width_limits = tuple(sp_cfg.get("peak_width_limits", [1.0, 12.0]))
         self._max_n_peaks = int(sp_cfg.get("max_n_peaks", 6))
 
-        wb_cfg = config.wholebrain
+        wb_cfg = config.vertex
         self._n_permutations = int(wb_cfg.get("n_permutations", 1000))
         self._adjacency_distance = float(wb_cfg.get("adjacency_distance_mm", 5.0))
         self._cluster_threshold = float(wb_cfg.get("cluster_threshold", 2.0))
@@ -144,8 +144,8 @@ class SpecparamVertexAnalysis(BaseAnalysis):
         if param_df.empty:
             logger.warning("No specparam data collected")
             return
-        param_df.to_csv(data_dir / "specparam_vertex.csv", index=False)
-        logger.info("Exported specparam_vertex.csv (%d rows)", len(param_df))
+        param_df.to_csv(data_dir / "vertex_specparam.csv", index=False)
+        logger.info("Exported vertex_specparam.csv (%d rows)", len(param_df))
 
         if self._source_coords is not None:
             coords_df = pd.DataFrame(self._source_coords, columns=["x", "y", "z"])
@@ -255,8 +255,8 @@ class SpecparamVertexAnalysis(BaseAnalysis):
 
         if all_stats:
             stats_df = pd.DataFrame(all_stats)
-            stats_df.to_csv(tbl_dir / "specparam_vertex_stats.csv", index=False)
-            logger.info("Exported specparam_vertex_stats.csv (%d rows)", len(stats_df))
+            stats_df.to_csv(tbl_dir / "vertex_specparam_stats.csv", index=False)
+            logger.info("Exported vertex_specparam_stats.csv (%d rows)", len(stats_df))
 
         # Save cluster results for --steps figures support
         if self._cluster_results:
@@ -317,7 +317,7 @@ class SpecparamVertexAnalysis(BaseAnalysis):
             coords_df = pd.read_csv(coords_csv)
             self._source_coords = coords_df[["x", "y", "z"]].values
 
-        logger.info("Loaded specparam_vertex state from %s", pkl_path)
+        logger.info("Loaded vertex_specparam state from %s", pkl_path)
         return True
 
     def figures(self) -> None:
@@ -356,11 +356,11 @@ class SpecparamVertexAnalysis(BaseAnalysis):
             ])
             mean_gamma_rate = all_gamma.mean(axis=0)
         else:
-            # Recompute from specparam_vertex.csv
+            # Recompute from vertex_specparam.csv
             data_dir = self.output_dir / "data"
-            csv_path = data_dir / "specparam_vertex.csv"
+            csv_path = data_dir / "vertex_specparam.csv"
             if not csv_path.exists():
-                logger.info("No specparam_vertex.csv; skipping gamma peak map")
+                logger.info("No vertex_specparam.csv; skipping gamma peak map")
                 return
             df = pd.read_csv(csv_path)
             mean_gamma_rate = df.groupby("vertex_idx")["has_gamma_peak"].mean().values
@@ -386,7 +386,7 @@ class SpecparamVertexAnalysis(BaseAnalysis):
 
         try:
             r_dir = _find_r_script_dir()
-            r_script = r_dir / "specparam_vertex_analysis.R"
+            r_script = r_dir / "vertex_specparam_analysis.R"
             if r_script.exists():
                 cmd = [
                     "Rscript", str(r_script),
@@ -437,7 +437,7 @@ class SpecparamVertexAnalysis(BaseAnalysis):
             lines.append("")
 
         # Specparam stats
-        stats_csv = tbl_dir / "specparam_vertex_stats.csv"
+        stats_csv = tbl_dir / "vertex_specparam_stats.csv"
         if stats_csv.exists():
             stats_df = pd.read_csv(stats_csv)
             lines.append("## Aperiodic Parameter Results")
@@ -464,8 +464,8 @@ class SpecparamVertexAnalysis(BaseAnalysis):
         lines.extend([
             "## Output Files",
             "",
-            "- `data/specparam_vertex.csv` — per-subject per-vertex specparam parameters",
-            "- `tables/specparam_vertex_stats.csv` — cluster permutation results",
+            "- `data/vertex_specparam.csv` — per-subject per-vertex specparam parameters",
+            "- `tables/vertex_specparam_stats.csv` — cluster permutation results",
             "- `tables/gamma_peak_chi2.csv` — gamma peak presence chi-squared tests",
             "- `figures/specparam_*.png` — aperiodic parameter glass brains",
             "- `figures/gamma_peak_presence.png` — gamma peak prevalence map",

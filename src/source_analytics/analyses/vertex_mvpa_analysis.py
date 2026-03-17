@@ -1,4 +1,4 @@
-"""MVPA (Multivariate Pattern Analysis) whole-brain analysis.
+"""Vertex MVPA (Multivariate Pattern Analysis) whole-brain analysis.
 
 Uses linear SVM + LOOCV to classify groups based on whole-brain spatial
 patterns of band power. Provides a single omnibus test per band: can the
@@ -43,10 +43,10 @@ def _find_r_script_dir() -> Path:
     raise FileNotFoundError("Cannot find R/ scripts directory")
 
 
-class MVPAAnalysis(BaseAnalysis):
-    """Whole-brain MVPA classification analysis."""
+class VertexMVPAAnalysis(BaseAnalysis):
+    """Whole-brain vertex-level MVPA classification analysis."""
 
-    name = "mvpa"
+    name = "vertex_mvpa"
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -58,12 +58,12 @@ class MVPAAnalysis(BaseAnalysis):
         self._subject_order: list[str] = []
 
         # Config
-        mvpa_cfg = config.raw.get("mvpa", {})
+        mvpa_cfg = config.raw.get("vertex_mvpa", config.raw.get("mvpa", {}))
         self._classifier = mvpa_cfg.get("classifier", "svm_linear")
         self._cv_method = mvpa_cfg.get("cv_method", "loocv")
         self._n_permutations = int(mvpa_cfg.get("n_permutations", 1000))
 
-        wb_cfg = config.wholebrain
+        wb_cfg = config.vertex
         self._noise_exclude = wb_cfg.get("noise_exclude_hz")
         if self._noise_exclude is not None:
             self._noise_exclude = tuple(self._noise_exclude)
@@ -134,10 +134,10 @@ class MVPAAnalysis(BaseAnalysis):
 
         feat_df = pd.DataFrame(self._feature_rows)
         if feat_df.empty:
-            logger.warning("No MVPA feature data collected")
+            logger.warning("No vertex MVPA feature data collected")
             return
-        feat_df.to_csv(data_dir / "mvpa_features.csv", index=False)
-        logger.info("Exported mvpa_features.csv (%d rows)", len(feat_df))
+        feat_df.to_csv(data_dir / "vertex_mvpa_features.csv", index=False)
+        logger.info("Exported vertex_mvpa_features.csv (%d rows)", len(feat_df))
 
         if self._source_coords is not None:
             coords_df = pd.DataFrame(self._source_coords, columns=["x", "y", "z"])
@@ -146,7 +146,7 @@ class MVPAAnalysis(BaseAnalysis):
 
     def statistics(self) -> None:
         if not self._subject_data:
-            logger.error("No subject data for MVPA")
+            logger.error("No subject data for vertex MVPA")
             return
 
         tbl_dir = self.tbl_dir
@@ -202,8 +202,8 @@ class MVPAAnalysis(BaseAnalysis):
 
         if all_results:
             results_df = pd.DataFrame(all_results)
-            results_df.to_csv(tbl_dir / "mvpa_results.csv", index=False)
-            logger.info("Exported mvpa_results.csv")
+            results_df.to_csv(tbl_dir / "vertex_mvpa_results.csv", index=False)
+            logger.info("Exported vertex_mvpa_results.csv")
 
         # Save full results for --steps figures support
         if self._mvpa_results:
@@ -223,18 +223,18 @@ class MVPAAnalysis(BaseAnalysis):
                     "accuracy_ci": result.accuracy_ci,
                     "n_permutations": result.n_permutations,
                 }
-            with open(data_dir / "mvpa_results.pkl", "wb") as f:
+            with open(data_dir / "vertex_mvpa_results.pkl", "wb") as f:
                 pickle.dump(pkl_data, f)
-            logger.info("Saved mvpa_results.pkl")
+            logger.info("Saved vertex_mvpa_results.pkl")
 
     def _load_state_from_disk(self) -> bool:
-        """Load saved MVPA state from pickle for --steps figures support."""
+        """Load saved vertex MVPA state from pickle for --steps figures support."""
         from ..stats.mvpa import MVPAResult
 
         data_dir = self.output_dir / "data"
-        pkl_path = data_dir / "mvpa_results.pkl"
+        pkl_path = data_dir / "vertex_mvpa_results.pkl"
         if not pkl_path.exists():
-            logger.warning("No saved MVPA state at %s; skipping figures", pkl_path)
+            logger.warning("No saved vertex MVPA state at %s; skipping figures", pkl_path)
             return False
 
         with open(pkl_path, "rb") as f:
@@ -261,7 +261,7 @@ class MVPAAnalysis(BaseAnalysis):
             coords_df = pd.read_csv(coords_csv)
             self._source_coords = coords_df[["x", "y", "z"]].values
 
-        logger.info("Loaded MVPA state from %s", pkl_path)
+        logger.info("Loaded vertex MVPA state from %s", pkl_path)
         return True
 
     def figures(self) -> None:
@@ -284,7 +284,7 @@ class MVPAAnalysis(BaseAnalysis):
                 coords=coords,
                 values=result.feature_weights,
                 title=f"Feature Importance — {key}",
-                output_path=fig_dir / f"mvpa_importance_{safe_name}.png",
+                output_path=fig_dir / f"vertex_mvpa_importance_{safe_name}.png",
                 cmap="YlOrRd",
             )
 
@@ -296,10 +296,10 @@ class MVPAAnalysis(BaseAnalysis):
                        linestyle="--", label=f"Observed: {result.accuracy:.1%}")
             ax.set_xlabel("Accuracy")
             ax.set_ylabel("Count")
-            ax.set_title(f"MVPA Permutation Test — {key}")
+            ax.set_title(f"Vertex MVPA Permutation Test — {key}")
             ax.legend()
             fig.tight_layout()
-            fig.savefig(fig_dir / f"mvpa_null_{safe_name}.png", dpi=150)
+            fig.savefig(fig_dir / f"vertex_mvpa_null_{safe_name}.png", dpi=150)
             plt.close(fig)
 
             # Confusion matrix
@@ -322,7 +322,7 @@ class MVPAAnalysis(BaseAnalysis):
             ax.set_yticklabels(["True 0", "True 1"])
             ax.set_title(f"Confusion Matrix — {key}")
             fig.tight_layout()
-            fig.savefig(fig_dir / f"mvpa_confusion_{safe_name}.png", dpi=150)
+            fig.savefig(fig_dir / f"vertex_mvpa_confusion_{safe_name}.png", dpi=150)
             plt.close(fig)
 
     def summary(self) -> None:
@@ -337,7 +337,7 @@ class MVPAAnalysis(BaseAnalysis):
 
         try:
             r_dir = _find_r_script_dir()
-            r_script = r_dir / "mvpa_analysis.R"
+            r_script = r_dir / "vertex_mvpa_analysis.R"
             if r_script.exists():
                 cmd = [
                     "Rscript", str(r_script),
@@ -360,10 +360,10 @@ class MVPAAnalysis(BaseAnalysis):
         tbl_dir = self.tbl_dir
 
         lines = [
-            "# MVPA Analysis Summary",
+            "# Vertex MVPA Analysis Summary",
             "",
             f"**Study**: {self.config.name}",
-            "**Analysis**: Multivariate Pattern Analysis (MVPA)",
+            "**Analysis**: Vertex-level Multivariate Pattern Analysis (MVPA)",
             f"**Classifier**: {self._classifier}",
             f"**CV method**: {self._cv_method}",
             f"**Permutations**: {self._n_permutations}",
@@ -385,7 +385,7 @@ class MVPAAnalysis(BaseAnalysis):
             )
             lines.append("")
 
-        results_csv = tbl_dir / "mvpa_results.csv"
+        results_csv = tbl_dir / "vertex_mvpa_results.csv"
         if results_csv.exists():
             results_df = pd.read_csv(results_csv)
             lines.append("## Results")
@@ -407,11 +407,11 @@ class MVPAAnalysis(BaseAnalysis):
         lines.extend([
             "## Output Files",
             "",
-            "- `data/mvpa_features.csv` — feature matrix (per-subject per-vertex band power)",
-            "- `tables/mvpa_results.csv` — classification results per band",
-            "- `figures/mvpa_importance_*.png` — feature importance glass brains",
-            "- `figures/mvpa_null_*.png` — permutation null distribution histograms",
-            "- `figures/mvpa_confusion_*.png` — confusion matrices",
+            "- `data/vertex_mvpa_features.csv` — feature matrix (per-subject per-vertex band power)",
+            "- `tables/vertex_mvpa_results.csv` — classification results per band",
+            "- `figures/vertex_mvpa_importance_*.png` — feature importance glass brains",
+            "- `figures/vertex_mvpa_null_*.png` — permutation null distribution histograms",
+            "- `figures/vertex_mvpa_confusion_*.png` — confusion matrices",
             "",
         ])
 

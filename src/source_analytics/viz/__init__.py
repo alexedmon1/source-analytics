@@ -12,7 +12,7 @@ from .constants import (
 from .glass_brain import (
     plot_glass_brain,
     plot_band_comparison,
-    plot_wholebrain_summary,
+    plot_vertex_cluster_summary,
 )
 from .connectivity_plots import (
     build_roi_matrix,
@@ -51,7 +51,7 @@ __all__ = [
     "METRIC_LABELS",
     "plot_glass_brain",
     "plot_band_comparison",
-    "plot_wholebrain_summary",
+    "plot_vertex_cluster_summary",
     "build_roi_matrix",
     "build_region_matrix",
     "build_significance_matrix",
