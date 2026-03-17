@@ -92,6 +92,59 @@ def sample_epochs(
     return epochs
 
 
+def sample_roi_epochs(
+    roi_ts: dict[str, np.ndarray],
+    sfreq: float,
+    epoch_duration_sec: float = 2.0,
+    n_epochs: int = 80,
+    seed: int | None = None,
+) -> dict[str, np.ndarray]:
+    """Randomly sample epochs from ROI timeseries and concatenate back.
+
+    Equalizes recording duration across subjects by randomly selecting
+    *n_epochs* non-overlapping windows of *epoch_duration_sec*, then
+    concatenating them into a continuous array per ROI.
+
+    Parameters
+    ----------
+    roi_ts : dict[str, ndarray]
+        Mapping of ROI name -> 1-D time course.
+    sfreq : float
+        Sampling frequency in Hz.
+    epoch_duration_sec : float
+        Duration of each epoch in seconds.
+    n_epochs : int
+        Number of epochs to sample.
+    seed : int, optional
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    dict[str, ndarray]
+        Same keys, values truncated to ``n_epochs * epoch_len`` samples.
+    """
+    if not roi_ts:
+        return roi_ts
+
+    # Stack into (n_rois, n_times) matrix
+    roi_names = list(roi_ts.keys())
+    data = np.stack([roi_ts[name] for name in roi_names])  # (n_rois, n_times)
+
+    # Sample epochs: (n_epochs, n_rois, epoch_len)
+    epochs = sample_epochs(
+        data, sfreq,
+        epoch_duration_sec=epoch_duration_sec,
+        n_epochs=n_epochs,
+        seed=seed,
+    )
+
+    # Concatenate back to continuous: (n_rois, n_epochs * epoch_len)
+    n_ep, n_rois, epoch_len = epochs.shape
+    continuous = epochs.transpose(1, 0, 2).reshape(n_rois, n_ep * epoch_len)
+
+    return {name: continuous[i] for i, name in enumerate(roi_names)}
+
+
 def get_epoch_config(config_dict: dict) -> dict | None:
     """Extract epoch sampling config from vertex config.
 

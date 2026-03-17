@@ -64,6 +64,13 @@ class BaseAnalysis(ABC):
         except FileNotFoundError:
             self._atlas_dir = None
 
+        # Epoch sampling config (applies to both ROI and vertex analyses)
+        epoch_cfg = config.raw.get("epoch_sampling", {})
+        self._epoch_equalize: bool = epoch_cfg.get("enabled", False)
+        self._epoch_duration_sec: float = epoch_cfg.get("epoch_duration_sec", 2.0)
+        self._epoch_n_epochs: int = epoch_cfg.get("n_epochs", 80)
+        self._epoch_seed: int | None = epoch_cfg.get("seed", None)
+
     @property
     def fig_dir(self) -> Path:
         """Directory for figures (under results_dir)."""
@@ -75,6 +82,27 @@ class BaseAnalysis(ABC):
         """Directory for tables (under results_dir)."""
         paradigm = self.config.paradigm_name or ""
         return self.config.results_dir / "tables" / paradigm / self.name
+
+    def _equalize_roi_timeseries(
+        self, roi_ts: dict[str, "np.ndarray"], sfreq: float,
+    ) -> dict[str, "np.ndarray"]:
+        """Apply epoch equalization to ROI timeseries if configured.
+
+        Randomly samples ``n_epochs`` non-overlapping windows and
+        concatenates them, so every subject has the same duration.
+        No-op if ``epoch_sampling.enabled`` is False in config.
+        """
+        if not self._epoch_equalize:
+            return roi_ts
+
+        from ..spectral.epoch_sampler import sample_roi_epochs
+
+        return sample_roi_epochs(
+            roi_ts, sfreq,
+            epoch_duration_sec=self._epoch_duration_sec,
+            n_epochs=self._epoch_n_epochs,
+            seed=self._epoch_seed,
+        )
 
     @abstractmethod
     def setup(self) -> None:

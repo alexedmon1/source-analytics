@@ -65,6 +65,7 @@ class ROIPsdAnalysis(BaseAnalysis):
             signed=True, atlas_dir=self._atlas_dir,
         )
         sfreq = loader.load_sfreq()
+        roi_ts = self._equalize_roi_timeseries(roi_ts, sfreq)
 
         if self._sfreq is None:
             self._sfreq = sfreq

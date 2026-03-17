@@ -66,6 +66,7 @@ class ROITransferEntropyAnalysis(BaseAnalysis):
         # Exclude corpus callosum white matter tracts
         roi_ts = {k: v for k, v in roi_ts.items() if k not in CC_ROIS}
         sfreq = loader.load_sfreq()
+        roi_ts = self._equalize_roi_timeseries(roi_ts, sfreq)
 
         if self._sfreq is None:
             self._sfreq = sfreq
