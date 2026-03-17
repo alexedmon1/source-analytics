@@ -52,6 +52,18 @@ class BaseAnalysis(ABC):
         self.fig_dir.mkdir(parents=True, exist_ok=True)
         self.tbl_dir.mkdir(parents=True, exist_ok=True)
 
+        # Resolve atlas directory for on-the-fly ROI extraction
+        from ..atlas.atlas_utils import find_atlas_dir
+
+        atlas_name = config.raw.get("pipeline", {}).get("atlas")
+        atlas_dir_cfg = config.raw.get("atlas_dir")
+        try:
+            self._atlas_dir: Path | None = find_atlas_dir(
+                atlas_dir_cfg, atlas_name=atlas_name,
+            )
+        except FileNotFoundError:
+            self._atlas_dir = None
+
     @property
     def fig_dir(self) -> Path:
         """Directory for figures (under results_dir)."""

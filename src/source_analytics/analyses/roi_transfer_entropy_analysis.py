@@ -60,7 +60,9 @@ class ROITransferEntropyAnalysis(BaseAnalysis):
         loader = SubjectLoader(subject.data_dir)
 
         # Use signed timeseries to preserve oscillatory phase
-        roi_ts = loader.load_roi_timeseries(signed=True)
+        roi_ts = loader.load_or_extract_roi_timeseries(
+            signed=True, atlas_dir=self._atlas_dir,
+        )
         # Exclude corpus callosum white matter tracts
         roi_ts = {k: v for k, v in roi_ts.items() if k not in CC_ROIS}
         sfreq = loader.load_sfreq()

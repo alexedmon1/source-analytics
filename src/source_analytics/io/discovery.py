@@ -61,8 +61,14 @@ def _check_data_dir(
                 "step6_roi_timeseries.pkl",
             ]
         )
-        if not has_roi:
-            logger.warning("No ROI timeseries in %s, skipping", data_dir)
+        has_stc = (
+            (data_dir / "step5_stc.pkl").exists()
+            and (data_dir / "step3_source_coords_mm.npy").exists()
+        )
+        if not has_roi and not has_stc:
+            logger.warning(
+                "No ROI timeseries or STC data in %s, skipping", data_dir,
+            )
             return False
     return True
 

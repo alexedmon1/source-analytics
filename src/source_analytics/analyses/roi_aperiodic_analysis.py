@@ -55,7 +55,9 @@ class ROIAperiodicAnalysis(BaseAnalysis):
     def process_subject(self, subject: SubjectInfo) -> None:
         loader = SubjectLoader(subject.data_dir)
 
-        roi_ts = loader.load_roi_timeseries(signed=True)
+        roi_ts = loader.load_or_extract_roi_timeseries(
+            signed=True, atlas_dir=self._atlas_dir,
+        )
         sfreq = loader.load_sfreq()
 
         if self._sfreq is None:

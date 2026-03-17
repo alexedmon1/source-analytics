@@ -76,6 +76,16 @@ class StudyConfig:
     def from_yaml(cls, path: str | Path) -> StudyConfig:
         """Load a study config from a YAML file.
 
+        Supports two formats:
+
+        **Legacy format** (separate analytics config):
+            Has ``output_dir`` and ``discovery`` keys.
+
+        **Unified format** (shared by source-localization, source-analytics,
+        source-lightbox):
+            Has ``subjects`` as a list of dicts with ``eeg_file`` keys and a
+            ``paths`` section.  Detected automatically.
+
         Path defaults (when keys are absent from the YAML):
         - ``output_dir`` → directory containing the YAML file
         - ``discovery.root_dir`` → ``../derivatives`` relative to the YAML file
@@ -86,6 +96,96 @@ class StudyConfig:
         with open(path) as f:
             data = yaml.safe_load(f)
 
+        # Detect unified format: subjects is a list of dicts with eeg_file
+        subjects_raw = data.get("subjects", [])
+        is_unified = (
+            isinstance(subjects_raw, list)
+            and len(subjects_raw) > 0
+            and isinstance(subjects_raw[0], dict)
+            and "eeg_file" in subjects_raw[0]
+        )
+
+        if is_unified:
+            return cls._from_unified_yaml(data, config_dir)
+        return cls._from_legacy_yaml(data, config_dir)
+
+    @classmethod
+    def _from_unified_yaml(cls, data: dict, config_dir: Path) -> StudyConfig:
+        """Parse unified study.yaml format."""
+        paths = data.get("paths", {})
+
+        # Resolve paths relative to config directory
+        def _resolve(p: str) -> Path:
+            pp = Path(p)
+            return pp if pp.is_absolute() else (config_dir / pp).resolve()
+
+        loc_dir = _resolve(paths.get("localization", "./localization"))
+        analytics_dir = _resolve(paths.get("analytics", "./analytics"))
+        results_dir = _resolve(paths.get("results", "./results"))
+
+        # Build subject_groups dict for discovery: {dir_name: group}
+        # Discovery root = localization/derivatives
+        discovery_root = loc_dir / "derivatives"
+        subject_groups: dict[str, str] = {}
+        for s in data.get("subjects", []):
+            sid = str(s["id"])
+            group = s.get("group", "unknown")
+            subject_groups[f"sub-{sid}"] = group
+
+        discovery: dict = {
+            "root_dir": str(discovery_root),
+            "subject_groups": subject_groups,
+            "data_subdir": "pipeline/data",
+        }
+
+        contrasts = [
+            Contrast(name=c["name"], group_a=c["group_a"], group_b=c["group_b"])
+            for c in data.get("contrasts", [])
+        ]
+
+        bands = {
+            name: tuple(limits) for name, limits in data.get("bands", {}).items()
+        }
+
+        # Map analyses to paradigm structure if no paradigms key
+        paradigms: dict[str, dict] = {}
+        analyses_raw = data.get("analyses", {})
+        if analyses_raw and "paradigms" not in data:
+            # Wrap in a single "resting" paradigm
+            paradigms["resting"] = {
+                "analyses": analyses_raw,
+                "data_dir": str(discovery_root),
+                "data_subdir": "pipeline/data",
+                "subjects": subject_groups,
+            }
+        for pname, pdata in data.get("paradigms", {}).items():
+            pcopy = dict(pdata)
+            if "data_dir" in pcopy:
+                pcopy["data_dir"] = str((config_dir / pcopy["data_dir"]).resolve())
+            paradigms[pname] = pcopy
+
+        return cls(
+            name=data.get("name", "Unnamed Study"),
+            output_dir=analytics_dir,
+            results_dir=results_dir,
+            groups=data.get("groups", {}),
+            group_order=data.get("group_order", list(data.get("groups", {}).keys())),
+            group_colors=data.get("group_colors", {}),
+            contrasts=contrasts,
+            bands=bands,
+            roi_categories=data.get("roi_categories", {}),
+            discovery=discovery,
+            vertex_filter=data.get("vertex_filter", {}),
+            vertex=_resolve_vertex_config(data),
+            electrode=data.get("electrode", {}),
+            evoked=data.get("evoked", {}),
+            paradigms=paradigms,
+            raw=data,
+        )
+
+    @classmethod
+    def _from_legacy_yaml(cls, data: dict, config_dir: Path) -> StudyConfig:
+        """Parse legacy analytics YAML format."""
         # Resolve output_dir: explicit or default to config file's directory
         output_dir = Path(data["output_dir"]) if "output_dir" in data else config_dir
 

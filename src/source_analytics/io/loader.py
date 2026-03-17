@@ -26,6 +26,8 @@ class SubjectLoader:
         self.data_dir = Path(data_dir)
         if not self.data_dir.is_dir():
             raise FileNotFoundError(f"Subject data directory not found: {self.data_dir}")
+        # Cache for on-the-fly ROI extraction (avoids re-extracting per analysis)
+        self._roi_cache: dict[str, dict[str, np.ndarray]] = {}
 
     def _load_pkl(self, filename: str) -> Any:
         path = self.data_dir / filename
@@ -117,7 +119,10 @@ class SubjectLoader:
         return (self.data_dir / filename).exists()
 
     def load_roi_epochs(
-        self, epoch_samples: int, signed: bool = True
+        self,
+        epoch_samples: int,
+        signed: bool = True,
+        atlas_dir: str | Path | None = None,
     ) -> dict[str, np.ndarray]:
         """Load ROI time series reshaped into epochs.
 
@@ -131,6 +136,9 @@ class SubjectLoader:
             Number of samples per epoch.
         signed : bool
             If True, load signed timeseries; otherwise magnitude.
+        atlas_dir : str or Path, optional
+            Atlas directory for on-the-fly extraction (passed through to
+            :meth:`load_or_extract_roi_timeseries`).
 
         Returns
         -------
@@ -142,7 +150,7 @@ class SubjectLoader:
         ValueError
             If total samples is not evenly divisible by epoch_samples.
         """
-        roi_ts = self.load_roi_timeseries(signed=signed)
+        roi_ts = self.load_or_extract_roi_timeseries(signed=signed, atlas_dir=atlas_dir)
         roi_epochs = {}
         for roi_name, ts in roi_ts.items():
             n_total = len(ts)
@@ -153,6 +161,69 @@ class SubjectLoader:
                 )
             roi_epochs[roi_name] = ts.reshape(-1, epoch_samples)
         return roi_epochs
+
+    def load_or_extract_roi_timeseries(
+        self,
+        signed: bool = True,
+        atlas_dir: str | Path | None = None,
+        method: str = "nearest",
+        proximity_radius_mm: float = 2.0,
+    ) -> dict[str, np.ndarray]:
+        """Load ROI time series, extracting on-the-fly from step5 if needed.
+
+        Tries pre-extracted step6 files first (backward compatibility).
+        If not found, falls back to on-the-fly ROI extraction from
+        step5_stc.pkl + step3_source_coords_mm.npy using the atlas.
+
+        Parameters
+        ----------
+        signed : bool
+            If True, use signed time courses; otherwise magnitude.
+        atlas_dir : str or Path, optional
+            Atlas directory for on-the-fly extraction. If None, auto-detected
+            via :func:`~source_analytics.atlas.find_atlas_dir`.
+        method : str
+            Source-to-ROI assignment: ``"nearest"`` or ``"proximity"``.
+        proximity_radius_mm : float
+            Radius for proximity method.
+
+        Returns
+        -------
+        dict[str, ndarray]
+            Mapping of ROI name -> 1-D time course array.
+        """
+        # 1. Try loading pre-extracted step6 files
+        try:
+            return self.load_roi_timeseries(signed=signed)
+        except FileNotFoundError:
+            pass
+
+        # 2. Fall back to on-the-fly extraction from step5 (cached)
+        cache_key = "signed" if signed else "magnitude"
+        if cache_key in self._roi_cache:
+            return self._roi_cache[cache_key]
+
+        logger.info(
+            "No step6 ROI files in %s — extracting on-the-fly from step5",
+            self.data_dir,
+        )
+        from ..atlas.atlas_utils import extract_roi_timeseries, find_atlas_dir
+
+        stc_data = self.load_source_timecourses(magnitude=not signed)
+        coords = self.load_source_coords()
+
+        if atlas_dir is None:
+            atlas_dir = find_atlas_dir()
+
+        result = extract_roi_timeseries(
+            stc_data,
+            coords,
+            atlas_dir,
+            method=method,
+            proximity_radius_mm=proximity_radius_mm,
+        )
+        self._roi_cache[cache_key] = result
+        return result
 
     def load_source_timecourses(self, magnitude: bool = False) -> np.ndarray:
         """Load full source time courses from step5_stc.pkl.
