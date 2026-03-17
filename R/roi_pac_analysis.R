@@ -143,14 +143,12 @@ run_global_ttests <- function(global_df, contrasts) {
   result_df <- bind_rows(results)
   if (nrow(result_df) == 0) return(result_df)
 
-  # BH FDR across freq_pairs within each contrast
+  # No cross-pair correction: freq pairs are pre-specified, per-pair p-values reported directly
   result_df <- result_df %>%
-    group_by(contrast) %>%
     mutate(
-      q_value = p.adjust(p_value, method = "BH"),
+      q_value = p_value,
       significant = q_value < 0.05
-    ) %>%
-    ungroup()
+    )
 
   return(result_df)
 }
@@ -269,16 +267,14 @@ run_omnibus_lmm_region <- function(region_df, contrasts) {
   omnibus_df <- bind_rows(results)
   if (nrow(omnibus_df) == 0) return(omnibus_df)
 
-  # BH FDR across freq_pairs within each contrast
+  # No cross-pair correction: freq pairs are pre-specified, per-pair p-values reported directly
   omnibus_df <- omnibus_df %>%
-    group_by(contrast) %>%
     mutate(
-      group_q = p.adjust(group_p, method = "BH"),
+      group_q = group_p,
       group_significant = group_q < 0.05,
-      interaction_q = p.adjust(interaction_p, method = "BH"),
+      interaction_q = interaction_p,
       interaction_significant = interaction_q < 0.05
-    ) %>%
-    ungroup()
+    )
 
   return(omnibus_df)
 }

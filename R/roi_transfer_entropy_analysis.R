@@ -107,12 +107,10 @@ run_global_ttests <- function(global_df, contrasts, bands) {
   if (nrow(result_df) == 0) return(result_df)
 
   result_df <- result_df %>%
-    group_by(contrast, metric) %>%
     mutate(
-      q_value = p.adjust(p_value, method = "BH"),
+      q_value = p_value,
       significant = q_value < 0.05
-    ) %>%
-    ungroup()
+    )
 
   return(result_df)
 }
@@ -175,12 +173,10 @@ run_directional_ttests <- function(edges, contrasts, bands) {
   if (nrow(result_df) == 0) return(result_df)
 
   result_df <- result_df %>%
-    group_by(contrast, group) %>%
     mutate(
-      q_value = p.adjust(p_value, method = "BH"),
+      q_value = p_value,
       significant = q_value < 0.05
-    ) %>%
-    ungroup()
+    )
 
   return(result_df)
 }
@@ -300,14 +296,12 @@ run_omnibus_lmm <- function(region_pair_df, contrasts, bands) {
   if (nrow(omnibus_df) == 0) return(omnibus_df)
 
   omnibus_df <- omnibus_df %>%
-    group_by(contrast, metric) %>%
     mutate(
-      group_q = p.adjust(group_p, method = "BH"),
+      group_q = group_p,
       group_significant = group_q < 0.05,
-      interaction_q = p.adjust(interaction_p, method = "BH"),
+      interaction_q = interaction_p,
       interaction_significant = interaction_q < 0.05
-    ) %>%
-    ungroup()
+    )
 
   return(omnibus_df)
 }

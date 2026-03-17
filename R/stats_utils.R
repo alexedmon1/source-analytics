@@ -102,16 +102,14 @@ run_omnibus_lmm <- function(band_df, contrasts, bands, power_type = "relative") 
   omnibus_df <- bind_rows(results)
   if (nrow(omnibus_df) == 0) return(omnibus_df)
 
-  # FDR correction across bands within each contrast x power_type
+  # No cross-band correction: bands are pre-specified, report per-band p-values directly
   omnibus_df <- omnibus_df %>%
-    group_by(contrast, power_type) %>%
     mutate(
-      group_q = p.adjust(group_p, method = "BH"),
+      group_q = group_p,
       group_significant = group_q < 0.05,
-      interaction_q = p.adjust(interaction_p, method = "BH"),
+      interaction_q = interaction_p,
       interaction_significant = interaction_q < 0.05
-    ) %>%
-    ungroup()
+    )
 
   return(omnibus_df)
 }
@@ -314,14 +312,12 @@ run_omnibus_lmm_region <- function(band_df, contrasts, bands, roi_categories,
   if (nrow(omnibus_df) == 0) return(omnibus_df)
 
   omnibus_df <- omnibus_df %>%
-    group_by(contrast, power_type) %>%
     mutate(
-      group_q = p.adjust(group_p, method = "BH"),
+      group_q = group_p,
       group_significant = group_q < 0.05,
-      interaction_q = p.adjust(interaction_p, method = "BH"),
+      interaction_q = interaction_p,
       interaction_significant = interaction_q < 0.05
-    ) %>%
-    ungroup()
+    )
 
   return(omnibus_df)
 }
@@ -517,14 +513,12 @@ run_omnibus_lmm_region_nested <- function(band_df, contrasts, bands, roi_categor
   if (nrow(omnibus_df) == 0) return(omnibus_df)
 
   omnibus_df <- omnibus_df %>%
-    group_by(contrast, power_type) %>%
     mutate(
-      group_q = p.adjust(group_p, method = "BH"),
+      group_q = group_p,
       group_significant = group_q < 0.05,
-      interaction_q = p.adjust(interaction_p, method = "BH"),
+      interaction_q = interaction_p,
       interaction_significant = interaction_q < 0.05
-    ) %>%
-    ungroup()
+    )
 
   return(omnibus_df)
 }
@@ -619,8 +613,8 @@ run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
 
   global_df <- bind_rows(results)
   if (nrow(global_df) > 0) {
-    # FDR correction across all tests
-    global_df$q_value <- p.adjust(global_df$p_value, method = "BH")
+    # No cross-band correction: per-band p-values reported directly
+    global_df$q_value <- global_df$p_value
     global_df$significant <- global_df$q_value < 0.05
     global_df$sig_label <- sig_stars(global_df$q_value)
   }

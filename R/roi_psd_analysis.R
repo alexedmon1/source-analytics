@@ -262,15 +262,13 @@ if (!figures_only) {
   global_posthoc_df <- bind_rows(global_posthoc_list)
 
   if (nrow(global_posthoc_df) > 0) {
-    # Re-apply FDR across all band x contrast tests within each power_type
+    # No cross-band correction: per-band p-values reported directly
     global_posthoc_df <- global_posthoc_df %>%
-      group_by(dv) %>%
       mutate(
-        q_value = p.adjust(p_value, method = "BH"),
+        q_value = p_value,
         significant = q_value < 0.05,
         sig_label = sig_stars(q_value)
-      ) %>%
-      ungroup()
+      )
 
     write_csv(global_posthoc_df, file.path(tbl_dir, "roi_psd_posthoc_global.csv"))
     message("  Saved: tables/roi_psd_posthoc_global.csv")
