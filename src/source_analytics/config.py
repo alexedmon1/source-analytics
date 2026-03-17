@@ -125,9 +125,12 @@ class StudyConfig:
 
         # Build subject_groups dict for discovery: {dir_name: group}
         # Discovery root = localization/derivatives
+        # Subjects with exclude: true are omitted from analyses
         discovery_root = loc_dir / "derivatives"
         subject_groups: dict[str, str] = {}
         for s in data.get("subjects", []):
+            if s.get("exclude", False):
+                continue
             sid = str(s["id"])
             group = s.get("group", "unknown")
             subject_groups[f"sub-{sid}"] = group
