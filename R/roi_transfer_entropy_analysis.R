@@ -682,8 +682,8 @@ dir.create(tbl_dir, showWarnings = FALSE, recursive = TRUE)
 
 # --- Load data ---
 message("Loading data...")
-edges <- read_csv(file.path(data_dir, "transfer_entropy_edges.csv"), show_col_types = FALSE)
-message("  transfer_entropy_edges.csv: ", nrow(edges), " rows")
+edges <- read_csv(file.path(data_dir, "roi_transfer_entropy_edges.csv"), show_col_types = FALSE)
+message("  roi_transfer_entropy_edges.csv: ", nrow(edges), " rows")
 
 # --- Load config ---
 config <- read_yaml(config_path)
