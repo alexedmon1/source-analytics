@@ -619,7 +619,7 @@ class VertexClusterAnalysis(BaseAnalysis):
         logger.info("Calling R: %s", " ".join(cmd))
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=600,
+                cmd, capture_output=True, text=True, timeout=3600,
             )
             if result.stdout:
                 for line in result.stdout.strip().split("\n"):

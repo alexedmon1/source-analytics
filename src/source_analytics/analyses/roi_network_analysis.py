@@ -512,7 +512,7 @@ class ROINetworkAnalysis(BaseAnalysis):
                 ]
                 cmd.extend(self._r_no_figures_flags())
                 result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=600,
+                    cmd, capture_output=True, text=True, timeout=3600,
                 )
                 if result.returncode == 0:
                     return

@@ -181,7 +181,7 @@ class ROIPacAnalysis(BaseAnalysis):
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=3600,
             )
             if result.stdout:
                 for line in result.stdout.strip().split("\n"):
