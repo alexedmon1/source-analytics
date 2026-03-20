@@ -11,6 +11,19 @@ import numpy as np
 import yaml
 
 
+def _load_atlas_roi_categories(atlas_name: str | None) -> dict[str, list[str]]:
+    """Load canonical roi_categories from atlas package data, if available."""
+    if not atlas_name:
+        return {}
+    try:
+        from source_analytics.atlas import find_atlas_dir, load_roi_categories
+
+        atlas_dir = find_atlas_dir(atlas_name=atlas_name)
+        return load_roi_categories(atlas_dir)
+    except Exception:
+        return {}
+
+
 @dataclass
 class Contrast:
     """A between-group contrast for statistical testing."""
@@ -167,6 +180,10 @@ class StudyConfig:
                 pcopy["data_dir"] = str((config_dir / pcopy["data_dir"]).resolve())
             paradigms[pname] = pcopy
 
+        roi_categories = data.get("roi_categories") or _load_atlas_roi_categories(
+            data.get("pipeline", {}).get("atlas")
+        )
+
         return cls(
             name=data.get("name", "Unnamed Study"),
             output_dir=analytics_dir,
@@ -176,7 +193,7 @@ class StudyConfig:
             group_colors=data.get("group_colors", {}),
             contrasts=contrasts,
             bands=bands,
-            roi_categories=data.get("roi_categories", {}),
+            roi_categories=roi_categories,
             discovery=discovery,
             vertex_filter=data.get("vertex_filter", {}),
             vertex=_resolve_vertex_config(data),

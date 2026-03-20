@@ -15,6 +15,8 @@ import json
 import logging
 from pathlib import Path
 
+import yaml
+
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -24,6 +26,7 @@ ATLAS_VOXEL_SCALE_FACTOR = 0.1
 _ATLAS_NIFTI = "Atlas_3DRoisLeftRight.Labels.nii"
 _ALLEN_NIFTI = "allen_labels.nii.gz"
 _ROI_MAPPING_FILE = "roi_mapping.json"
+_ROI_CATEGORIES_FILE = "roi_categories.yaml"
 
 
 def find_atlas_dir(
@@ -67,8 +70,8 @@ def find_atlas_dir(
     if base_atlas_dir is None:
         # Fallback: well-known path
         fallback = Path(
-            "/home/edm9fd/sandbox/AlexProjects/mouse-eeg-source-localization"
-            "/source_localization/src/source_localization/data/atlas"
+            "/home/edm9fd/sandbox/source-localization"
+            "/src/source_localization/data/atlas"
         )
         if fallback.is_dir():
             base_atlas_dir = fallback
@@ -79,10 +82,15 @@ def find_atlas_dir(
         )
 
     # If atlas_name given, check for subdirectory (e.g. atlas/allen/)
+    # allen32/allen64 are variants of the same allen/ directory
     if atlas_name is not None:
-        sub = base_atlas_dir / atlas_name
-        if sub.is_dir():
-            return sub
+        candidates = [atlas_name]
+        if atlas_name.startswith("allen"):
+            candidates.append("allen")
+        for candidate in candidates:
+            sub = base_atlas_dir / candidate
+            if sub.is_dir():
+                return sub
 
     return base_atlas_dir
 
@@ -178,6 +186,30 @@ def load_roi_mapping(atlas_dir: str | Path) -> dict:
 
     with open(mapping_path) as f:
         return json.load(f)
+
+
+def load_roi_categories(atlas_dir: str | Path) -> dict[str, list[str]]:
+    """Load canonical ROI categories from the atlas directory.
+
+    Reads ``roi_categories.yaml`` from *atlas_dir*. Returns an empty dict if
+    the file does not exist (studies can define their own via config).
+
+    Parameters
+    ----------
+    atlas_dir : str or Path
+        Directory containing roi_categories.yaml (same dir as roi_mapping.json).
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Mapping of category name -> list of ROI names.
+    """
+    atlas_dir = Path(atlas_dir)
+    categories_path = atlas_dir / _ROI_CATEGORIES_FILE
+    if not categories_path.exists():
+        return {}
+    with open(categories_path) as f:
+        return yaml.safe_load(f) or {}
 
 
 def load_vertex_roi_labels(
