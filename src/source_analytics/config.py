@@ -309,6 +309,9 @@ class StudyConfig:
             discovery["data_subdir"] = self.discovery["data_subdir"]
         if "subjects" in pdata:
             discovery["subject_groups"] = pdata["subjects"]
+        elif "subject_groups" in self.discovery:
+            # Inherit global subject list when paradigm doesn't override it
+            discovery["subject_groups"] = self.discovery["subject_groups"]
         if "required_files" in pdata:
             discovery["required_files"] = pdata["required_files"]
 
@@ -382,7 +385,7 @@ class StudyConfig:
         if data_subdir:
             discovery["data_subdir"] = data_subdir
 
-        subjects = a_subjects or pdata.get("subjects")
+        subjects = a_subjects or pdata.get("subjects") or self.discovery.get("subject_groups")
         if subjects:
             discovery["subject_groups"] = subjects
 
