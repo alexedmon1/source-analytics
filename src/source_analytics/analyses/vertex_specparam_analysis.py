@@ -100,6 +100,7 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 epoch_duration_sec=self._epoch_config.get("epoch_duration_sec", 2.0),
                 n_epochs=self._epoch_config.get("n_epochs", 80),
                 seed=self._epoch_config.get("seed", 42),
+                n_bootstrap=self._epoch_config.get("n_bootstrap", 1),
             )
             all_psd = []
             for ep in epochs:

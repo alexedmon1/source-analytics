@@ -126,6 +126,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
                         ),
                         n_epochs=self._epoch_config.get("n_epochs", 80),
                         seed=self._epoch_config.get("seed", 42),
+                n_bootstrap=self._epoch_config.get("n_bootstrap", 1),
                     )
                     conn_results = compute_vertex_connectivity_matrix_epochs_multi(
                         epochs, sfreq, (fmin, fmax), metrics=self._metrics,
@@ -145,6 +146,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
                         ),
                         n_epochs=self._epoch_config.get("n_epochs", 80),
                         seed=self._epoch_config.get("seed", 42),
+                n_bootstrap=self._epoch_config.get("n_bootstrap", 1),
                     )
                     conn_mat = compute_vertex_connectivity_matrix_epochs(
                         epochs, sfreq, (fmin, fmax), metric=metric,

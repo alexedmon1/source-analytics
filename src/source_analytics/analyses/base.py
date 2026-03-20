@@ -70,6 +70,7 @@ class BaseAnalysis(ABC):
         self._epoch_duration_sec: float = epoch_cfg.get("epoch_duration_sec", 2.0)
         self._epoch_n_epochs: int = epoch_cfg.get("n_epochs", 80)
         self._epoch_seed: int | None = epoch_cfg.get("seed", None)
+        self._epoch_n_bootstrap: int = epoch_cfg.get("n_bootstrap", 1)
 
     @property
     def fig_dir(self) -> Path:
@@ -102,6 +103,7 @@ class BaseAnalysis(ABC):
             epoch_duration_sec=self._epoch_duration_sec,
             n_epochs=self._epoch_n_epochs,
             seed=self._epoch_seed,
+            n_bootstrap=self._epoch_n_bootstrap,
         )
 
     @abstractmethod

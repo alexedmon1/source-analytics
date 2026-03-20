@@ -23,6 +23,7 @@ def sample_epochs(
     n_epochs: int = 100,
     seed: int | None = None,
     overlap: float = 0.0,
+    n_bootstrap: int = 1,
 ) -> np.ndarray:
     """Randomly sample non-overlapping epochs from continuous data.
 
@@ -35,21 +36,43 @@ def sample_epochs(
     epoch_duration_sec : float
         Duration of each epoch in seconds.
     n_epochs : int
-        Number of epochs to sample. If 0 or None, returns data unchanged
-        in a (1, n_channels, n_times) array for backward compatibility.
+        Number of epochs to sample per bootstrap draw. If 0 or None,
+        returns data unchanged in a (1, n_channels, n_times) array.
     seed : int, optional
         Random seed for reproducibility.
     overlap : float
         Fraction of overlap allowed between epochs (0.0 = no overlap).
         Currently only 0.0 is supported.
+    n_bootstrap : int
+        Number of independent bootstrap draws. When > 1, ``n_bootstrap``
+        draws of ``n_epochs`` epochs are taken with independent random
+        seeds and concatenated along the epoch axis, so the returned
+        array has shape ``(n_bootstrap * n_epochs, n_channels, epoch_len)``.
+        Downstream code that averages PSD across all returned epochs
+        automatically obtains a bootstrap-averaged estimate.
 
     Returns
     -------
-    epochs : ndarray, shape (n_epochs, n_channels, epoch_length)
-        Sampled epochs.
+    epochs : ndarray, shape (effective_n_epochs, n_channels, epoch_length)
+        Sampled epochs. ``effective_n_epochs`` equals ``n_epochs`` when
+        ``n_bootstrap == 1``, or up to ``n_bootstrap * n_epochs`` otherwise.
     """
     if n_epochs is None or n_epochs == 0:
         return data[np.newaxis, :, :]  # (1, n_channels, n_times)
+
+    if n_bootstrap > 1:
+        rng = np.random.default_rng(seed)
+        draw_seeds = rng.integers(0, 2**31, size=n_bootstrap)
+        draws = [
+            sample_epochs(data, sfreq, epoch_duration_sec, n_epochs, seed=int(s))
+            for s in draw_seeds
+        ]
+        result = np.concatenate(draws, axis=0)
+        logger.info(
+            "Bootstrap epoch sampling: %d draws × %d epochs = %d total epochs",
+            n_bootstrap, draws[0].shape[0], result.shape[0],
+        )
+        return result
 
     n_channels, n_times = data.shape
     epoch_len = int(epoch_duration_sec * sfreq)
@@ -98,6 +121,7 @@ def sample_roi_epochs(
     epoch_duration_sec: float = 2.0,
     n_epochs: int = 80,
     seed: int | None = None,
+    n_bootstrap: int = 1,
 ) -> dict[str, np.ndarray]:
     """Randomly sample epochs from ROI timeseries and concatenate back.
 
@@ -114,14 +138,20 @@ def sample_roi_epochs(
     epoch_duration_sec : float
         Duration of each epoch in seconds.
     n_epochs : int
-        Number of epochs to sample.
+        Number of epochs per bootstrap draw.
     seed : int, optional
         Random seed for reproducibility.
+    n_bootstrap : int
+        Number of independent bootstrap draws. When > 1, all draws are
+        concatenated along the time axis so downstream PSD estimation
+        (Welch) averages across all bootstrap samples automatically.
 
     Returns
     -------
     dict[str, ndarray]
-        Same keys, values truncated to ``n_epochs * epoch_len`` samples.
+        Same keys, values concatenated to
+        ``effective_n_epochs * epoch_len`` samples, where
+        ``effective_n_epochs`` is up to ``n_bootstrap * n_epochs``.
     """
     if not roi_ts:
         return roi_ts
@@ -130,15 +160,16 @@ def sample_roi_epochs(
     roi_names = list(roi_ts.keys())
     data = np.stack([roi_ts[name] for name in roi_names])  # (n_rois, n_times)
 
-    # Sample epochs: (n_epochs, n_rois, epoch_len)
+    # Sample epochs (n_bootstrap handled inside sample_epochs)
     epochs = sample_epochs(
         data, sfreq,
         epoch_duration_sec=epoch_duration_sec,
         n_epochs=n_epochs,
         seed=seed,
+        n_bootstrap=n_bootstrap,
     )
 
-    # Concatenate back to continuous: (n_rois, n_epochs * epoch_len)
+    # Concatenate back to continuous: (n_rois, effective_n_epochs * epoch_len)
     n_ep, n_rois, epoch_len = epochs.shape
     continuous = epochs.transpose(1, 0, 2).reshape(n_rois, n_ep * epoch_len)
 
