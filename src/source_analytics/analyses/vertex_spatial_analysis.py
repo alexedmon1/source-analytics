@@ -54,6 +54,7 @@ class VertexSpatialAnalysis(BaseAnalysis):
 
         # Config
         slmm_cfg = config.raw.get("vertex_spatial", config.raw.get("spatial_lmm", {}))
+        self._stat_method = slmm_cfg.get("stat_method", "gls")
         self._correlation_structure = slmm_cfg.get("correlation_structure", "exponential")
         self._spatial_range_mm = float(slmm_cfg.get("spatial_range_mm", 3.0))
 
