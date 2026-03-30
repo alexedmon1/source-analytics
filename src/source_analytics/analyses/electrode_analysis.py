@@ -126,7 +126,13 @@ class ElectrodeAnalysis(BaseAnalysis):
         if eeg_path is None:
             return
 
-        data, sfreq, ch_names, _ = load_eeglab_set(eeg_path)
+        target_sfreq = (
+            self.config.electrode.get("target_sfreq")
+            or self.config.raw.get(self.name, {}).get("target_sfreq")
+        )
+        data, sfreq, ch_names, _ = load_eeglab_set(
+            eeg_path, target_sfreq=target_sfreq,
+        )
 
         if self._sfreq is None:
             self._sfreq = sfreq

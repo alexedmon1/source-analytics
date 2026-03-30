@@ -42,8 +42,17 @@ class ROIEvokedAnalysis(BaseAnalysis):
         self._sfreq: float | None = None
 
     def _get_evoked_config(self) -> dict:
-        """Get and validate the evoked config section."""
+        """Get and validate the evoked config section.
+
+        Checks (in order): config.evoked, config.raw[self.name],
+        config.raw["evoked"].
+        """
         evoked = self.config.evoked
+        if not evoked:
+            # Fallback: analysis-specific params stored under raw[analysis_name]
+            evoked = self.config.raw.get(self.name, {})
+        if not evoked:
+            evoked = self.config.raw.get("evoked", {})
         if not evoked:
             raise ValueError(
                 "No 'evoked' section in study config. "

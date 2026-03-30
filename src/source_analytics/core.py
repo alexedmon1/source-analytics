@@ -24,6 +24,7 @@ from .analyses.vertex_network_analysis import VertexNetworkAnalysis
 from .analyses.vertex_spatial_analysis import VertexSpatialAnalysis
 from .analyses.roi_transfer_entropy_analysis import ROITransferEntropyAnalysis
 from .analyses.roi_evoked_analysis import ROIEvokedAnalysis
+from .analyses.electrode_evoked_analysis import ElectrodeEvokedAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "vertex_spatial": VertexSpatialAnalysis,
     "roi_transfer_entropy": ROITransferEntropyAnalysis,
     "roi_evoked": ROIEvokedAnalysis,
+    "electrode_evoked": ElectrodeEvokedAnalysis,
 }
 
 # Backward-compatibility aliases (old name -> new name)
@@ -97,6 +99,7 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
     "electrode":            {"category": "resting", "level": "electrode",  "description": "Sensor-level PSD analysis"},
     "electrode_comparison": {"category": "resting", "level": "electrode",  "description": "Source vs electrode comparison"},
     "roi_evoked":           {"category": "evoked",  "level": "roi",        "description": "ITC, ERSP, STP for trial-based paradigms"},
+    "electrode_evoked":     {"category": "evoked",  "level": "electrode",  "description": "Electrode-level ITC, ERSP, STP for trial-based paradigms"},
 }
 
 # Add metadata entries for deprecated aliases (point to same metadata)

@@ -23,7 +23,14 @@ from .connectivity_plots import (
     plot_connectivity_comparison,
     plot_significance_circos,
 )
-from .brain_roi import plot_brain_roi, plot_brain_roi_mosaic, render_posthoc_mosaics
+from .brain_roi import (
+    fdr_bh,
+    plot_brain_roi,
+    plot_brain_roi_mosaic,
+    plot_effect_size_mosaic,
+    plot_significance_mosaic,
+    render_posthoc_mosaics,
+)
 from .palettes import (
     ANALYSIS_CMAPS,
     R_GRADIENT2_COLORS,
@@ -59,8 +66,11 @@ __all__ = [
     "plot_connectivity_heatmap",
     "plot_connectivity_comparison",
     "plot_significance_circos",
+    "fdr_bh",
     "plot_brain_roi",
     "plot_brain_roi_mosaic",
+    "plot_effect_size_mosaic",
+    "plot_significance_mosaic",
     "render_posthoc_mosaics",
     "ANALYSIS_CMAPS",
     "R_GRADIENT2_COLORS",

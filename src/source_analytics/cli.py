@@ -261,6 +261,7 @@ def cmd_list(args):
         "resting|vertex": "Resting State (Vertex Level)",
         "resting|electrode": "Resting State (Electrode Level)",
         "evoked|roi": "Evoked Response (ROI Level)",
+        "evoked|electrode": "Evoked Response (Electrode Level)",
     }
 
     print("Available analyses:\n")
