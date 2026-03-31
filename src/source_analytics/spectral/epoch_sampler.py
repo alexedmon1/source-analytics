@@ -122,12 +122,13 @@ def sample_roi_epochs(
     n_epochs: int = 80,
     seed: int | None = None,
     n_bootstrap: int = 1,
-) -> dict[str, np.ndarray]:
-    """Randomly sample epochs from ROI timeseries and concatenate back.
+) -> list[dict[str, np.ndarray]]:
+    """Randomly sample epochs from ROI timeseries.
 
-    Equalizes recording duration across subjects by randomly selecting
-    *n_epochs* non-overlapping windows of *epoch_duration_sec*, then
-    concatenating them into a continuous array per ROI.
+    Returns a list of bootstrap draws, each a dict mapping ROI name to
+    a duration-equalized 1-D timeseries.  Downstream analyses should
+    compute their metric on each draw independently, then average
+    across draws.
 
     Parameters
     ----------
@@ -142,38 +143,54 @@ def sample_roi_epochs(
     seed : int, optional
         Random seed for reproducibility.
     n_bootstrap : int
-        Number of independent bootstrap draws. When > 1, all draws are
-        concatenated along the time axis so downstream PSD estimation
-        (Welch) averages across all bootstrap samples automatically.
+        Number of independent bootstrap draws.
 
     Returns
     -------
-    dict[str, ndarray]
-        Same keys, values concatenated to
-        ``effective_n_epochs * epoch_len`` samples, where
-        ``effective_n_epochs`` is up to ``n_bootstrap * n_epochs``.
+    list[dict[str, ndarray]]
+        One dict per bootstrap draw, each with the same keys as
+        *roi_ts* and values of length ``n_epochs * epoch_len``.
     """
     if not roi_ts:
-        return roi_ts
+        return [roi_ts]
 
-    # Stack into (n_rois, n_times) matrix
     roi_names = list(roi_ts.keys())
     data = np.stack([roi_ts[name] for name in roi_names])  # (n_rois, n_times)
 
-    # Sample epochs (n_bootstrap handled inside sample_epochs)
-    epochs = sample_epochs(
-        data, sfreq,
-        epoch_duration_sec=epoch_duration_sec,
-        n_epochs=n_epochs,
-        seed=seed,
-        n_bootstrap=n_bootstrap,
+    if n_bootstrap <= 1:
+        # Single draw
+        epochs = sample_epochs(
+            data, sfreq,
+            epoch_duration_sec=epoch_duration_sec,
+            n_epochs=n_epochs,
+            seed=seed,
+        )
+        # (n_epochs, n_rois, epoch_len) → (n_rois, n_epochs * epoch_len)
+        n_ep, n_r, epoch_len = epochs.shape
+        continuous = epochs.transpose(1, 0, 2).reshape(n_r, n_ep * epoch_len)
+        return [{name: continuous[i] for i, name in enumerate(roi_names)}]
+
+    # Multiple draws — return each separately
+    rng = np.random.default_rng(seed)
+    draw_seeds = rng.integers(0, 2**31, size=n_bootstrap)
+    draws: list[dict[str, np.ndarray]] = []
+
+    for s in draw_seeds:
+        epochs = sample_epochs(
+            data, sfreq,
+            epoch_duration_sec=epoch_duration_sec,
+            n_epochs=n_epochs,
+            seed=int(s),
+        )
+        n_ep, n_r, epoch_len = epochs.shape
+        continuous = epochs.transpose(1, 0, 2).reshape(n_r, n_ep * epoch_len)
+        draws.append({name: continuous[i] for i, name in enumerate(roi_names)})
+
+    logger.info(
+        "Bootstrap epoch sampling: %d independent draws × %d epochs",
+        n_bootstrap, n_epochs,
     )
-
-    # Concatenate back to continuous: (n_rois, effective_n_epochs * epoch_len)
-    n_ep, n_rois, epoch_len = epochs.shape
-    continuous = epochs.transpose(1, 0, 2).reshape(n_rois, n_ep * epoch_len)
-
-    return {name: continuous[i] for i, name in enumerate(roi_names)}
+    return draws
 
 
 def get_epoch_config(config_dict: dict) -> dict | None:

@@ -66,7 +66,7 @@ class ROITransferEntropyAnalysis(BaseAnalysis):
         # Exclude corpus callosum white matter tracts
         roi_ts = {k: v for k, v in roi_ts.items() if k not in CC_ROIS}
         sfreq = loader.load_sfreq()
-        roi_ts = self._equalize_roi_timeseries(roi_ts, sfreq)
+        draws = self._equalize_roi_timeseries(roi_ts, sfreq)
 
         if self._sfreq is None:
             self._sfreq = sfreq
@@ -78,14 +78,34 @@ class ROITransferEntropyAnalysis(BaseAnalysis):
 
         uid = f"{subject.group}_{subject.subject_id}"
 
-        # Compute transfer entropy matrices for all bands
-        band_results, roi_names = compute_transfer_entropy(
-            roi_ts, sfreq, self.config.bands,
-        )
+        # Compute transfer entropy per bootstrap draw and average matrices
+        avg_results: dict[str, dict[str, np.ndarray]] | None = None
+        roi_names: list[str] | None = None
+        n_draws = len(draws)
+
+        for draw_ts in draws:
+            band_results, roi_names = compute_transfer_entropy(
+                draw_ts, sfreq, self.config.bands,
+            )
+            if avg_results is None:
+                avg_results = {
+                    band: {metric: mat.copy() for metric, mat in metrics.items()}
+                    for band, metrics in band_results.items()
+                }
+            else:
+                for band, metrics in band_results.items():
+                    for metric, mat in metrics.items():
+                        avg_results[band][metric] += mat
+
+        if n_draws > 1:
+            for band in avg_results:
+                for metric in avg_results[band]:
+                    avg_results[band][metric] /= n_draws
+
         n_rois = len(roi_names)
 
         # Flatten to directed edge rows (all n*(n-1) pairs)
-        for band_name, metrics in band_results.items():
+        for band_name, metrics in avg_results.items():
             te_mat = metrics["te"]
             net_te_mat = metrics["net_te"]
 

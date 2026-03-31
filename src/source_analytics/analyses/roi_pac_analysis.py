@@ -71,7 +71,7 @@ class ROIPacAnalysis(BaseAnalysis):
             signed=True, atlas_dir=self._atlas_dir,
         )
         sfreq = loader.load_sfreq()
-        roi_ts = self._equalize_roi_timeseries(roi_ts, sfreq)
+        draws = self._equalize_roi_timeseries(roi_ts, sfreq)
 
         if self._sfreq is None:
             self._sfreq = sfreq
@@ -94,20 +94,38 @@ class ROIPacAnalysis(BaseAnalysis):
             return
 
         logger.info(
-            "Computing PAC for %s: %d ROIs x %d pairs",
-            subject.subject_id, len(roi_ts), len(pac_pairs),
+            "Computing PAC for %s: %d ROIs x %d pairs x %d draws",
+            subject.subject_id, len(draws[0]), len(pac_pairs), len(draws),
         )
 
-        # Compute PAC z-scores for all ROIs x all pairs
-        results = compute_pac_multiroi(
-            roi_ts, sfreq, pac_pairs, self.config.bands,
-        )
+        # Compute PAC per bootstrap draw and average
+        # Key: (roi, freq_pair) → list of {mi, z_score, surr_mean, surr_std}
+        accum: dict[tuple[str, str], list[dict]] = {}
 
-        # Append subject/group info to each row
-        for row in results:
-            row["subject"] = uid
-            row["group"] = subject.group
-            self._pac_rows.append(row)
+        for draw_ts in draws:
+            results = compute_pac_multiroi(
+                draw_ts, sfreq, pac_pairs, self.config.bands,
+            )
+            for row in results:
+                key = (row["roi"], row["freq_pair"])
+                accum.setdefault(key, []).append(row)
+
+        # Average numeric fields across draws
+        for key, rows in accum.items():
+            n = len(rows)
+            avg_row = {
+                "subject": uid,
+                "group": subject.group,
+                "roi": rows[0]["roi"],
+                "phase_band": rows[0]["phase_band"],
+                "amp_band": rows[0]["amp_band"],
+                "freq_pair": rows[0]["freq_pair"],
+                "mi": sum(r["mi"] for r in rows) / n,
+                "z_score": sum(r["z_score"] for r in rows) / n,
+                "surr_mean": sum(r["surr_mean"] for r in rows) / n,
+                "surr_std": sum(r["surr_std"] for r in rows) / n,
+            }
+            self._pac_rows.append(avg_row)
 
     def aggregate(self) -> None:
         """Export PAC values CSV for R consumption."""

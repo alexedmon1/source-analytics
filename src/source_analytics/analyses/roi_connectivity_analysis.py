@@ -66,7 +66,7 @@ class ConnectivityAnalysis(BaseAnalysis):
         # Exclude corpus callosum white matter tracts
         roi_ts = {k: v for k, v in roi_ts.items() if k not in CC_ROIS}
         sfreq = loader.load_sfreq()
-        roi_ts = self._equalize_roi_timeseries(roi_ts, sfreq)
+        draws = self._equalize_roi_timeseries(roi_ts, sfreq)
 
         if self._sfreq is None:
             self._sfreq = sfreq
@@ -78,14 +78,37 @@ class ConnectivityAnalysis(BaseAnalysis):
 
         uid = f"{subject.group}_{subject.subject_id}"
 
-        # Compute connectivity matrices for all bands
-        band_results, roi_names = compute_connectivity_matrix(
-            roi_ts, sfreq, self.config.bands,
-        )
+        # Compute connectivity per bootstrap draw and average matrices
+        avg_results: dict[str, dict[str, np.ndarray]] | None = None
+        roi_names: list[str] | None = None
+        n_draws = len(draws)
+
+        for draw_ts in draws:
+            band_results, roi_names = compute_connectivity_matrix(
+                draw_ts, sfreq, self.config.bands,
+            )
+            if avg_results is None:
+                # First draw — initialize accumulators
+                avg_results = {
+                    band: {metric: mat.copy() for metric, mat in metrics.items()}
+                    for band, metrics in band_results.items()
+                }
+            else:
+                # Accumulate
+                for band, metrics in band_results.items():
+                    for metric, mat in metrics.items():
+                        avg_results[band][metric] += mat
+
+        # Divide by number of draws to get mean
+        if n_draws > 1:
+            for band in avg_results:
+                for metric in avg_results[band]:
+                    avg_results[band][metric] /= n_draws
+
         n_rois = len(roi_names)
 
         # Flatten upper triangle to edge rows
-        for band_name, metrics in band_results.items():
+        for band_name, metrics in avg_results.items():
             coh_mat = metrics["coherence"]
             icoh_mat = metrics["imag_coherence"]
             pli_mat = metrics.get("pli")

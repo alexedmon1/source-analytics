@@ -91,15 +91,20 @@ class BaseAnalysis(ABC):
 
     def _equalize_roi_timeseries(
         self, roi_ts: dict[str, "np.ndarray"], sfreq: float,
-    ) -> dict[str, "np.ndarray"]:
+    ) -> list[dict[str, "np.ndarray"]]:
         """Apply epoch equalization to ROI timeseries if configured.
 
-        Randomly samples ``n_epochs`` non-overlapping windows and
-        concatenates them, so every subject has the same duration.
-        No-op if ``epoch_sampling.enabled`` is False in config.
+        Randomly samples ``n_epochs`` non-overlapping windows per
+        bootstrap draw.  Returns a list of dicts (one per draw).
+        Analyses should compute their metric on each draw independently,
+        then average across draws.
+
+        No-op if ``epoch_sampling.enabled`` is False in config, in
+        which case a single-element list containing the original
+        timeseries is returned.
         """
         if not self._epoch_equalize:
-            return roi_ts
+            return [roi_ts]
 
         from ..spectral.epoch_sampler import sample_roi_epochs
 

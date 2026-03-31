@@ -65,7 +65,7 @@ class ROIPsdAnalysis(BaseAnalysis):
             signed=True, atlas_dir=self._atlas_dir,
         )
         sfreq = loader.load_sfreq()
-        roi_ts = self._equalize_roi_timeseries(roi_ts, sfreq)
+        draws = self._equalize_roi_timeseries(roi_ts, sfreq)
 
         if self._sfreq is None:
             self._sfreq = sfreq
@@ -76,36 +76,51 @@ class ROIPsdAnalysis(BaseAnalysis):
             )
 
         uid = f"{subject.group}_{subject.subject_id}"
-
-        # Compute PSD for all ROIs
         fmax = max(hi for _, hi in self.config.bands.values()) + 10
-        roi_psds = compute_psd_multiroi(roi_ts, sfreq, fmax=fmax)
         self._subject_groups[uid] = subject.group
 
-        # Collect PSD curves for export
-        for roi_name, (freqs, psd) in roi_psds.items():
-            for i, freq in enumerate(freqs):
+        # Compute PSD per bootstrap draw and average
+        all_psd_arrays: dict[str, list[np.ndarray]] = {}
+        all_band_abs: dict[tuple[str, str], list[float]] = {}
+        all_band_rel: dict[tuple[str, str], list[float]] = {}
+        freqs_out: np.ndarray | None = None
+
+        for draw_ts in draws:
+            roi_psds = compute_psd_multiroi(draw_ts, sfreq, fmax=fmax)
+
+            for roi_name, (freqs, psd) in roi_psds.items():
+                freqs_out = freqs
+                all_psd_arrays.setdefault(roi_name, []).append(psd)
+
+            band_power = extract_band_power_multiroi(roi_psds, self.config.bands)
+            for roi_name, bp_dict in band_power.items():
+                for band_name, power_vals in bp_dict.items():
+                    key = (roi_name, band_name)
+                    all_band_abs.setdefault(key, []).append(power_vals["absolute"])
+                    all_band_rel.setdefault(key, []).append(power_vals["relative"])
+
+        # Average PSD curves across draws
+        for roi_name, psd_list in all_psd_arrays.items():
+            avg_psd = np.mean(psd_list, axis=0)
+            for i, freq in enumerate(freqs_out):
                 self._subject_psd_curves.append({
                     "subject": uid,
                     "group": subject.group,
                     "roi": roi_name,
                     "freq_hz": float(freq),
-                    "psd": float(psd[i]),
+                    "psd": float(avg_psd[i]),
                 })
 
-        # Extract band power
-        band_power = extract_band_power_multiroi(roi_psds, self.config.bands)
-
-        for roi_name, bp_dict in band_power.items():
-            for band_name, power_vals in bp_dict.items():
-                self._subject_band_power.append({
-                    "subject": uid,
-                    "group": subject.group,
-                    "roi": roi_name,
-                    "band": band_name,
-                    "absolute": power_vals["absolute"],
-                    "relative": power_vals["relative"],
-                })
+        # Average band power across draws
+        for (roi_name, band_name), abs_list in all_band_abs.items():
+            self._subject_band_power.append({
+                "subject": uid,
+                "group": subject.group,
+                "roi": roi_name,
+                "band": band_name,
+                "absolute": float(np.mean(abs_list)),
+                "relative": float(np.mean(all_band_rel[(roi_name, band_name)])),
+            })
 
     def aggregate(self) -> None:
         """Export CSVs for R consumption."""

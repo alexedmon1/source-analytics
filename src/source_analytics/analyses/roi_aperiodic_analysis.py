@@ -59,7 +59,7 @@ class ROIAperiodicAnalysis(BaseAnalysis):
             signed=True, atlas_dir=self._atlas_dir,
         )
         sfreq = loader.load_sfreq()
-        roi_ts = self._equalize_roi_timeseries(roi_ts, sfreq)
+        draws = self._equalize_roi_timeseries(roi_ts, sfreq)
 
         if self._sfreq is None:
             self._sfreq = sfreq
@@ -70,25 +70,30 @@ class ROIAperiodicAnalysis(BaseAnalysis):
             )
 
         uid = f"{subject.group}_{subject.subject_id}"
-
-        # Compute PSD for all ROIs (wide range for aperiodic fitting)
-        roi_psds = compute_psd_multiroi(roi_ts, sfreq, fmin=1.0, fmax=100.0)
         self._subject_groups[uid] = subject.group
 
-        # Fit aperiodic parameters per ROI
-        aperiodic_params = fit_aperiodic_multiroi(roi_psds, freq_range=(2, 50))
+        # Fit aperiodic per bootstrap draw and average numeric params
+        roi_params_accum: dict[str, list[dict]] = {}
 
-        for roi_name, params in aperiodic_params.items():
+        for draw_ts in draws:
+            roi_psds = compute_psd_multiroi(draw_ts, sfreq, fmin=1.0, fmax=100.0)
+            aperiodic_params = fit_aperiodic_multiroi(roi_psds, freq_range=(2, 50))
+            for roi_name, params in aperiodic_params.items():
+                roi_params_accum.setdefault(roi_name, []).append(params)
+
+        # Average across draws
+        for roi_name, params_list in roi_params_accum.items():
+            n = len(params_list)
             self._subject_aperiodic.append({
                 "subject": uid,
                 "group": subject.group,
                 "roi": roi_name,
-                "exponent": params["exponent"],
-                "offset": params["offset"],
-                "r_squared": params["r_squared"],
-                "n_peaks": params["n_peaks"],
-                "error": params["error"],
-                "method": params["method"],
+                "exponent": sum(p["exponent"] for p in params_list) / n,
+                "offset": sum(p["offset"] for p in params_list) / n,
+                "r_squared": sum(p["r_squared"] for p in params_list) / n,
+                "n_peaks": sum(p["n_peaks"] for p in params_list) / n,
+                "error": sum(p["error"] for p in params_list) / n,
+                "method": params_list[0]["method"],
             })
 
     def aggregate(self) -> None:
