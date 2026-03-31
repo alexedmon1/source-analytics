@@ -174,6 +174,7 @@ class ROIPacAnalysis(BaseAnalysis):
             "--tbl-dir", str(self.tbl_dir),
         ]
         cmd.extend(self._r_no_figures_flags())
+        cmd.extend(self._r_roi_categories_flags())
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:

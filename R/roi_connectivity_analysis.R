@@ -857,6 +857,8 @@ parser$add_argument("--figures-only", action = "store_true", default = FALSE,
                     help = "Skip statistics; regenerate figures from existing data/tables")
 parser$add_argument("--no-figures", action = "store_true", default = FALSE,
                     help = "Skip all figure generation (stats/tables only)")
+parser$add_argument("--roi-categories", default = NULL,
+                    help = "Path to roi_categories.yaml (atlas ROI groupings)")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
@@ -889,6 +891,13 @@ group_order <- config$group_order
 message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 message("Bands: ", paste(names(config$bands), collapse = ", "))
+
+# Load roi_categories from atlas file if provided
+if (!is.null(args$roi_categories) && file.exists(args$roi_categories)) {
+  config$roi_categories <- read_yaml(args$roi_categories)
+  message("Loaded roi_categories from: ", args$roi_categories,
+          " (", length(config$roi_categories), " regions)")
+}
 
 # ===========================================================================
 # 1. Global connectivity analysis

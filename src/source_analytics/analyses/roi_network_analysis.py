@@ -511,6 +511,7 @@ class ROINetworkAnalysis(BaseAnalysis):
                     "--tbl-dir", str(self.tbl_dir),
                 ]
                 cmd.extend(self._r_no_figures_flags())
+                cmd.extend(self._r_roi_categories_flags())
                 result = subprocess.run(
                     cmd, capture_output=True, text=True, timeout=3600,
                 )

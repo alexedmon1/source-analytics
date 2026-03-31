@@ -189,6 +189,7 @@ class BaseAnalysis(ABC):
             "--tbl-dir", str(self.tbl_dir),
             "--figures-only",
         ]
+        cmd.extend(self._r_roi_categories_flags())
 
         logger.info("Calling R (figures-only): %s", " ".join(cmd))
         try:
@@ -211,6 +212,14 @@ class BaseAnalysis(ABC):
         except subprocess.TimeoutExpired:
             logger.error("R figures-only timed out after 300s")
             return False
+
+    def _r_roi_categories_flags(self) -> list[str]:
+        """Return ['--roi-categories', path] if atlas roi_categories.yaml exists."""
+        if self._atlas_dir is not None:
+            cat_path = self._atlas_dir / "roi_categories.yaml"
+            if cat_path.exists():
+                return ["--roi-categories", str(cat_path)]
+        return []
 
     def _r_no_figures_flags(self) -> list[str]:
         """Return ['--no-figures'] if figure generation is disabled, else []."""
