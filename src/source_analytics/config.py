@@ -118,6 +118,9 @@ class StudyConfig:
             and "eeg_file" in subjects_raw[0]
         )
 
+        # Pass YAML filename stem so output_dir can be derived from it
+        data["_config_stem"] = path.stem
+
         if is_unified:
             return cls._from_unified_yaml(data, config_dir)
         return cls._from_legacy_yaml(data, config_dir)
@@ -206,8 +209,25 @@ class StudyConfig:
     @classmethod
     def _from_legacy_yaml(cls, data: dict, config_dir: Path) -> StudyConfig:
         """Parse legacy analytics YAML format."""
-        # Resolve output_dir: explicit or default to config file's directory
-        output_dir = Path(data["output_dir"]) if "output_dir" in data else config_dir
+        # Resolve output_dir: explicit, or derive from YAML filename so that
+        # multiple configs in the same directory never collide.
+        # e.g. analytics/study_allen32_roi.yaml → analytics/allen32_roi/
+        if "output_dir" in data:
+            output_dir = Path(data["output_dir"])
+        else:
+            stem = config_dir.stem if hasattr(config_dir, "stem") else ""
+            # Use the YAML filename (passed via _config_stem) if available
+            yaml_stem = data.get("_config_stem")
+            if yaml_stem:
+                # Strip common prefixes like "study_"
+                dirname = yaml_stem
+                for prefix in ("study_", "config_"):
+                    if dirname.startswith(prefix):
+                        dirname = dirname[len(prefix):]
+                        break
+                output_dir = config_dir / dirname
+            else:
+                output_dir = config_dir
 
         # Resolve results_dir: explicit or default to sibling results/
         if "results_dir" in data:

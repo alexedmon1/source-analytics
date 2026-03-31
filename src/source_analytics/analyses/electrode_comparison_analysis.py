@@ -16,7 +16,11 @@ import pandas as pd
 
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
-from ..viz.constants import BAND_ORDER, CC_ROIS
+from ..viz.constants import BAND_ORDER as _BAND_ORDER_TITLE, CC_ROIS
+
+# Build case-insensitive band order: lowercase + underscore versions
+# Include epsilon which some studies use
+BAND_ORDER = [b.lower().replace(" ", "_") for b in _BAND_ORDER_TITLE] + ["epsilon"]
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -96,12 +100,14 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
         self._electrode_df = pd.read_csv(electrode_csv)
         logger.info("Loaded electrode data: %d rows", len(self._electrode_df))
 
-        # Load source (PSD) data
-        source_csv = base_dir / "psd" / "data" / "band_power.csv"
+        # Load source (PSD) data — check both canonical and legacy names
+        source_csv = base_dir / "roi_psd" / "data" / "band_power.csv"
+        if not source_csv.exists():
+            source_csv = base_dir / "psd" / "data" / "band_power.csv"
         if not source_csv.exists():
             raise FileNotFoundError(
-                f"Source band power CSV not found: {source_csv}. "
-                "Run the 'psd' analysis first."
+                f"Source band power CSV not found (checked roi_psd/ and psd/). "
+                "Run the 'roi_psd' analysis first."
             )
         self._source_df = pd.read_csv(source_csv)
         # Exclude Corpus Callosum (white matter) ROIs
@@ -381,131 +387,143 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
     def _plot_effect_size_comparison(self, stats_df: pd.DataFrame, fig_dir: Path) -> None:
         import matplotlib.pyplot as plt
 
+        contrasts = stats_df["contrast"].unique()
+
         for power_type in ["relative", "absolute"]:
-            pt_df = stats_df[stats_df["power_type"] == power_type].copy()
-            if pt_df.empty:
-                continue
+            for contrast in contrasts:
+                pt_df = stats_df[
+                    (stats_df["power_type"] == power_type) &
+                    (stats_df["contrast"] == contrast)
+                ].copy()
+                if pt_df.empty:
+                    continue
 
-            # Sort by standard ascending Hz order
-            pt_df["band"] = pd.Categorical(pt_df["band"], categories=BAND_ORDER, ordered=True)
-            pt_df = pt_df.sort_values("band").dropna(subset=["band"])
+                pt_df["band"] = pd.Categorical(pt_df["band"], categories=BAND_ORDER, ordered=True)
+                pt_df = pt_df.sort_values("band").dropna(subset=["band"])
 
-            bands = pt_df["band"].values
-            n = len(bands)
-            x = np.arange(n)
-            width = 0.35
+                bands = pt_df["band"].values
+                n = len(bands)
+                if n == 0:
+                    continue
+                x = np.arange(n)
+                width = 0.35
 
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6 + n * 1.2, 5))
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6 + n * 1.2, 5))
 
-            # Bar chart with error bars (CIs)
-            elec_g = pt_df["electrode_hedges_g"].values
-            src_g = pt_df["source_hedges_g"].values
-            elec_ci_lo = pt_df["electrode_ci_lo"].values
-            elec_ci_hi = pt_df["electrode_ci_hi"].values
-            src_ci_lo = pt_df["source_ci_lo"].values
-            src_ci_hi = pt_df["source_ci_hi"].values
+                elec_g = pt_df["electrode_hedges_g"].values
+                src_g = pt_df["source_hedges_g"].values
+                elec_ci_lo = pt_df["electrode_ci_lo"].values
+                elec_ci_hi = pt_df["electrode_ci_hi"].values
+                src_ci_lo = pt_df["source_ci_lo"].values
+                src_ci_hi = pt_df["source_ci_hi"].values
 
-            elec_err = np.array([elec_g - elec_ci_lo, elec_ci_hi - elec_g])
-            src_err = np.array([src_g - src_ci_lo, src_ci_hi - src_g])
+                elec_err = np.array([elec_g - elec_ci_lo, elec_ci_hi - elec_g])
+                src_err = np.array([src_g - src_ci_lo, src_ci_hi - src_g])
 
-            ax1.bar(x - width / 2, elec_g, width, label="Electrode", color="#7FB3D8",
-                    edgecolor="white", yerr=elec_err, capsize=3, error_kw={"linewidth": 1})
-            ax1.bar(x + width / 2, src_g, width, label="Source", color="#E8A0A0",
-                    edgecolor="white", yerr=src_err, capsize=3, error_kw={"linewidth": 1})
+                ax1.bar(x - width / 2, elec_g, width, label="Electrode", color="#7FB3D8",
+                        edgecolor="white", yerr=elec_err, capsize=3, error_kw={"linewidth": 1})
+                ax1.bar(x + width / 2, src_g, width, label="Source", color="#E8A0A0",
+                        edgecolor="white", yerr=src_err, capsize=3, error_kw={"linewidth": 1})
 
-            # Significance markers: * where CI excludes zero
-            for i in range(n):
-                # Electrode significance
-                if elec_ci_lo[i] > 0 or elec_ci_hi[i] < 0:
-                    y_pos_star = max(elec_g[i] + elec_err[1, i], 0) + 0.05
-                    ax1.annotate("*", xy=(x[i] - width / 2, y_pos_star),
-                                 fontsize=14, fontweight="bold", color="#4A90D9",
-                                 ha="center", va="bottom")
-                # Source significance
-                if src_ci_lo[i] > 0 or src_ci_hi[i] < 0:
-                    y_pos_star = max(src_g[i] + src_err[1, i], 0) + 0.05
-                    ax1.annotate("*", xy=(x[i] + width / 2, y_pos_star),
-                                 fontsize=14, fontweight="bold", color="#C0392B",
-                                 ha="center", va="bottom")
+                for i in range(n):
+                    if elec_ci_lo[i] > 0 or elec_ci_hi[i] < 0:
+                        y_pos_star = max(elec_g[i] + elec_err[1, i], 0) + 0.05
+                        ax1.annotate("*", xy=(x[i] - width / 2, y_pos_star),
+                                     fontsize=14, fontweight="bold", color="#4A90D9",
+                                     ha="center", va="bottom")
+                    if src_ci_lo[i] > 0 or src_ci_hi[i] < 0:
+                        y_pos_star = max(src_g[i] + src_err[1, i], 0) + 0.05
+                        ax1.annotate("*", xy=(x[i] + width / 2, y_pos_star),
+                                     fontsize=14, fontweight="bold", color="#C0392B",
+                                     ha="center", va="bottom")
 
-            ax1.set_xticks(x)
-            ax1.set_xticklabels(bands, rotation=45, ha="right")
-            ax1.set_ylabel("Hedges' g")
-            ax1.set_title("Effect Sizes by Band")
-            ax1.axhline(y=0, color="grey", linewidth=0.5)
-            ax1.legend(fontsize=9)
+                ax1.set_xticks(x)
+                ax1.set_xticklabels(bands, rotation=45, ha="right")
+                ax1.set_ylabel("Hedges' g")
+                ax1.set_title(f"Effect Sizes — {contrast}")
+                ax1.axhline(y=0, color="grey", linewidth=0.5)
+                ax1.legend(fontsize=9)
 
-            # Scatter: electrode g vs source g
-            ax2.scatter(elec_g, src_g, c="#444444", s=50, zorder=3)
-            for i, band in enumerate(bands):
-                ax2.annotate(str(band), (elec_g[i], src_g[i]), fontsize=8,
-                             xytext=(5, 5), textcoords="offset points")
-            lims = [
-                min(min(elec_g), min(src_g)) - 0.2,
-                max(max(elec_g), max(src_g)) + 0.2,
-            ]
-            ax2.plot(lims, lims, "k--", alpha=0.3, linewidth=1)
-            ax2.set_xlabel("Electrode Hedges' g")
-            ax2.set_ylabel("Source Hedges' g")
-            ax2.set_title("Electrode vs Source Effect Size")
+                ax2.scatter(elec_g, src_g, c="#444444", s=50, zorder=3)
+                for i, band in enumerate(bands):
+                    ax2.annotate(str(band), (elec_g[i], src_g[i]), fontsize=8,
+                                 xytext=(5, 5), textcoords="offset points")
+                all_g = np.concatenate([elec_g, src_g])
+                all_g = all_g[~np.isnan(all_g)]
+                if len(all_g) > 0:
+                    lims = [np.min(all_g) - 0.2, np.max(all_g) + 0.2]
+                    ax2.plot(lims, lims, "k--", alpha=0.3, linewidth=1)
+                ax2.set_xlabel("Electrode Hedges' g")
+                ax2.set_ylabel("Source Hedges' g")
+                ax2.set_title("Electrode vs Source")
 
-            fig.suptitle(f"Effect Size Comparison ({power_type})", fontsize=13)
-            fig.tight_layout()
-            fig.savefig(fig_dir / f"fig2_effect_sizes_{power_type}.png", dpi=300, bbox_inches="tight")
-            plt.close(fig)
-            logger.info("Saved fig2_effect_sizes_%s.png", power_type)
+                fig.suptitle(f"Effect Size Comparison ({power_type}, {contrast})", fontsize=13)
+                fig.tight_layout()
+                safe_contrast = contrast.replace(" ", "_")
+                fig.savefig(fig_dir / f"fig2_effect_sizes_{power_type}_{safe_contrast}.png",
+                            dpi=300, bbox_inches="tight")
+                plt.close(fig)
+                logger.info("Saved fig2_effect_sizes_%s_%s.png", power_type, safe_contrast)
 
     def _plot_spatial_advantage(self, regional_df: pd.DataFrame, fig_dir: Path) -> None:
         """Heatmap: which regions exceed electrode-level sensitivity."""
         import matplotlib.pyplot as plt
 
+        contrasts = regional_df["contrast"].unique()
+
         for power_type in ["relative", "absolute"]:
-            pt_df = regional_df[regional_df["power_type"] == power_type]
-            if pt_df.empty:
-                continue
+            for contrast in contrasts:
+                pt_df = regional_df[
+                    (regional_df["power_type"] == power_type) &
+                    (regional_df["contrast"] == contrast)
+                ]
+                if pt_df.empty:
+                    continue
 
-            bands = sorted(pt_df["band"].unique(), key=lambda b: list(self.config.bands.keys()).index(b)
-                           if b in self.config.bands else 999)
-            regions = sorted(pt_df["region"].unique())
+                bands = sorted(pt_df["band"].unique(), key=lambda b: list(self.config.bands.keys()).index(b)
+                               if b in self.config.bands else 999)
+                regions = sorted(pt_df["region"].unique())
 
-            # Build matrix: region_g - electrode_g
-            advantage = np.full((len(regions), len(bands)), np.nan)
-            for i, region in enumerate(regions):
-                for j, band in enumerate(bands):
-                    row = pt_df[(pt_df["region"] == region) & (pt_df["band"] == band)]
-                    if not row.empty:
-                        advantage[i, j] = (
-                            abs(row["region_hedges_g"].values[0]) -
-                            abs(row["electrode_hedges_g"].values[0])
-                        )
+                advantage = np.full((len(regions), len(bands)), np.nan)
+                for i, region in enumerate(regions):
+                    for j, band in enumerate(bands):
+                        row = pt_df[(pt_df["region"] == region) & (pt_df["band"] == band)]
+                        if not row.empty:
+                            advantage[i, j] = (
+                                abs(row["region_hedges_g"].values[0]) -
+                                abs(row["electrode_hedges_g"].values[0])
+                            )
 
-            fig, ax = plt.subplots(figsize=(max(6, len(bands) * 1.5), max(4, len(regions) * 0.5)))
+                fig, ax = plt.subplots(figsize=(max(6, len(bands) * 1.5), max(4, len(regions) * 0.5)))
 
-            vmax = np.nanmax(np.abs(advantage))
-            im = ax.imshow(advantage, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
+                vmax = np.nanmax(np.abs(advantage))
+                if vmax == 0 or np.isnan(vmax):
+                    vmax = 1.0
+                im = ax.imshow(advantage, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
 
-            ax.set_xticks(range(len(bands)))
-            ax.set_xticklabels(bands, rotation=45, ha="right")
-            ax.set_yticks(range(len(regions)))
-            ax.set_yticklabels(regions, fontsize=9)
+                ax.set_xticks(range(len(bands)))
+                ax.set_xticklabels(bands, rotation=45, ha="right")
+                ax.set_yticks(range(len(regions)))
+                ax.set_yticklabels(regions, fontsize=9)
 
-            # Annotate cells
-            for i in range(len(regions)):
-                for j in range(len(bands)):
-                    val = advantage[i, j]
-                    if not np.isnan(val):
-                        color = "white" if abs(val) > vmax * 0.6 else "black"
-                        ax.text(j, i, f"{val:+.2f}", ha="center", va="center",
-                                fontsize=8, color=color)
+                for i in range(len(regions)):
+                    for j in range(len(bands)):
+                        val = advantage[i, j]
+                        if not np.isnan(val):
+                            color = "white" if abs(val) > vmax * 0.6 else "black"
+                            ax.text(j, i, f"{val:+.2f}", ha="center", va="center",
+                                    fontsize=8, color=color)
 
-            fig.colorbar(im, ax=ax, label="|Regional g| - |Electrode g|", shrink=0.8)
-            ax.set_title(f"Spatial Specificity: Source vs Electrode ({power_type})")
-            ax.set_xlabel("Frequency Band")
-            ax.set_ylabel("Brain Region")
-            fig.tight_layout()
-            fig.savefig(fig_dir / f"fig4_spatial_advantage_{power_type}.png", dpi=300, bbox_inches="tight")
-            plt.close(fig)
-            logger.info("Saved fig4_spatial_advantage_%s.png", power_type)
+                fig.colorbar(im, ax=ax, label="|Regional g| - |Electrode g|", shrink=0.8)
+                ax.set_title(f"Spatial Specificity ({power_type}, {contrast})")
+                ax.set_xlabel("Frequency Band")
+                ax.set_ylabel("Brain Region")
+                fig.tight_layout()
+                safe_contrast = contrast.replace(" ", "_")
+                fig.savefig(fig_dir / f"fig4_spatial_advantage_{power_type}_{safe_contrast}.png",
+                            dpi=300, bbox_inches="tight")
+                plt.close(fig)
+                logger.info("Saved fig4_spatial_advantage_%s_%s.png", power_type, safe_contrast)
 
     def summary(self) -> None:
         """Call Rscript for formatted comparison report."""
