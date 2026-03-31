@@ -1,8 +1,8 @@
-"""Electrode-level PSD and band power analysis.
+"""Electrode-level aperiodic (1/f) spectral parameter analysis.
 
-Mirrors the PSD analysis module but operates on raw scalp EEG channels
-instead of source-localized ROI time courses.  Uses ``subject_roster.csv``
-to map each discovered subject to its raw ``.set/.fdt`` file.
+Mirrors the ROI aperiodic analysis but operates on raw scalp EEG channels.
+Fits specparam to each channel's PSD and exports per-channel aperiodic
+parameters (exponent, offset) for LMM analysis in R.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from ..io.discovery import SubjectInfo
 from ..io.electrode_loader import load_eeglab_set
 from ..spectral.epoch_sampler import sample_epochs
 from ..spectral.psd import compute_psd
-from ..spectral.band_power import extract_band_power
+from ..spectral.aperiodic import fit_aperiodic
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -39,81 +39,64 @@ def _find_r_script_dir() -> Path:
     )
 
 
-class ElectrodeAnalysis(BaseAnalysis):
-    """Electrode-level power spectral density analysis.
+class ElectrodeAperiodicAnalysis(BaseAnalysis):
+    """Electrode-level aperiodic spectral parameter analysis.
 
-    Python computes per-channel PSD and band power, exports CSVs.
+    Python computes per-channel PSD, fits specparam, exports CSVs.
     R handles LMM statistics (group * channel) and visualization.
 
     Requires ``electrode.subject_roster`` in the study config pointing
     to a CSV with columns: ``subject_id, group, eeg_filename, eeg_dir``.
     """
 
-    name = "electrode_psd"
+    name = "electrode_aperiodic"
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
-        self._subject_band_power: list[dict] = []
-        self._subject_psd_curves: list[dict] = []
+        self._subject_aperiodic: list[dict] = []
+        self._subject_groups: dict[str, str] = {}
         self._sfreq: float | None = None
         self._roster: pd.DataFrame | None = None
 
     def setup(self) -> None:
-        self._subject_band_power.clear()
-        self._subject_psd_curves.clear()
+        self._subject_aperiodic.clear()
+        self._subject_groups.clear()
 
+        # Load subject roster
         roster_path = self.config.electrode.get("subject_roster")
-        if not roster_path:
-            raise ValueError(
-                "electrode.subject_roster not set in study config. "
-                "Add 'electrode: {subject_roster: /path/to/subject_roster.csv}' "
-                "to analysis.yaml."
-            )
+        if roster_path is None:
+            logger.error("No electrode.subject_roster in config")
+            return
         roster_path = Path(roster_path)
         if not roster_path.exists():
-            raise FileNotFoundError(f"Subject roster not found: {roster_path}")
-
+            logger.error("Subject roster not found: %s", roster_path)
+            return
         self._roster = pd.read_csv(roster_path)
-        logger.info("Loaded subject roster: %d entries from %s", len(self._roster), roster_path)
-
-        # Build lookup: subject_id -> row
-        required_cols = {"subject_id", "eeg_filename", "eeg_dir"}
-        missing = required_cols - set(self._roster.columns)
-        if missing:
-            raise ValueError(
-                f"Subject roster missing required columns: {missing}. "
-                f"Available: {list(self._roster.columns)}"
-            )
+        logger.info("Loaded subject roster: %d rows", len(self._roster))
 
     def _find_eeg_path(self, subject: SubjectInfo) -> Path | None:
-        """Look up the raw EEG file path for a subject from the roster."""
-        # Match on subject_id AND group to avoid collisions when the same
-        # base ID exists in multiple groups (e.g., Dsbpro_0 in KO and WT).
-        roster_group = subject.pipeline_dir.parent.name  # e.g., "KO ICV"
+        """Resolve the raw EEG .set file path for a subject."""
+        if self._roster is None:
+            return None
+
+        # Map analysis group back to roster group
+        group_mapping = self.config.groups
+        roster_group = group_mapping.get(subject.group, subject.group)
+
         matches = self._roster[
-            (self._roster["subject_id"] == subject.subject_id)
-            & (self._roster["group"] == roster_group)
+            (self._roster["group"] == roster_group)
+            & (self._roster["subject_id"] == subject.subject_id)
         ]
         if matches.empty:
-            # Fallback: match by subject_id only (safe when IDs are unique)
-            matches = self._roster[self._roster["subject_id"] == subject.subject_id]
-        if matches.empty:
-            # Try matching by pipeline_dir basename
             matches = self._roster[
                 self._roster["subject_id"] == subject.pipeline_dir.name
             ]
         if matches.empty:
             logger.warning(
-                "Subject %s not found in roster, skipping electrode analysis",
+                "Subject %s not found in roster, skipping",
                 subject.subject_id,
             )
             return None
-
-        if len(matches) > 1:
-            logger.warning(
-                "Multiple roster matches for %s in group %s, using first",
-                subject.subject_id, roster_group,
-            )
 
         row = matches.iloc[0]
         eeg_path = Path(row["eeg_dir"]) / row["eeg_filename"]
@@ -125,18 +108,12 @@ class ElectrodeAnalysis(BaseAnalysis):
     def _get_electrode_draws(
         self, data: np.ndarray, sfreq: float,
     ) -> list[np.ndarray]:
-        """Apply epoch sampling to raw electrode data.
-
-        Returns a list of 2-D arrays (n_channels, n_samples), one per
-        bootstrap draw.  When epoch sampling is disabled, returns a
-        single-element list with the original data.
-        """
+        """Apply epoch sampling to raw electrode data."""
         if not self._epoch_equalize:
             return [data]
 
         n_bootstrap = self._epoch_n_bootstrap
 
-        # n_bootstrap=0: no sampling, use full timeseries
         if n_bootstrap <= 0:
             return [data]
 
@@ -147,7 +124,6 @@ class ElectrodeAnalysis(BaseAnalysis):
                 n_epochs=self._epoch_n_epochs,
                 seed=self._epoch_seed,
             )
-            # (n_epochs, n_channels, epoch_len) → (n_channels, n_epochs * epoch_len)
             n_ep, n_ch, ep_len = epochs.shape
             return [epochs.transpose(1, 0, 2).reshape(n_ch, n_ep * ep_len)]
 
@@ -165,7 +141,7 @@ class ElectrodeAnalysis(BaseAnalysis):
             draws.append(epochs.transpose(1, 0, 2).reshape(n_ch, n_ep * ep_len))
 
         logger.info(
-            "Electrode bootstrap: %d draws × %d epochs",
+            "Electrode aperiodic bootstrap: %d draws × %d epochs",
             n_bootstrap, self._epoch_n_epochs,
         )
         return draws
@@ -192,15 +168,12 @@ class ElectrodeAnalysis(BaseAnalysis):
             )
 
         uid = f"{subject.group}_{subject.subject_id}"
-        fmax = max(hi for _, hi in self.config.bands.values()) + 10
+        self._subject_groups[uid] = subject.group
 
-        # Get bootstrap draws (list of 2-D arrays)
         draws = self._get_electrode_draws(data, sfreq)
 
-        # Accumulate PSD and band power per channel across draws
-        ch_psd_accum: dict[str, list[np.ndarray]] = {}
-        ch_bp_accum: dict[tuple[str, str], list[dict]] = {}
-        freqs_out: np.ndarray | None = None
+        # Fit aperiodic per channel per draw, then average
+        ch_params_accum: dict[str, list[dict]] = {}
 
         for draw_data in draws:
             for ch_idx, ch_name in enumerate(ch_names):
@@ -209,56 +182,38 @@ class ElectrodeAnalysis(BaseAnalysis):
                 if np.all(ch_data == 0) or np.any(np.isnan(ch_data)):
                     continue
 
-                freqs, psd = compute_psd(ch_data, sfreq, fmax=fmax)
-                if freqs_out is None:
-                    freqs_out = freqs
-                ch_psd_accum.setdefault(ch_name, []).append(psd)
+                freqs, psd = compute_psd(ch_data, sfreq, fmin=1.0, fmax=100.0)
+                params = fit_aperiodic(freqs, psd, freq_range=(2, 50))
+                ch_params_accum.setdefault(ch_name, []).append(params)
 
-                bp = extract_band_power(freqs, psd, self.config.bands)
-                for band_name, power_vals in bp.items():
-                    key = (ch_name, band_name)
-                    ch_bp_accum.setdefault(key, []).append(power_vals)
-
-        # Average PSD curves across draws
-        for ch_name, psd_list in ch_psd_accum.items():
-            avg_psd = np.mean(psd_list, axis=0)
-            for i, freq in enumerate(freqs_out):
-                self._subject_psd_curves.append({
-                    "subject": uid,
-                    "group": subject.group,
-                    "channel": ch_name,
-                    "freq_hz": float(freq),
-                    "psd": float(avg_psd[i]),
-                })
-
-        # Average band power across draws
-        for (ch_name, band_name), bp_list in ch_bp_accum.items():
-            n = len(bp_list)
-            self._subject_band_power.append({
+        # Average across draws
+        for ch_name, params_list in ch_params_accum.items():
+            n = len(params_list)
+            self._subject_aperiodic.append({
                 "subject": uid,
                 "group": subject.group,
                 "channel": ch_name,
-                "band": band_name,
-                "absolute": sum(p["absolute"] for p in bp_list) / n,
-                "relative": sum(p["relative"] for p in bp_list) / n,
+                "exponent": sum(p["exponent"] for p in params_list) / n,
+                "offset": sum(p["offset"] for p in params_list) / n,
+                "r_squared": sum(p["r_squared"] for p in params_list) / n,
+                "n_peaks": sum(p["n_peaks"] for p in params_list) / n,
+                "error": sum(p["error"] for p in params_list) / n,
+                "method": params_list[0]["method"],
             })
 
     def aggregate(self) -> None:
-        """Export CSVs for R consumption."""
+        """Export aperiodic_params.csv for R consumption."""
         data_dir = self.output_dir / "data"
 
-        band_df = pd.DataFrame(self._subject_band_power)
-        if band_df.empty:
-            logger.warning("No electrode band power data collected")
+        df = pd.DataFrame(self._subject_aperiodic)
+        if df.empty:
+            logger.warning("No electrode aperiodic data collected")
             return
 
-        band_df.to_csv(data_dir / "electrode_band_power.csv", index=False)
-        logger.info("Exported electrode_band_power.csv (%d rows)", len(band_df))
-
-        psd_df = pd.DataFrame(self._subject_psd_curves)
-        if not psd_df.empty:
-            psd_df.to_csv(data_dir / "electrode_psd_curves.csv", index=False)
-            logger.info("Exported electrode_psd_curves.csv (%d rows)", len(psd_df))
+        df.to_csv(data_dir / "electrode_aperiodic_params.csv", index=False)
+        logger.info(
+            "Exported electrode_aperiodic_params.csv (%d rows)", len(df),
+        )
 
     def statistics(self) -> None:
         """Delegated to R."""
@@ -272,8 +227,11 @@ class ElectrodeAnalysis(BaseAnalysis):
         """Call Rscript for statistics, figures, and summary."""
         data_dir = self.output_dir / "data"
 
-        if not (data_dir / "electrode_band_power.csv").exists():
-            logger.error("electrode_band_power.csv not found — skipping R analysis")
+        csv_path = data_dir / "electrode_aperiodic_params.csv"
+        if not csv_path.exists():
+            logger.error(
+                "electrode_aperiodic_params.csv not found — skipping R analysis",
+            )
             return
 
         try:
@@ -282,12 +240,13 @@ class ElectrodeAnalysis(BaseAnalysis):
             logger.error(str(e))
             return
 
-        r_script = r_dir / "electrode_analysis.R"
+        r_script = r_dir / "electrode_aperiodic_analysis.R"
         if not r_script.exists():
-            logger.error("R script not found: %s", r_script)
+            logger.warning(
+                "R script not found: %s — skipping R statistics", r_script,
+            )
             return
 
-        # Write study config YAML for R
         config_path = data_dir / "study_config.yaml"
         import yaml
 
@@ -320,8 +279,12 @@ class ElectrodeAnalysis(BaseAnalysis):
                     if line.strip():
                         logger.info("[R] %s", line)
             if result.returncode != 0:
-                logger.error("R script failed with exit code %d", result.returncode)
+                logger.error(
+                    "R script failed with exit code %d", result.returncode,
+                )
         except FileNotFoundError:
-            logger.error("Rscript not found. Install R to enable statistics and visualization.")
+            logger.error(
+                "Rscript not found. Install R to enable statistics.",
+            )
         except subprocess.TimeoutExpired:
             logger.error("R script timed out after 600 seconds")

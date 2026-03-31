@@ -90,12 +90,14 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
         """Load CSVs from both electrode and psd output directories."""
         base_dir = self.config.output_dir
 
-        # Load electrode data
-        electrode_csv = base_dir / "electrode" / "data" / "electrode_band_power.csv"
+        # Load electrode data — check both new and legacy names
+        electrode_csv = base_dir / "electrode_psd" / "data" / "electrode_band_power.csv"
+        if not electrode_csv.exists():
+            electrode_csv = base_dir / "electrode" / "data" / "electrode_band_power.csv"
         if not electrode_csv.exists():
             raise FileNotFoundError(
-                f"Electrode band power CSV not found: {electrode_csv}. "
-                "Run the 'electrode' analysis first."
+                f"Electrode band power CSV not found. "
+                "Run the 'electrode_psd' analysis first."
             )
         self._electrode_df = pd.read_csv(electrode_csv)
         logger.info("Loaded electrode data: %d rows", len(self._electrode_df))

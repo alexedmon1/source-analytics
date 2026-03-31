@@ -25,6 +25,7 @@ from .analyses.vertex_spatial_analysis import VertexSpatialAnalysis
 from .analyses.roi_transfer_entropy_analysis import ROITransferEntropyAnalysis
 from .analyses.roi_evoked_analysis import ROIEvokedAnalysis
 from .analyses.electrode_evoked_analysis import ElectrodeEvokedAnalysis
+from .analyses.electrode_aperiodic_analysis import ElectrodeAperiodicAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,8 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "roi_connectivity": ConnectivityAnalysis,
     "roi_pac": ROIPacAnalysis,
     "vertex_cluster": VertexClusterAnalysis,
-    "electrode": ElectrodeAnalysis,
+    "electrode_psd": ElectrodeAnalysis,
+    "electrode_aperiodic": ElectrodeAperiodicAnalysis,
     "electrode_comparison": ElectrodeComparisonAnalysis,
     "vertex_connectivity": VertexConnectivityAnalysis,
     "vertex_specparam": VertexSpecparamAnalysis,
@@ -59,6 +61,7 @@ _DEPRECATED_NAMES: dict[str, str] = {
     "mvpa": "vertex_mvpa",
     "transfer_entropy": "roi_transfer_entropy",
     "evoked": "roi_evoked",
+    "electrode": "electrode_psd",
 }
 
 # Register aliases so old YAML configs still work
@@ -96,7 +99,8 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
     "vertex_spatial":       {"category": "resting", "level": "vertex",     "description": "Spatial GLS (vertex-level generalized least squares)"},
     "vertex_specparam":     {"category": "resting", "level": "vertex",     "description": "Vertex-level spectral parameterization"},
     "vertex_connectivity":  {"category": "resting", "level": "vertex",     "description": "Vertex pairwise connectivity"},
-    "electrode":            {"category": "resting", "level": "electrode",  "description": "Sensor-level PSD analysis"},
+    "electrode_psd":        {"category": "resting", "level": "electrode",  "description": "Sensor-level PSD analysis"},
+    "electrode_aperiodic":  {"category": "resting", "level": "electrode",  "description": "Sensor-level aperiodic (1/f) analysis"},
     "electrode_comparison": {"category": "resting", "level": "electrode",  "description": "Source vs electrode comparison"},
     "roi_evoked":           {"category": "evoked",  "level": "roi",        "description": "ITC, ERSP, STP for trial-based paradigms"},
     "electrode_evoked":     {"category": "evoked",  "level": "electrode",  "description": "Electrode-level ITC, ERSP, STP for trial-based paradigms"},
