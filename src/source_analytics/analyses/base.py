@@ -65,7 +65,12 @@ class BaseAnalysis(ABC):
             self._atlas_dir = None
 
         # Epoch sampling config (applies to both ROI and vertex analyses)
-        epoch_cfg = config.raw.get("epoch_sampling", {})
+        # Per-analysis override: analyses can set epoch_sampling in their
+        # paradigm config block to override the global settings.
+        analysis_cfg = config.raw.get(self.name, {})
+        analysis_epoch = analysis_cfg.get("epoch_sampling", {})
+        global_epoch = config.raw.get("epoch_sampling", {})
+        epoch_cfg = {**global_epoch, **analysis_epoch}
         self._epoch_equalize: bool = epoch_cfg.get("enabled", False)
         self._epoch_duration_sec: float = epoch_cfg.get("epoch_duration_sec", 2.0)
         self._epoch_n_epochs: int = epoch_cfg.get("n_epochs", 80)
