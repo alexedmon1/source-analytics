@@ -87,10 +87,11 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
         self._comparison_df: pd.DataFrame | None = None
 
     def setup(self) -> None:
-        """Load CSVs from both electrode and psd output directories."""
+        """Load CSVs from both electrode and source output directories."""
         base_dir = self.config.output_dir
 
-        # Load electrode data — check both new and legacy names
+        # --- PSD data ---
+        # Load electrode PSD data — check both new and legacy names
         electrode_csv = base_dir / "electrode_psd" / "data" / "electrode_band_power.csv"
         if not electrode_csv.exists():
             electrode_csv = base_dir / "electrode" / "data" / "electrode_band_power.csv"
@@ -100,9 +101,9 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                 "Run the 'electrode_psd' analysis first."
             )
         self._electrode_df = pd.read_csv(electrode_csv)
-        logger.info("Loaded electrode data: %d rows", len(self._electrode_df))
+        logger.info("Loaded electrode PSD data: %d rows", len(self._electrode_df))
 
-        # Load source (PSD) data — check both canonical and legacy names
+        # Load source PSD data — check both canonical and legacy names
         source_csv = base_dir / "roi_psd" / "data" / "band_power.csv"
         if not source_csv.exists():
             source_csv = base_dir / "psd" / "data" / "band_power.csv"
@@ -115,8 +116,26 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
         # Exclude Corpus Callosum (white matter) ROIs
         n_before = len(self._source_df)
         self._source_df = self._source_df[~self._source_df["roi"].isin(CC_ROIS)]
-        logger.info("Loaded source data: %d rows (%d CC rows excluded)",
+        logger.info("Loaded source PSD data: %d rows (%d CC rows excluded)",
                      len(self._source_df), n_before - len(self._source_df))
+
+        # --- Aperiodic data (optional) ---
+        self._elec_aperiodic_df = None
+        self._src_aperiodic_df = None
+
+        elec_ap_csv = base_dir / "electrode_aperiodic" / "data" / "electrode_aperiodic_params.csv"
+        src_ap_csv = base_dir / "roi_aperiodic" / "data" / "aperiodic_params.csv"
+
+        if elec_ap_csv.exists() and src_ap_csv.exists():
+            self._elec_aperiodic_df = pd.read_csv(elec_ap_csv)
+            self._src_aperiodic_df = pd.read_csv(src_ap_csv)
+            self._src_aperiodic_df = self._src_aperiodic_df[
+                ~self._src_aperiodic_df["roi"].isin(CC_ROIS)
+            ]
+            logger.info("Loaded aperiodic data: electrode=%d rows, source=%d rows",
+                         len(self._elec_aperiodic_df), len(self._src_aperiodic_df))
+        else:
+            logger.info("Aperiodic data not found — skipping aperiodic comparison")
 
     def process_subject(self, subject: SubjectInfo) -> None:
         """No-op — data already loaded from CSVs."""
@@ -185,6 +204,45 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
 
             regional_src.to_csv(data_dir / "regional_source_power.csv", index=False)
             logger.info("Exported regional_source_power.csv (%d rows)", len(regional_src))
+
+        # --- Aperiodic comparison ---
+        if self._elec_aperiodic_df is not None and self._src_aperiodic_df is not None:
+            # Per-subject mean aperiodic params across channels
+            elec_ap_subj = (
+                self._elec_aperiodic_df
+                .groupby(["subject", "group"])
+                .agg(
+                    elec_exponent=("exponent", "mean"),
+                    elec_offset=("offset", "mean"),
+                )
+                .reset_index()
+            )
+
+            # Per-subject mean aperiodic params across ROIs
+            src_ap_subj = (
+                self._src_aperiodic_df
+                .groupby(["subject", "group"])
+                .agg(
+                    source_exponent=("exponent", "mean"),
+                    source_offset=("offset", "mean"),
+                )
+                .reset_index()
+            )
+
+            self._aperiodic_comparison_df = pd.merge(
+                elec_ap_subj, src_ap_subj,
+                on=["subject", "group"],
+                how="inner",
+            )
+
+            if not self._aperiodic_comparison_df.empty:
+                self._aperiodic_comparison_df.to_csv(
+                    data_dir / "aperiodic_comparison_data.csv", index=False,
+                )
+                logger.info(
+                    "Exported aperiodic_comparison_data.csv (%d rows)",
+                    len(self._aperiodic_comparison_df),
+                )
 
     def statistics(self) -> None:
         """Compute correlations, effect sizes, and regional specificity."""
@@ -295,6 +353,53 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             if not regional_df.empty:
                 regional_df.to_csv(tbl_dir / "regional_effect_sizes.csv", index=False)
                 logger.info("Exported regional_effect_sizes.csv (%d rows)", len(regional_df))
+
+        # --- Aperiodic comparison ---
+        ap_csv = data_dir / "aperiodic_comparison_data.csv"
+        if ap_csv.exists():
+            ap_comp = pd.read_csv(ap_csv)
+            ap_stats_rows = []
+
+            for dv_name in ["exponent", "offset"]:
+                elec_col = f"elec_{dv_name}"
+                src_col = f"source_{dv_name}"
+
+                # Correlation
+                valid = ap_comp[[elec_col, src_col]].dropna()
+                if len(valid) > 2:
+                    r, p = sp_stats.pearsonr(valid[elec_col], valid[src_col])
+                else:
+                    r, p = np.nan, np.nan
+
+                for contrast in self.config.contrasts:
+                    ga_data = ap_comp[ap_comp["group"] == contrast.group_a]
+                    gb_data = ap_comp[ap_comp["group"] == contrast.group_b]
+
+                    elec_g, elec_ci_lo, elec_ci_hi = _hedges_g_ci(
+                        ga_data[elec_col].values, gb_data[elec_col].values
+                    )
+                    src_g, src_ci_lo, src_ci_hi = _hedges_g_ci(
+                        ga_data[src_col].values, gb_data[src_col].values
+                    )
+
+                    ap_stats_rows.append({
+                        "dv": dv_name,
+                        "contrast": contrast.name,
+                        "correlation_r": r,
+                        "correlation_p": p,
+                        "n_subjects": len(valid),
+                        "electrode_hedges_g": elec_g,
+                        "electrode_ci_lo": elec_ci_lo,
+                        "electrode_ci_hi": elec_ci_hi,
+                        "source_hedges_g": src_g,
+                        "source_ci_lo": src_ci_lo,
+                        "source_ci_hi": src_ci_hi,
+                    })
+
+            ap_stats_df = pd.DataFrame(ap_stats_rows)
+            if not ap_stats_df.empty:
+                ap_stats_df.to_csv(tbl_dir / "aperiodic_comparison_stats.csv", index=False)
+                logger.info("Exported aperiodic_comparison_stats.csv (%d rows)", len(ap_stats_df))
 
     def figures(self) -> None:
         """Generate matplotlib comparison figures."""
