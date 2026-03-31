@@ -136,7 +136,11 @@ class ElectrodeAnalysis(BaseAnalysis):
 
         n_bootstrap = self._epoch_n_bootstrap
 
-        if n_bootstrap <= 1:
+        # n_bootstrap=0: no sampling, use full timeseries
+        if n_bootstrap <= 0:
+            return [data]
+
+        if n_bootstrap == 1:
             epochs = sample_epochs(
                 data, sfreq,
                 epoch_duration_sec=self._epoch_duration_sec,

@@ -154,11 +154,15 @@ def sample_roi_epochs(
     if not roi_ts:
         return [roi_ts]
 
+    # n_bootstrap=0: no sampling, use full timeseries
+    if n_bootstrap <= 0:
+        return [roi_ts]
+
     roi_names = list(roi_ts.keys())
     data = np.stack([roi_ts[name] for name in roi_names])  # (n_rois, n_times)
 
-    if n_bootstrap <= 1:
-        # Single draw
+    if n_bootstrap == 1:
+        # Single draw (epoch equalization without bootstrap averaging)
         epochs = sample_epochs(
             data, sfreq,
             epoch_duration_sec=epoch_duration_sec,
