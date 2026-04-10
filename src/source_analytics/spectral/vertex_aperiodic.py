@@ -2,7 +2,8 @@
 
 Wraps the existing fit_aperiodic() in a vectorized loop over all source
 vertices, extracting aperiodic parameters (exponent, offset) and detecting
-oscillatory peaks (especially gamma) at each spatial location.
+oscillatory peaks across all configured frequency bands at each spatial
+location.
 """
 
 from __future__ import annotations
@@ -16,13 +17,18 @@ from .aperiodic import fit_aperiodic
 logger = logging.getLogger(__name__)
 
 
+def _safe_band_key(band_name: str) -> str:
+    """Sanitize band name for use as a dict/column key."""
+    return band_name.lower().replace(" ", "_")
+
+
 def fit_aperiodic_vertices(
     freqs: np.ndarray,
     psd: np.ndarray,
     freq_range: tuple[float, float] = (1, 100),
     max_n_peaks: int = 6,
     peak_width_limits: tuple[float, float] = (1.0, 12.0),
-    gamma_range: tuple[float, float] = (30, 100),
+    bands: dict[str, tuple[float, float]] | None = None,
 ) -> dict[str, np.ndarray]:
     """Fit aperiodic (1/f) model at each vertex.
 
@@ -38,26 +44,34 @@ def fit_aperiodic_vertices(
         Maximum number of peaks to detect per vertex.
     peak_width_limits : tuple
         Min and max peak width in Hz.
-    gamma_range : tuple
-        Frequency range to search for gamma peaks.
+    bands : dict mapping band name to (fmin, fmax), optional
+        Frequency bands for peak detection.  When *None*, defaults to
+        ``{"Gamma": (30, 100)}`` for backward compatibility.
 
     Returns
     -------
     dict[str, ndarray]
-        Keys: exponent, offset, r_squared, n_peaks, method,
-              has_gamma_peak, gamma_peak_freq, gamma_peak_power
+        Always contains: exponent, offset, r_squared, n_peaks, method.
+        Per-band keys: has_{key}_peak, {key}_peak_freq, {key}_peak_power
+        where {key} is the lower-cased, underscore-separated band name.
         All arrays have shape (n_vertices,) except method which is a list.
     """
+    if bands is None:
+        bands = {"Gamma": (30, 100)}
+
     n_vertices = psd.shape[0]
 
     exponents = np.zeros(n_vertices)
     offsets = np.zeros(n_vertices)
     r_squareds = np.zeros(n_vertices)
     n_peaks_arr = np.zeros(n_vertices, dtype=int)
-    methods = []
-    has_gamma = np.zeros(n_vertices, dtype=bool)
-    gamma_freq = np.full(n_vertices, np.nan)
-    gamma_power = np.full(n_vertices, np.nan)
+    methods: list[str] = []
+
+    # Per-band peak arrays
+    band_keys = {name: _safe_band_key(name) for name in bands}
+    band_has_peak = {key: np.zeros(n_vertices, dtype=bool) for key in band_keys.values()}
+    band_peak_freq = {key: np.full(n_vertices, np.nan) for key in band_keys.values()}
+    band_peak_power = {key: np.full(n_vertices, np.nan) for key in band_keys.values()}
 
     for vi in range(n_vertices):
         try:
@@ -71,18 +85,19 @@ def fit_aperiodic_vertices(
             n_peaks_arr[vi] = result.get("n_peaks", 0)
             methods.append(result.get("method", "unknown"))
 
-            # Check for gamma peaks if specparam was used
+            # Match detected peaks to frequency bands
             peaks = result.get("peaks", [])
             if peaks:
                 for peak in peaks:
                     cf = peak.get("center_frequency", 0)
-                    if gamma_range[0] <= cf <= gamma_range[1]:
-                        has_gamma[vi] = True
-                        # Keep the strongest gamma peak
-                        pw = peak.get("power", 0)
-                        if np.isnan(gamma_power[vi]) or pw > gamma_power[vi]:
-                            gamma_freq[vi] = cf
-                            gamma_power[vi] = pw
+                    pw = peak.get("power", 0)
+                    for band_name, (flo, fhi) in bands.items():
+                        key = band_keys[band_name]
+                        if flo <= cf <= fhi:
+                            if np.isnan(band_peak_power[key][vi]) or pw > band_peak_power[key][vi]:
+                                band_has_peak[key][vi] = True
+                                band_peak_freq[key][vi] = cf
+                                band_peak_power[key][vi] = pw
 
         except Exception as e:
             logger.debug("Vertex %d fit failed: %s", vi, e)
@@ -90,19 +105,22 @@ def fit_aperiodic_vertices(
 
     n_specparam = sum(1 for m in methods if m == "specparam")
     n_linreg = sum(1 for m in methods if m == "linreg")
-    n_gamma = int(has_gamma.sum())
-    logger.info(
-        "Specparam fit: %d specparam, %d linreg, %d gamma peaks detected",
-        n_specparam, n_linreg, n_gamma,
-    )
+    logger.info("Specparam fit: %d specparam, %d linreg", n_specparam, n_linreg)
+    for band_name in bands:
+        key = band_keys[band_name]
+        n_det = int(band_has_peak[key].sum())
+        logger.info("  %s peaks detected: %d/%d vertices", band_name, n_det, n_vertices)
 
-    return {
+    result_dict: dict[str, np.ndarray | list[str]] = {
         "exponent": exponents,
         "offset": offsets,
         "r_squared": r_squareds,
         "n_peaks": n_peaks_arr,
         "method": methods,
-        "has_gamma_peak": has_gamma,
-        "gamma_peak_freq": gamma_freq,
-        "gamma_peak_power": gamma_power,
     }
+    for key in band_keys.values():
+        result_dict[f"has_{key}_peak"] = band_has_peak[key]
+        result_dict[f"{key}_peak_freq"] = band_peak_freq[key]
+        result_dict[f"{key}_peak_power"] = band_peak_power[key]
+
+    return result_dict

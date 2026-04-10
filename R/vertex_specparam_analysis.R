@@ -46,19 +46,27 @@ n_subjects <- length(unique(params$subject))
 n_vertices <- length(unique(params$vertex_idx))
 groups <- unique(params$group)
 
-# Per-group summary of aperiodic parameters
+# Detect per-band peak columns dynamically
+peak_cols <- grep("^has_.*_peak$", names(params), value = TRUE)
+band_labels <- sub("^has_(.*)_peak$", "\\1", peak_cols)
+
+# Per-group summary of aperiodic parameters + per-band peak rates
 group_summary <- do.call(rbind, lapply(groups, function(g) {
   sub <- params[params$group == g, ]
-  data.frame(
+  base <- data.frame(
     Group = g,
     Mean_Exponent = round(mean(sub$exponent, na.rm = TRUE), 3),
     SD_Exponent = round(sd(sub$exponent, na.rm = TRUE), 3),
     Mean_Offset = round(mean(sub$offset, na.rm = TRUE), 3),
     SD_Offset = round(sd(sub$offset, na.rm = TRUE), 3),
     Mean_R2 = round(mean(sub$r_squared, na.rm = TRUE), 3),
-    Gamma_Peak_Rate = round(mean(sub$has_gamma_peak, na.rm = TRUE), 3),
     stringsAsFactors = FALSE
   )
+  for (col in peak_cols) {
+    label <- paste0(sub("^has_(.*)_peak$", "\\1", col), "_Peak_Rate")
+    base[[label]] <- round(mean(sub[[col]], na.rm = TRUE), 3)
+  }
+  base
 }))
 
 # Method distribution
@@ -94,7 +102,7 @@ lines <- c(lines,
   "Spectral parameterization (specparam/FOOOF) was applied to the PSD at each vertex.",
   "The aperiodic component (1/f slope and offset) and oscillatory peaks were extracted.",
   "Group differences in aperiodic parameters were tested with cluster-based permutation.",
-  "Gamma peak presence rates were compared with per-vertex chi-squared tests.",
+  "Per-band peak presence rates were compared with per-vertex chi-squared tests.",
   "",
   "## Fitting Methods Used",
   "",
@@ -103,18 +111,25 @@ lines <- c(lines,
   sprintf("- failed: %d fits", method_table["failed"] %||% 0),
   "",
   "## Group Summary",
-  "",
-  "| Group | Mean Exp | SD Exp | Mean Offset | SD Offset | Mean R\u00b2 | Gamma Rate |",
-  "|-------|----------|--------|-------------|-----------|---------|------------|"
+  ""
 )
+
+# Build dynamic table header with per-band peak rate columns
+rate_cols <- grep("_Peak_Rate$", names(group_summary), value = TRUE)
+rate_headers <- sub("_Peak_Rate$", "", rate_cols)
+header_line <- paste0("| Group | Mean Exp | SD Exp | Mean Offset | SD Offset | Mean R\u00b2 |",
+                       paste0(" ", rate_headers, " Rate |", collapse = ""))
+sep_line <- paste0("|-------|----------|--------|-------------|-----------|---------|",
+                    paste0(rep("------|", length(rate_cols)), collapse = ""))
+lines <- c(lines, header_line, sep_line)
 
 for (i in seq_len(nrow(group_summary))) {
   r <- group_summary[i, ]
-  lines <- c(lines, sprintf(
-    "| %s | %.3f | %.3f | %.3f | %.3f | %.3f | %.3f |",
-    r$Group, r$Mean_Exponent, r$SD_Exponent,
-    r$Mean_Offset, r$SD_Offset, r$Mean_R2, r$Gamma_Peak_Rate
-  ))
+  base_fmt <- sprintf("| %s | %.3f | %.3f | %.3f | %.3f | %.3f |",
+                       r$Group, r$Mean_Exponent, r$SD_Exponent,
+                       r$Mean_Offset, r$SD_Offset, r$Mean_R2)
+  rate_vals <- paste0(sprintf(" %.3f |", unlist(r[rate_cols])), collapse = "")
+  lines <- c(lines, paste0(base_fmt, rate_vals))
 }
 
 # Cluster stats
@@ -131,18 +146,27 @@ if (file.exists(stats_path)) {
   lines <- c(lines, "")
 }
 
-# Chi-squared results
-chi2_path <- file.path(output_dir, "tables", "gamma_peak_chi2.csv")
+# Per-band chi-squared results
+chi2_path <- file.path(output_dir, "tables", "band_peak_chi2.csv")
+if (!file.exists(chi2_path)) {
+  chi2_path <- file.path(output_dir, "tables", "gamma_peak_chi2.csv")
+}
 if (file.exists(chi2_path)) {
   chi2 <- read.csv(chi2_path, stringsAsFactors = FALSE)
-  n_sig <- sum(chi2$p < 0.05)
-  lines <- c(lines,
-    "## Gamma Peak Presence (Chi-squared)",
-    "",
-    sprintf("- %d/%d vertices with significant group difference (uncorrected p<0.05)",
-            n_sig, nrow(chi2)),
-    ""
-  )
+  lines <- c(lines, "## Peak Presence by Band (Chi-squared)", "")
+  if ("band" %in% names(chi2)) {
+    for (band in unique(chi2$band)) {
+      sub <- chi2[chi2$band == band, ]
+      n_sig <- sum(sub$p < 0.05)
+      lines <- c(lines, sprintf("- **%s**: %d/%d vertices significant (uncorrected p<0.05)",
+                                band, n_sig, nrow(sub)))
+    }
+  } else {
+    n_sig <- sum(chi2$p < 0.05)
+    lines <- c(lines, sprintf("- %d/%d vertices significant (uncorrected p<0.05)",
+                              n_sig, nrow(chi2)))
+  }
+  lines <- c(lines, "")
 }
 
 lines <- c(lines,
@@ -150,9 +174,9 @@ lines <- c(lines,
   "",
   "- `data/vertex_specparam.csv` — per-subject per-vertex specparam fit parameters",
   "- `tables/vertex_specparam_stats.csv` — cluster permutation statistics",
-  "- `tables/gamma_peak_chi2.csv` — gamma peak presence chi-squared tests",
-  "- `figures/vertex_specparam_*.png` — aperiodic parameter glass brain maps",
-  "- `figures/gamma_peak_presence.png` — gamma peak prevalence map",
+  "- `tables/band_peak_chi2.csv` — per-band peak presence chi-squared tests",
+  "- `figures/specparam_*.png` — aperiodic parameter glass brain maps",
+  "- `figures/{band}_peak_presence.png` — per-band peak prevalence maps",
   ""
 )
 

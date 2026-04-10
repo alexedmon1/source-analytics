@@ -187,10 +187,8 @@ class VertexSpatialAnalysis(BaseAnalysis):
         n_verts = len(coords)
         vert_map = dict(zip(coords_df["vertex_idx"], range(n_verts)))
 
-        # Use gamma bands if available, otherwise skip
-        gamma_bands = [b for b in df["band"].unique()
-                       if "gamma" in b.lower()]
-        if not gamma_bands:
+        all_bands = list(df["band"].unique())
+        if not all_bands:
             return
 
         contrasts = self.config.contrasts
@@ -199,7 +197,7 @@ class VertexSpatialAnalysis(BaseAnalysis):
             contrast_name = f"{ga}_vs_{gb}"
 
             band_data = {}
-            for band in gamma_bands:
+            for band in all_bands:
                 bdata = df[df["band"] == band]
                 t_values = np.zeros(n_verts)
                 for vidx in coords_df["vertex_idx"]:
@@ -230,8 +228,8 @@ class VertexSpatialAnalysis(BaseAnalysis):
             plot_anatomical_glass_brain(
                 coords=coords,
                 band_data=band_data,
-                output_path=fig_dir / f"gamma_tscores_{contrast_name}.png",
-                title=(f"Dorsal Vertex-Level Gamma Power: "
+                output_path=fig_dir / f"band_tscores_{contrast_name}.png",
+                title=(f"Dorsal Vertex-Level Band Power: "
                        f"{ga} vs {gb} (vertex spatial posthoc)"),
                 subtitle=(f"Large circles = uncorrected |t| > 2.0; "
                           f"Mean direction: {ga} {mean_dir} than {gb}"),

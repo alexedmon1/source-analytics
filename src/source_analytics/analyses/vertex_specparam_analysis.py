@@ -1,9 +1,10 @@
 """Vertex-level spectral parameterization analysis.
 
-Fits aperiodic (1/f) models at each vertex to determine whether gamma
-elevation is a true oscillatory peak versus a broadband spectral shift.
-Tests group differences in aperiodic exponent, offset, and gamma peak
-presence using cluster permutation and chi-squared tests.
+Fits aperiodic (1/f) models at each vertex to decompose the power spectrum
+into aperiodic (1/f) and oscillatory components.  Detects peaks in every
+configured frequency band and tests group differences in aperiodic
+exponent, offset, and per-band peak presence using cluster permutation
+and chi-squared tests.
 """
 
 from __future__ import annotations
@@ -61,6 +62,12 @@ class VertexSpecparamAnalysis(BaseAnalysis):
         self._peak_width_limits = tuple(sp_cfg.get("peak_width_limits", [1.0, 12.0]))
         self._max_n_peaks = int(sp_cfg.get("max_n_peaks", 6))
 
+        # Frequency bands for peak detection
+        self._bands = dict(config.bands)
+        self._band_keys = {
+            name: name.lower().replace(" ", "_") for name in self._bands
+        }
+
         wb_cfg = config.vertex
         self._n_permutations = int(wb_cfg.get("n_permutations", 1000))
         self._adjacency_distance = float(wb_cfg.get("adjacency_distance_mm", 5.0))
@@ -117,6 +124,7 @@ class VertexSpecparamAnalysis(BaseAnalysis):
             freq_range=self._freq_range,
             max_n_peaks=self._max_n_peaks,
             peak_width_limits=self._peak_width_limits,
+            bands=self._bands,
         )
 
         self._subject_groups[uid] = subject.group
@@ -124,7 +132,7 @@ class VertexSpecparamAnalysis(BaseAnalysis):
 
         n_vertices = psd.shape[0]
         for vi in range(n_vertices):
-            self._param_rows.append({
+            row = {
                 "subject": uid,
                 "group": subject.group,
                 "vertex_idx": vi,
@@ -132,11 +140,13 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 "offset": float(params["offset"][vi]),
                 "r_squared": float(params["r_squared"][vi]),
                 "n_peaks": int(params["n_peaks"][vi]),
-                "has_gamma_peak": bool(params["has_gamma_peak"][vi]),
-                "gamma_peak_freq": float(params["gamma_peak_freq"][vi]),
-                "gamma_peak_power": float(params["gamma_peak_power"][vi]),
                 "method": params["method"][vi],
-            })
+            }
+            for key in self._band_keys.values():
+                row[f"has_{key}_peak"] = bool(params[f"has_{key}_peak"][vi])
+                row[f"{key}_peak_freq"] = float(params[f"{key}_peak_freq"][vi])
+                row[f"{key}_peak_power"] = float(params[f"{key}_peak_power"][vi])
+            self._param_rows.append(row)
 
     def aggregate(self) -> None:
         data_dir = self.output_dir / "data"
@@ -214,45 +224,107 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                         "cluster_id": int(result.cluster_labels[vi]),
                     })
 
-            # Chi-squared test on gamma peak presence
-            gamma_a = np.array([
-                self._subject_data[uid]["has_gamma_peak"] for uid in group_a_uids
-            ])  # (n_a, n_vertices) bool
-            gamma_b = np.array([
-                self._subject_data[uid]["has_gamma_peak"] for uid in group_b_uids
-            ])
-
-            rate_a = gamma_a.mean(axis=0)  # fraction with gamma peak per vertex
-            rate_b = gamma_b.mean(axis=0)
-
-            # Per-vertex chi-squared test
+            # Per-band chi-squared tests on peak presence + optional
+            # cluster permutation on peak power
             n_a, n_b = len(group_a_uids), len(group_b_uids)
-            chi2_stats = []
-            for vi in range(len(rate_a)):
-                # 2x2 contingency table
-                a_yes = int(gamma_a[:, vi].sum())
-                a_no = n_a - a_yes
-                b_yes = int(gamma_b[:, vi].sum())
-                b_no = n_b - b_yes
+            all_chi2_stats: list[dict] = []
 
-                table = np.array([[a_yes, a_no], [b_yes, b_no]])
-                if table.sum() > 0 and np.all(table.sum(axis=0) > 0):
-                    chi2, p_val, _, _ = sp_stats.chi2_contingency(table, correction=True)
-                else:
-                    chi2, p_val = 0.0, 1.0
+            for band_name in self._bands:
+                key = self._band_keys[band_name]
+                col = f"has_{key}_peak"
 
-                chi2_stats.append({
-                    "contrast": contrast.name,
-                    "vertex_idx": vi,
-                    "gamma_rate_a": float(rate_a[vi]),
-                    "gamma_rate_b": float(rate_b[vi]),
-                    "chi2": float(chi2),
-                    "p": float(p_val),
-                })
+                peak_a = np.array([
+                    self._subject_data[uid][col] for uid in group_a_uids
+                ])  # (n_a, n_vertices) bool
+                peak_b = np.array([
+                    self._subject_data[uid][col] for uid in group_b_uids
+                ])
 
-            if chi2_stats:
-                chi2_df = pd.DataFrame(chi2_stats)
-                chi2_df.to_csv(tbl_dir / "gamma_peak_chi2.csv", index=False)
+                rate_a = peak_a.mean(axis=0)
+                rate_b = peak_b.mean(axis=0)
+
+                for vi in range(len(rate_a)):
+                    a_yes = int(peak_a[:, vi].sum())
+                    a_no = n_a - a_yes
+                    b_yes = int(peak_b[:, vi].sum())
+                    b_no = n_b - b_yes
+
+                    table = np.array([[a_yes, a_no], [b_yes, b_no]])
+                    if table.sum() > 0 and np.all(table.sum(axis=0) > 0):
+                        chi2, p_val, _, _ = sp_stats.chi2_contingency(
+                            table, correction=True,
+                        )
+                    else:
+                        chi2, p_val = 0.0, 1.0
+
+                    all_chi2_stats.append({
+                        "contrast": contrast.name,
+                        "band": band_name,
+                        "band_key": key,
+                        "vertex_idx": vi,
+                        "rate_a": float(rate_a[vi]),
+                        "rate_b": float(rate_b[vi]),
+                        "chi2": float(chi2),
+                        "p": float(p_val),
+                    })
+
+                # Cluster permutation on peak power for bands with
+                # enough detected peaks (>=10% of vertices overall)
+                overall_rate = np.concatenate([peak_a, peak_b]).mean(axis=0)
+                if overall_rate.mean() >= 0.10:
+                    power_a = np.array([
+                        self._subject_data[uid][f"{key}_peak_power"]
+                        for uid in group_a_uids
+                    ])
+                    power_b = np.array([
+                        self._subject_data[uid][f"{key}_peak_power"]
+                        for uid in group_b_uids
+                    ])
+                    power_a = np.nan_to_num(power_a, nan=0.0)
+                    power_b = np.nan_to_num(power_b, nan=0.0)
+
+                    result = cluster_permutation_test(
+                        power_a, power_b, coords,
+                        n_perms=self._n_permutations,
+                        threshold=self._cluster_threshold,
+                        distance_mm=self._adjacency_distance,
+                        seed=42,
+                    )
+                    g_map = hedges_g(power_a, power_b)
+
+                    self._cluster_results[
+                        f"{contrast.name}_{key}_peak_power"
+                    ] = {
+                        "result": result,
+                        "mean_a": power_a.mean(axis=0),
+                        "mean_b": power_b.mean(axis=0),
+                        "group_labels": (label_a, label_b),
+                        "param": f"{key}_peak_power",
+                    }
+
+                    for vi in range(len(result.t_map)):
+                        all_stats.append({
+                            "contrast": contrast.name,
+                            "parameter": f"{key}_peak_power",
+                            "vertex_idx": vi,
+                            "t": float(result.t_map[vi]),
+                            "p": float(result.p_map[vi]),
+                            "hedges_g": float(g_map[vi]),
+                            "cluster_id": int(result.cluster_labels[vi]),
+                        })
+
+            if all_chi2_stats:
+                chi2_df = pd.DataFrame(all_chi2_stats)
+                chi2_df.to_csv(tbl_dir / "band_peak_chi2.csv", index=False)
+                # Backward compat: gamma-only subset
+                gamma_keys = [
+                    k for k in self._band_keys.values() if "gamma" in k
+                ]
+                gamma_sub = chi2_df[chi2_df["band_key"].isin(gamma_keys)]
+                if not gamma_sub.empty:
+                    gamma_sub.to_csv(
+                        tbl_dir / "gamma_peak_chi2.csv", index=False,
+                    )
 
         if all_stats:
             stats_df = pd.DataFrame(all_stats)
@@ -350,30 +422,51 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 output_path=fig_dir / f"specparam_{param}.png",
             )
 
-        # Gamma peak presence map — load from CSV if _subject_data is empty
-        if self._subject_data:
-            all_gamma = np.array([
-                d["has_gamma_peak"].astype(float) for d in self._subject_data.values()
-            ])
-            mean_gamma_rate = all_gamma.mean(axis=0)
-        else:
-            # Recompute from vertex_specparam.csv
+        # Per-band peak presence maps
+        band_keys = self._band_keys if self._band_keys else {}
+        # Detect band keys from CSV if in-memory state is empty
+        if not band_keys:
             data_dir = self.output_dir / "data"
             csv_path = data_dir / "vertex_specparam.csv"
-            if not csv_path.exists():
-                logger.info("No vertex_specparam.csv; skipping gamma peak map")
-                return
-            df = pd.read_csv(csv_path)
-            mean_gamma_rate = df.groupby("vertex_idx")["has_gamma_peak"].mean().values
+            if csv_path.exists():
+                df = pd.read_csv(csv_path)
+                import re
+                for col in df.columns:
+                    m = re.match(r"has_(.+)_peak$", col)
+                    if m:
+                        band_keys[m.group(1)] = m.group(1)  # key == key
 
-        plot_glass_brain(
-            coords=coords,
-            values=mean_gamma_rate,
-            title="Gamma Peak Presence Rate",
-            output_path=fig_dir / "gamma_peak_presence.png",
-            cmap="YlOrRd",
-            vlim=(0, 1),
-        )
+        for band_name, key in (
+            self._band_keys.items() if self._band_keys else
+            {k: k for k in band_keys}.items()
+        ):
+            col = f"has_{key}_peak"
+            if self._subject_data:
+                try:
+                    all_peaks = np.array([
+                        d[col].astype(float) for d in self._subject_data.values()
+                    ])
+                    mean_rate = all_peaks.mean(axis=0)
+                except KeyError:
+                    continue
+            else:
+                data_dir = self.output_dir / "data"
+                csv_path = data_dir / "vertex_specparam.csv"
+                if not csv_path.exists():
+                    continue
+                df = pd.read_csv(csv_path)
+                if col not in df.columns:
+                    continue
+                mean_rate = df.groupby("vertex_idx")[col].mean().values
+
+            plot_glass_brain(
+                coords=coords,
+                values=mean_rate,
+                title=f"{band_name} Peak Presence Rate",
+                output_path=fig_dir / f"{key}_peak_presence.png",
+                cmap="YlOrRd",
+                vlim=(0, 1),
+            )
 
     def summary(self) -> None:
         data_dir = self.output_dir / "data"
@@ -422,11 +515,13 @@ class VertexSpecparamAnalysis(BaseAnalysis):
             "",
             "Spectral parameterization (specparam/FOOOF) was applied to the PSD at "
             "each source vertex to decompose the spectrum into aperiodic (1/f) and "
-            "oscillatory components. This determines whether elevated gamma power "
-            "reflects a true oscillatory peak or a broadband spectral shift. "
-            "Group differences in aperiodic exponent and offset were tested using "
-            "cluster-based permutation testing. Gamma peak presence rates were "
-            "compared using per-vertex chi-squared tests.",
+            "oscillatory components. Peaks were detected in all configured frequency "
+            "bands to determine whether power elevations reflect true oscillatory "
+            "peaks or broadband spectral shifts. Group differences in aperiodic "
+            "exponent and offset were tested using cluster-based permutation testing. "
+            "Per-band peak presence rates were compared using per-vertex chi-squared "
+            "tests. For bands with sufficient peak prevalence (>=10% of vertices), "
+            "cluster permutation was also applied to peak power maps.",
             "",
         ]
 
@@ -449,17 +544,28 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 lines.append(f"- **{param}**: {n_clust} clusters found")
             lines.append("")
 
-        # Chi-squared results
-        chi2_csv = tbl_dir / "gamma_peak_chi2.csv"
+        # Per-band chi-squared results
+        chi2_csv = tbl_dir / "band_peak_chi2.csv"
+        if not chi2_csv.exists():
+            chi2_csv = tbl_dir / "gamma_peak_chi2.csv"  # backward compat
         if chi2_csv.exists():
             chi2_df = pd.read_csv(chi2_csv)
-            n_sig = len(chi2_df[chi2_df["p"] < 0.05])
-            lines.append("## Gamma Peak Presence")
+            lines.append("## Peak Presence by Band")
             lines.append("")
-            lines.append(
-                f"- {n_sig}/{len(chi2_df)} vertices with significant "
-                "group differences in gamma peak presence (uncorrected p<0.05)"
-            )
+            if "band" in chi2_df.columns:
+                for band_name in chi2_df["band"].unique():
+                    sub = chi2_df[chi2_df["band"] == band_name]
+                    n_sig = len(sub[sub["p"] < 0.05])
+                    lines.append(
+                        f"- **{band_name}**: {n_sig}/{len(sub)} vertices with "
+                        "significant group differences (uncorrected p<0.05)"
+                    )
+            else:
+                n_sig = len(chi2_df[chi2_df["p"] < 0.05])
+                lines.append(
+                    f"- {n_sig}/{len(chi2_df)} vertices with significant "
+                    "group differences (uncorrected p<0.05)"
+                )
             lines.append("")
 
         lines.extend([
@@ -467,9 +573,9 @@ class VertexSpecparamAnalysis(BaseAnalysis):
             "",
             "- `data/vertex_specparam.csv` — per-subject per-vertex specparam parameters",
             "- `tables/vertex_specparam_stats.csv` — cluster permutation results",
-            "- `tables/gamma_peak_chi2.csv` — gamma peak presence chi-squared tests",
+            "- `tables/band_peak_chi2.csv` — per-band peak presence chi-squared tests",
             "- `figures/specparam_*.png` — aperiodic parameter glass brains",
-            "- `figures/gamma_peak_presence.png` — gamma peak prevalence map",
+            "- `figures/{band}_peak_presence.png` — per-band peak prevalence maps",
             "",
         ])
 
