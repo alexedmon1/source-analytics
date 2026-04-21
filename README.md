@@ -10,6 +10,10 @@ Statistical analysis toolkit for source-localized EEG data. Reads pipeline outpu
 
 **Python** handles orchestration, signal processing, and data I/O. **R** handles statistics (linear mixed models via lme4) and visualization (ggplot2). Vertex-level modules use Python for statistics (cluster permutation) and visualization (glass brain plots), with R for report generation.
 
+## AI-Assisted Workflow (IRL)
+
+This repo ships an [IRL](https://github.com/drpedapati/irl-template) plan template for running source-analytics inside an Idempotent Research Loop: [`irl-template.md`](irl-template.md) (author `analysis.yaml` → run ROI/vertex/electrode modules → copy summaries to `$RESULTS`). Initialize a study with `irl init -t source-analytics "<project-name>"` after dropping the template into `~/research/_templates/`.
+
 ## Installation
 
 ### Python
