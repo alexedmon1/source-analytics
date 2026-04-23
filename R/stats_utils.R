@@ -153,7 +153,7 @@ run_posthoc_emmeans <- function(band_df, contrasts, bands, omnibus_df,
         fit <- lmer(dv ~ group * roi + (1 | subject), data = bdata)
 
         emm <- emmeans(fit, pairwise ~ group | roi)
-        con_df <- as.data.frame(emm$contrasts)
+        con_df <- as.data.frame(summary(emm$contrasts, infer = c(TRUE, TRUE)))
         emm_df <- as.data.frame(emm$emmeans)
 
         resid_sd <- sigma(fit)
@@ -177,6 +177,8 @@ run_posthoc_emmeans <- function(band_df, contrasts, bands, omnibus_df,
             power_type = power_type,
             roi = roi_name,
             estimate = con_df$estimate[i],
+            estimate_lcl = con_df$lower.CL[i],
+            estimate_ucl = con_df$upper.CL[i],
             SE = con_df$SE[i],
             df = con_df$df[i],
             t_ratio = con_df$t.ratio[i],
@@ -185,6 +187,8 @@ run_posthoc_emmeans <- function(band_df, contrasts, bands, omnibus_df,
             emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
             emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
             hedges_g = hg,
+            hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
+            hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
             significant = con_df$q_value[i] < 0.05,
             stringsAsFactors = FALSE
           )
@@ -364,7 +368,7 @@ run_posthoc_emmeans_region <- function(band_df, contrasts, bands, roi_categories
         fit <- lmer(dv ~ group * region + (1 | subject), data = bdata)
 
         emm <- emmeans(fit, pairwise ~ group | region)
-        con_df <- as.data.frame(emm$contrasts)
+        con_df <- as.data.frame(summary(emm$contrasts, infer = c(TRUE, TRUE)))
         emm_df <- as.data.frame(emm$emmeans)
 
         resid_sd <- sigma(fit)
@@ -388,6 +392,8 @@ run_posthoc_emmeans_region <- function(band_df, contrasts, bands, roi_categories
             power_type = power_type,
             region = region_name,
             estimate = con_df$estimate[i],
+            estimate_lcl = con_df$lower.CL[i],
+            estimate_ucl = con_df$upper.CL[i],
             SE = con_df$SE[i],
             df = con_df$df[i],
             t_ratio = con_df$t.ratio[i],
@@ -396,6 +402,8 @@ run_posthoc_emmeans_region <- function(band_df, contrasts, bands, roi_categories
             emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
             emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
             hedges_g = hg,
+            hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
+            hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
             significant = con_df$q_value[i] < 0.05,
             stringsAsFactors = FALSE
           )
@@ -660,7 +668,7 @@ run_posthoc_emmeans_region_nested <- function(band_df, contrasts, bands, roi_cat
         fit <- lmer(dv ~ group * region + (1 | subject), data = bdata)
 
         emm <- emmeans(fit, pairwise ~ group | region)
-        con_df <- as.data.frame(emm$contrasts)
+        con_df <- as.data.frame(summary(emm$contrasts, infer = c(TRUE, TRUE)))
         emm_df <- as.data.frame(emm$emmeans)
 
         resid_sd <- sigma(fit)
@@ -684,6 +692,8 @@ run_posthoc_emmeans_region_nested <- function(band_df, contrasts, bands, roi_cat
             power_type = power_type,
             region = region_name,
             estimate = con_df$estimate[i],
+            estimate_lcl = con_df$lower.CL[i],
+            estimate_ucl = con_df$upper.CL[i],
             SE = con_df$SE[i],
             df = con_df$df[i],
             t_ratio = con_df$t.ratio[i],
@@ -692,6 +702,8 @@ run_posthoc_emmeans_region_nested <- function(band_df, contrasts, bands, roi_cat
             emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
             emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
             hedges_g = hg,
+            hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
+            hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
             significant = con_df$q_value[i] < 0.05,
             stringsAsFactors = FALSE
           )
