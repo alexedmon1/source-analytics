@@ -227,7 +227,7 @@ run_posthoc_emmeans_aperiodic <- function(ap_df, contrasts, dv_name, omnibus_df,
       fit <- lmer(dv ~ group * roi + (1 | subject), data = cdata)
 
       emm <- emmeans(fit, pairwise ~ group | roi)
-      con_df <- as.data.frame(emm$contrasts)
+      con_df <- as.data.frame(summary(emm$contrasts, infer = c(TRUE, TRUE)))
       emm_df <- as.data.frame(emm$emmeans)
 
       resid_sd <- sigma(fit)
@@ -245,6 +245,8 @@ run_posthoc_emmeans_aperiodic <- function(ap_df, contrasts, dv_name, omnibus_df,
           dv = dv_name,
           roi = roi_name,
           estimate = con_df$estimate[i],
+          estimate_lcl = con_df$lower.CL[i],
+          estimate_ucl = con_df$upper.CL[i],
           SE = con_df$SE[i],
           df = con_df$df[i],
           t_ratio = con_df$t.ratio[i],
@@ -253,6 +255,8 @@ run_posthoc_emmeans_aperiodic <- function(ap_df, contrasts, dv_name, omnibus_df,
           emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
           emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
           hedges_g = hg,
+          hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
+          hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
           significant = con_df$q_value[i] < 0.05,
           stringsAsFactors = FALSE
         )
@@ -402,7 +406,7 @@ run_posthoc_emmeans_region_aperiodic <- function(ap_df, contrasts, roi_categorie
       fit <- lmer(dv ~ group * region + (1 | subject), data = cdata)
 
       emm <- emmeans(fit, pairwise ~ group | region)
-      con_df <- as.data.frame(emm$contrasts)
+      con_df <- as.data.frame(summary(emm$contrasts, infer = c(TRUE, TRUE)))
       emm_df <- as.data.frame(emm$emmeans)
 
       resid_sd <- sigma(fit)
@@ -420,6 +424,8 @@ run_posthoc_emmeans_region_aperiodic <- function(ap_df, contrasts, roi_categorie
           dv = dv_name,
           region = region_name,
           estimate = con_df$estimate[i],
+          estimate_lcl = con_df$lower.CL[i],
+          estimate_ucl = con_df$upper.CL[i],
           SE = con_df$SE[i],
           df = con_df$df[i],
           t_ratio = con_df$t.ratio[i],
@@ -428,6 +434,8 @@ run_posthoc_emmeans_region_aperiodic <- function(ap_df, contrasts, roi_categorie
           emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
           emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
           hedges_g = hg,
+          hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
+          hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
           significant = con_df$q_value[i] < 0.05,
           stringsAsFactors = FALSE
         )

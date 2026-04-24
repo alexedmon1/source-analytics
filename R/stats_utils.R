@@ -591,7 +591,7 @@ run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
       fit <- lmer(as.formula(formula_str), data = cdata)
 
       emm <- emmeans(fit, pairwise ~ group)
-      con_df <- as.data.frame(emm$contrasts)
+      con_df <- as.data.frame(summary(emm$contrasts, infer = c(TRUE, TRUE)))
 
       resid_sd <- sigma(fit)
       hg <- con_df$estimate[1] / resid_sd
@@ -603,11 +603,15 @@ run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
         group_a = ga,
         group_b = gb,
         estimate = con_df$estimate[1],
+        estimate_lcl = con_df$lower.CL[1],
+        estimate_ucl = con_df$upper.CL[1],
         SE = con_df$SE[1],
         df = con_df$df[1],
         t_ratio = con_df$t.ratio[1],
         p_value = con_df$p.value[1],
         hedges_g = hg,
+        hedges_g_lcl = con_df$lower.CL[1] / resid_sd,
+        hedges_g_ucl = con_df$upper.CL[1] / resid_sd,
         stringsAsFactors = FALSE
       )
     }, warning = function(w) {
