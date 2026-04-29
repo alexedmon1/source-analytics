@@ -1,10 +1,13 @@
 """Mouse brain visualization with ROIs colored by effect size.
 
-Three entry points:
-- ``plot_brain_roi_mosaic``: 2D atlas slice mosaic (coronal, axial, sagittal)
-  with anatomy background.  Publication-ready; no 3D dependencies.
+Entry points:
+- ``plot_effect_size_mosaic``: compact 1-or-2 row mosaic (all ROIs; plus an
+  FDR-thresholded row when any survive).  Preferred for publication.
 - ``render_posthoc_mosaics``: batch helper — reads a posthoc CSV, groups by
-  facet columns, and calls ``plot_brain_roi_mosaic`` for every group.
+  facet columns, and calls ``plot_effect_size_mosaic`` for every group.
+- ``plot_significance_mosaic``: compact mosaic colored by 1 − p.
+- ``plot_brain_roi_mosaic``: 3×3 slice mosaic with anatomy background (legacy;
+  used when an already-aggregated region→value dict is all that's available).
 - ``plot_brain_roi``: 3D rendered views (dorsal, lateral, posterior) using PyVista.
 
 Requires: nibabel, matplotlib.  PyVista needed only for ``plot_brain_roi``.
@@ -663,6 +666,30 @@ def plot_effect_size_mosaic(
 # Batch helper — read posthoc CSV → one mosaic per facet group
 # ---------------------------------------------------------------------------
 
+def _expand_regions_to_rois(
+    df: pd.DataFrame,
+    region_col: str,
+    roi_categories: dict[str, list[str]],
+) -> pd.DataFrame:
+    """Duplicate region-level rows into one row per member ROI.
+
+    Region-level posthoc CSVs (e.g. PAC) have one row per anatomical group.
+    ``plot_effect_size_mosaic`` needs atlas ROI names to color individual
+    labels, so each region row is replicated across its member ROIs with
+    the effect size and p-value carried through unchanged.
+    """
+    rows = []
+    for _, row in df.iterrows():
+        member_rois = roi_categories.get(row[region_col], [])
+        for roi in member_rois:
+            new_row = row.copy()
+            new_row["roi"] = roi
+            rows.append(new_row)
+    if not rows:
+        return df.assign(roi=df[region_col])
+    return pd.DataFrame(rows).reset_index(drop=True)
+
+
 def render_posthoc_mosaics(
     posthoc_csv: Path,
     roi_categories: dict[str, list[str]],
@@ -671,34 +698,38 @@ def render_posthoc_mosaics(
     analysis_name: str = "psd",
     effect_col: str = "hedges_g",
     roi_col: str = "roi",
+    p_col: str = "p_value",
     facet_cols: list[str] | None = None,
     colorbar_label: str = "Hedges' g",
+    alpha: float = 0.05,
 ) -> list[Path]:
-    """Render brain ROI mosaics from a posthoc effect-size CSV.
+    """Render effect-size brain mosaics from a posthoc CSV.
 
-    For each unique combination of *facet_cols* the function builds a
-    ``{roi: effect_size}`` dict and delegates to :func:`plot_brain_roi_mosaic`
-    using the analysis-specific diverging colormap.
+    For each unique combination of *facet_cols* the function delegates to
+    :func:`plot_effect_size_mosaic`, producing a compact 1-or-2 row mosaic
+    (all ROIs, plus an FDR-thresholded row when any survive *alpha*).
 
     Parameters
     ----------
     posthoc_csv : Path
-        CSV with at least *roi_col*, *effect_col*, and any *facet_cols*.
+        CSV with at least *roi_col*, *effect_col*, *p_col*, and any *facet_cols*.
     roi_categories : dict
-        Region name → list of ROI abbreviations (same as the study config).
+        Region name → list of ROI abbreviations. Used only when *roi_col*
+        holds region names rather than atlas ROI names (e.g. PAC); rows are
+        expanded so each member ROI is colored with the region's effect.
     output_dir : Path
         Directory for output PNGs.
     analysis_name : str
         Key into ``ANALYSIS_CMAPS`` (e.g. ``"psd"``, ``"aperiodic"``, ``"pac"``).
-    effect_col : str
-        Column containing the scalar to color-map (default ``"hedges_g"``).
-    roi_col : str
-        Column identifying individual ROIs or regions.
+        A leading ``"roi_"`` prefix is stripped for lookup.
+    effect_col, roi_col, p_col : str
+        Columns for effect size, ROI identifier, and uncorrected p-values.
     facet_cols : list[str] | None
         Columns whose unique combinations define separate mosaics.
-        If *None*, a single mosaic is rendered for the whole CSV.
     colorbar_label : str
         Label for the mosaic colorbar.
+    alpha : float
+        FDR threshold used to build the second row.
 
     Returns
     -------
@@ -711,22 +742,37 @@ def render_posthoc_mosaics(
         return []
 
     df = pd.read_csv(posthoc_csv)
-    if df.empty or effect_col not in df.columns or roi_col not in df.columns:
-        logger.warning("Posthoc CSV empty or missing columns — skipping mosaics")
+    required = {roi_col, effect_col, p_col}
+    if df.empty or not required.issubset(df.columns):
+        logger.warning(
+            "Posthoc CSV empty or missing required columns %s — skipping mosaics",
+            required - set(df.columns),
+        )
         return []
 
     if facet_cols is None:
         facet_cols = []
-
-    # Validate facet cols exist
     facet_cols = [c for c in facet_cols if c in df.columns]
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cmap_name = get_diverging_cmap_name(analysis_name)
-    saved: list[Path] = []
+    cmap_key = analysis_name[4:] if analysis_name.startswith("roi_") else analysis_name
+    cmap_name = get_diverging_cmap_name(cmap_key)
 
+    # Region-level CSV? The roi_col values are region names (keys of
+    # roi_categories) rather than atlas ROI names — expand to ROI-level
+    # so each atlas label can be colored.
+    is_region_level = bool(
+        set(df[roi_col].astype(str).unique()) & set(roi_categories.keys())
+    )
+    if is_region_level:
+        df = _expand_regions_to_rois(df, roi_col, roi_categories)
+        plot_roi_col = "roi"
+    else:
+        plot_roi_col = roi_col
+
+    saved: list[Path] = []
     if facet_cols:
         groups = df.groupby(facet_cols)
     else:
@@ -735,54 +781,32 @@ def render_posthoc_mosaics(
     for group_key, group_df in groups:
         if not isinstance(group_key, tuple):
             group_key = (group_key,)
-
-        # Build {roi: effect} dict — average if duplicates
-        roi_effects = (
-            group_df.groupby(roi_col)[effect_col]
-            .mean()
-            .to_dict()
-        )
-        if not roi_effects:
+        if group_df.empty:
             continue
 
-        # Map ROIs to regions: roi_categories maps region → [roi_abbrevs],
-        # but posthoc CSV may use region names directly (for region-level data)
-        # or ROI names. Try both approaches.
-        region_values: dict[str, float] = {}
-        for region, roi_names in roi_categories.items():
-            # Check if ROI names from the CSV match region names (region-level data)
-            if region in roi_effects:
-                region_values[region] = roi_effects[region]
-            else:
-                # Check for individual ROI matches
-                vals = [roi_effects[r] for r in roi_names if r in roi_effects]
-                if vals:
-                    region_values[region] = float(np.mean(vals))
-
-        if not region_values:
-            continue
-
-        # Build filename from facet values
         tag = "_".join(str(v).replace(" ", "_").replace("/", "-") for v in group_key)
-        fname = f"brain_roi_{tag}.png"
-        out_path = output_dir / fname
+        out_path = output_dir / f"effect_size_{tag}.png"
 
-        # Title from facet values
         if facet_cols:
-            title_parts = [f"{c}: {v}" for c, v in zip(facet_cols, group_key)]
-            title = " | ".join(title_parts)
+            title = " | ".join(str(v) for v in group_key)
         else:
             title = analysis_name.upper()
 
-        plot_brain_roi_mosaic(
-            region_values,
-            roi_categories,
-            out_path,
-            title=title,
-            cmap_name=cmap_name,
-            colorbar_label=colorbar_label,
-        )
-        saved.append(out_path)
+        try:
+            plot_effect_size_mosaic(
+                group_df,
+                out_path,
+                title=title,
+                roi_col=plot_roi_col,
+                effect_col=effect_col,
+                p_col=p_col,
+                alpha=alpha,
+                cmap_name=cmap_name,
+                colorbar_label=colorbar_label,
+            )
+            saved.append(out_path)
+        except Exception as exc:
+            logger.warning("Failed to render mosaic for %s: %s", tag, exc)
 
     logger.info("Rendered %d brain mosaics in %s", len(saved), output_dir)
     return saved

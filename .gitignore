@@ -6,3 +6,6 @@ __pycache__/
 dist/
 build/
 *.egg
+
+# stray run logs at repo root
+*.log

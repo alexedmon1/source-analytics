@@ -277,7 +277,7 @@ class VertexSpatialAnalysis(BaseAnalysis):
         logger.info("Calling R: %s", " ".join(cmd))
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=1200,  # 20 min for complex models
+                cmd, capture_output=True, text=True, timeout=7200,  # 2 hr for large multi-group studies
             )
             if result.stdout:
                 for line in result.stdout.strip().split("\n"):
