@@ -44,6 +44,23 @@ def _run_single(config: StudyConfig, analysis_name: str, steps: set[str] | None 
     print(f"\nDone. Output: {config.output_dir / analysis_name}")
 
 
+def _check_output_clean(out_dir, analysis_name, *, strict, force):
+    """Enforce --strict-output: error if `out_dir / analysis_name` exists.
+
+    --force overrides (re-process anyway).
+    """
+    if not strict or force:
+        return
+    target = out_dir / analysis_name
+    if target.exists() and any(target.iterdir()):
+        print(
+            f"ERROR: --strict-output set and analysis output already exists: {target}",
+            file=sys.stderr,
+        )
+        print("Pass --force to overwrite, or remove the directory first.", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_run(args):
     """Run an analysis module."""
     config = StudyConfig.from_yaml(args.study)
@@ -58,12 +75,16 @@ def cmd_run(args):
             print(f"Valid steps: {', '.join(sorted(VALID_STEPS))}")
             sys.exit(1)
 
+    strict = getattr(args, "strict_output", False)
+    force = getattr(args, "force", False)
+
     if config.has_paradigms:
         # Multi-paradigm config
         if args.paradigm:
             if args.analysis:
                 # Scope to one paradigm + one analysis
                 aconfig = config.for_paradigm_analysis(args.paradigm, args.analysis)
+                _check_output_clean(aconfig.output_dir, args.analysis, strict=strict, force=force)
                 _run_single(aconfig, args.analysis, steps=steps)
             else:
                 # Run all analyses listed for this paradigm
@@ -76,6 +97,7 @@ def cmd_run(args):
                     print(f"Paradigm: {args.paradigm}  |  Analysis: {analysis_name}")
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(args.paradigm, analysis_name)
+                    _check_output_clean(aconfig.output_dir, analysis_name, strict=strict, force=force)
                     _run_single(aconfig, analysis_name, steps=steps)
                     print()
         else:
@@ -94,6 +116,7 @@ def cmd_run(args):
                     print(f"Paradigm: {pname}  |  Analysis: {analysis_name}")
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(pname, analysis_name)
+                    _check_output_clean(aconfig.output_dir, analysis_name, strict=strict, force=force)
                     _run_single(aconfig, analysis_name, steps=steps)
                     print()
     else:
@@ -101,6 +124,7 @@ def cmd_run(args):
         if not args.analysis:
             print("ERROR: --analysis is required for single-paradigm configs.")
             sys.exit(1)
+        _check_output_clean(config.output_dir, args.analysis, strict=strict, force=force)
         analyzer = StudyAnalyzer(config)
         _print_study_summary(config, analyzer)
         analyzer.run_analysis(args.analysis, steps=steps)
@@ -480,6 +504,17 @@ def main():
         "--steps",
         help="Comma-separated lifecycle steps to run (default: all). "
         f"Valid: {', '.join(sorted(VALID_STEPS))}",
+    )
+    p_run.add_argument(
+        "--strict-output",
+        action="store_true",
+        help="Error if the analysis output directory already exists; "
+             "--force overrides",
+    )
+    p_run.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite the analysis output directory if it already exists",
     )
     p_run.set_defaults(func=cmd_run)
 
