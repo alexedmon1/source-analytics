@@ -651,6 +651,8 @@ def plot_effect_size_mosaic(
     roi_col: str = "roi",
     effect_col: str = "hedges_g",
     p_col: str = "p_value",
+    q_col: str | None = None,
+    correction_label: str = "FDR",
     alpha: float = 0.05,
     cmap_name: str = "RdBu_r",
     colorbar_label: str | None = None,
@@ -661,13 +663,20 @@ def plot_effect_size_mosaic(
     """Plot an effect-size mosaic with diverging colormap.
 
     Top row: all ROIs colored by Hedges' g.
-    Bottom row (if any survive): FDR-corrected ROIs only.
+    Bottom row (if any survive): post-hoc-corrected ROIs only, thresholded
+    at ``q < alpha``.
+
+    By default the bottom row uses BH-FDR computed from *p_col* internally
+    (legacy behavior). Pass ``q_col`` to use an already-corrected q-value
+    column from the CSV directly — useful when the study uses a different
+    post-hoc correction (e.g., Holm step-down within a (band × power-type)
+    cell, per the analysis pipeline) and that column is already populated.
 
     Parameters
     ----------
     df : DataFrame
-        ROI-level posthoc results.  Must contain *roi_col*, *effect_col*,
-        and *p_col*.
+        ROI-level posthoc results. Must contain *roi_col*, *effect_col*,
+        *p_col*, and optionally *q_col*.
     output_path : str or Path
         Output PNG path.
     title : str
@@ -677,13 +686,20 @@ def plot_effect_size_mosaic(
     effect_col : str
         Column with effect sizes (default ``"hedges_g"``).
     p_col : str
-        Column with uncorrected p-values (for FDR thresholding).
+        Column with uncorrected p-values. Used only when *q_col* is None
+        (legacy BH-FDR fallback).
+    q_col : str, optional
+        Column with pre-computed q-values (e.g., Holm-corrected). When
+        provided, the bottom-row threshold is applied to this column
+        directly and ``p_col`` is ignored for thresholding.
+    correction_label : str
+        Label inserted into the bottom-row label, e.g., "FDR" or "Holm".
     alpha : float
-        Significance threshold for the FDR-corrected row.
+        Significance threshold for the bottom-row column.
     cmap_name : str
         Diverging colormap name.
     colorbar_label : str, optional
-        Custom colorbar label.  If *None*, defaults to
+        Custom colorbar label. If *None*, defaults to
         ``"Hedges' g  (blue: KO < WT    red: KO > WT)"``.
     atlas_name : str
         Atlas to load (default ``"allen"``).
@@ -691,7 +707,12 @@ def plot_effect_size_mosaic(
     label_data, affine, roi_mapping, anat_norm = _load_atlas_and_anat(atlas_name)
 
     df = df.copy()
-    df["_q_fdr"] = fdr_bh(df[p_col].values)
+    if q_col is not None:
+        if q_col not in df.columns:
+            raise ValueError(f"q_col={q_col!r} not in DataFrame columns: {list(df.columns)}")
+        df["_q_thresh"] = df[q_col]
+    else:
+        df["_q_thresh"] = fdr_bh(df[p_col].values)
 
     g_abs_max = max(abs(df[effect_col].min()), abs(df[effect_col].max()), 0.5)
     vmin, vmax = -g_abs_max, g_abs_max
@@ -701,7 +722,7 @@ def plot_effect_size_mosaic(
     all_values = dict(zip(df[roi_col], df[effect_col]))
     label_vals_all = _build_roi_label_to_value(all_values, roi_mapping)
 
-    sig = df[df["_q_fdr"] < alpha]
+    sig = df[df["_q_thresh"] < alpha]
     sig_values = dict(zip(sig[roi_col], sig[effect_col]))
     label_vals_sig = _build_roi_label_to_value(sig_values, roi_mapping)
     n_sig = len(sig_values)
@@ -709,7 +730,7 @@ def plot_effect_size_mosaic(
     row_configs = [(label_vals_all, "Hedges' g (all ROIs)")]
     if n_sig > 0:
         row_configs.append(
-            (label_vals_sig, f"Hedges' g (FDR q < {alpha}, n={n_sig})")
+            (label_vals_sig, f"Hedges' g ({correction_label} q < {alpha}, n={n_sig})")
         )
 
     return _compact_mosaic(
