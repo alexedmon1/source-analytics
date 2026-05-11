@@ -102,7 +102,7 @@ def _roi_boundaries(label_slice: np.ndarray) -> np.ndarray:
     """Return a boolean mask that is True on ROI boundary pixels.
 
     Checks two directions (right and down) so each border is drawn once,
-    producing a 1-pixel-wide line.
+    producing a 1-pixel-wide line. Used by the legacy pixel-boundary path.
     """
     h, w = label_slice.shape
     boundary = np.zeros((h, w), dtype=bool)
@@ -113,6 +113,51 @@ def _roi_boundaries(label_slice: np.ndarray) -> np.ndarray:
     either_d = (label_slice[:-1, :] > 0) | (label_slice[1:, :] > 0)
     boundary[:-1, :] |= (diff_d & either_d)
     return boundary
+
+
+def _draw_roi_contours(
+    ax,
+    label_slice: np.ndarray,
+    extent: list[float],
+    color: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    alpha: float = 0.4,
+    linewidth: float = 0.6,
+) -> None:
+    """Draw smooth, anti-aliased ROI boundaries on `ax` using sub-pixel contours.
+
+    Uses skimage.measure.find_contours to extract polylines at the 0.5
+    level set of each ROI's boolean mask, then draws each polyline with
+    matplotlib's default anti-aliasing. Produces clean curves that follow
+    the underlying anatomy rather than the jagged voxel-grid edges of
+    the legacy pixel-boundary path.
+
+    Silently no-ops if scikit-image is not installed.
+    """
+    try:
+        from skimage import measure
+    except ImportError:
+        return
+    h, w = label_slice.shape
+    extent_w = extent[1] - extent[0]
+    extent_h = extent[3] - extent[2]
+    # find_contours returns (row, col) coordinates in image-array space.
+    # Convert to data coordinates using the imshow `extent`.
+    unique_labels = np.unique(label_slice)
+    unique_labels = unique_labels[unique_labels > 0]
+    for lid in unique_labels:
+        mask = (label_slice == lid).astype(float)
+        contours = measure.find_contours(mask, 0.5)
+        for contour in contours:
+            ys = extent[2] + (contour[:, 0] / max(h - 1, 1)) * extent_h
+            xs = extent[0] + (contour[:, 1] / max(w - 1, 1)) * extent_w
+            ax.plot(
+                xs, ys,
+                color=color, alpha=alpha,
+                linewidth=linewidth,
+                antialiased=True,
+                solid_capstyle="round",
+                solid_joinstyle="round",
+            )
 
 
 def _region_to_label_ids(
@@ -418,7 +463,9 @@ def _compact_mosaic(
 
     n_rows = len(row_configs)
     height_ratios = [1] * n_rows + [0.05]
-    fig_height = 5.0 + 3.5 * (n_rows - 1)
+    # Tightened from (5.0 + 3.5*(n-1)) and width 13 -> 11 to reduce whitespace.
+    fig_height = 4.0 + 2.8 * (n_rows - 1)
+    fig_width = 11.0
 
     def _vox_to_mm(axis, idx):
         return affine[axis, axis] * idx + affine[axis, 3]
@@ -452,19 +499,23 @@ def _compact_mosaic(
          lambda xi: f"X = {_vox_to_mm(0, xi):.1f} mm"),
     ]
 
-    fig = plt.figure(figsize=(13, fig_height), facecolor="white")
+    fig = plt.figure(figsize=(fig_width, fig_height), facecolor="white")
+    # Tighter spacing: wspace/hspace minimized; top/bottom margins reduced
+    # to claw back vertical whitespace around the panels and colorbar.
     gs = gridspec.GridSpec(
         n_rows + 1, 3, height_ratios=height_ratios,
-        hspace=0.08, wspace=0.04,
-        left=0.09, right=0.98,
-        top=0.88 if n_rows > 1 else 0.82,
-        bottom=0.07 if n_rows > 1 else 0.10,
+        hspace=0.04, wspace=0.02,
+        left=0.07, right=0.99,
+        top=0.92 if n_rows > 1 else 0.88,
+        bottom=0.05 if n_rows > 1 else 0.08,
     )
 
-    fig.suptitle(title, fontsize=14, fontweight="bold")
+    fig.suptitle(title, fontsize=14, fontweight="bold", y=0.98)
 
+    # Suppress baked-in pixel boundaries; we'll draw smooth contour
+    # boundaries on each axis after imshow.
     slice_kw = dict(cmap=cmap, norm=norm, vmin=vmin, vmax=vmax,
-                    roi_opacity=roi_opacity, boundary_opacity=boundary_opacity)
+                    roi_opacity=roi_opacity, boundary_opacity=0.0)
     axes_grid = []
 
     for row_idx, (label_vals, row_label) in enumerate(row_configs):
@@ -479,13 +530,20 @@ def _compact_mosaic(
             ext = extent_fn()
             ax.imshow(rgb, extent=ext, aspect="equal", interpolation="nearest",
                       origin="lower")
+            # Smooth contour-based ROI outlines (sub-pixel, anti-aliased).
+            _draw_roi_contours(
+                ax, lbl_slice, ext,
+                color=(0.0, 0.0, 0.0),
+                alpha=boundary_opacity if boundary_opacity > 0 else 0.4,
+                linewidth=0.55,
+            )
             ax.set_xlim(*xlim)
             ax.set_ylim(*ylim)
             ax.axis("off")
             _add_direction_labels(ax, *dirs)
             if row_idx == 0:
                 ax.set_title(f"{view_name}  {coord_label(slice_idx)}",
-                             fontsize=10, pad=3)
+                             fontsize=10, pad=2)
         axes_grid.append(row_axes)
 
     for row_idx, (_, row_label) in enumerate(row_configs):
