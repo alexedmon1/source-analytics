@@ -72,7 +72,7 @@ class SubjectLoader:
         is present.
         """
         # Primary: read from .set file (scipy only, no MNE needed)
-        for set_name in ["roi_timeseries_magnitude.set", "roi_timeseries_signed.set"]:
+        for set_name in ["roi_timeseries_signed.set", "roi_timeseries_magnitude.set"]:
             set_path = self.data_dir / set_name
             if set_path.exists():
                 try:
@@ -226,22 +226,47 @@ class SubjectLoader:
         return result
 
     def load_source_timecourses(self, magnitude: bool = False) -> np.ndarray:
-        """Load full source time courses from step5_stc.pkl.
+        """Load full source time courses.
+
+        Reads ``step5_stc_signed.pkl`` by default (phase-preserving signed
+        amplitudes) or ``step5_stc_magnitude.pkl`` when ``magnitude=True``.
+
+        Falls back to legacy ``step5_stc.pkl`` ONLY when ``magnitude=True``
+        is explicitly requested — historical pipeline output wrote the
+        unsuffixed file as magnitude, so loading it as "signed" would
+        silently return rectified data and corrupt phase-based analyses.
 
         Parameters
         ----------
         magnitude : bool
-            If True, return absolute values. If False (default), return
-            signed source amplitudes.
+            If True, return rectified (absolute) source amplitudes.
+            If False (default), return signed source amplitudes.
 
         Returns
         -------
         ndarray, shape (n_sources, n_times)
             Source-space time courses.
+
+        Raises
+        ------
+        FileNotFoundError
+            If neither ``step5_stc_{signed,magnitude}.pkl`` exists. Re-run
+            source-localization to produce the variant-suffixed outputs.
         """
-        stc = self._load_pkl("step5_stc.pkl")
+        suffix = "magnitude" if magnitude else "signed"
+        primary = f"step5_stc_{suffix}.pkl"
+        if (self.data_dir / primary).exists():
+            stc = self._load_pkl(primary)
+        elif magnitude and (self.data_dir / "step5_stc.pkl").exists():
+            # Legacy pipeline output: step5_stc.pkl was saved as a magnitude
+            # duplicate. Safe to read only when magnitude is requested.
+            stc = self._load_pkl("step5_stc.pkl")
+        else:
+            raise FileNotFoundError(
+                f"{primary} not found in {self.data_dir}. "
+                f"Re-run source-localization to produce signed/magnitude "
+                f"variants (legacy step5_stc.pkl is magnitude-only and "
+                f"cannot be used for signed analyses)."
+            )
         # MNE SourceEstimate stores data as (n_sources, n_times)
-        data = stc.data if hasattr(stc, "data") else np.asarray(stc)
-        if magnitude:
-            data = np.abs(data)
-        return data
+        return stc.data if hasattr(stc, "data") else np.asarray(stc)

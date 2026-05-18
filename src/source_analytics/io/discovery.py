@@ -57,12 +57,20 @@ def _check_data_dir(
         has_roi = any(
             (data_dir / f).exists()
             for f in [
+                "step6_roi_timeseries_signed.pkl",
                 "step6_roi_timeseries_magnitude.pkl",
-                "step6_roi_timeseries.pkl",
+                "step6_roi_timeseries.pkl",  # legacy (magnitude)
             ]
         )
         has_stc = (
-            (data_dir / "step5_stc.pkl").exists()
+            any(
+                (data_dir / f).exists()
+                for f in [
+                    "step5_stc_signed.pkl",
+                    "step5_stc_magnitude.pkl",
+                    "step5_stc.pkl",  # legacy (magnitude)
+                ]
+            )
             and (data_dir / "step3_source_coords_mm.npy").exists()
         )
         if not has_roi and not has_stc:
@@ -92,7 +100,8 @@ def discover_subjects(
     required_files : list[str], optional
         Files that must exist in the data directory for a subject to be
         included.  When *None* (default), checks for ROI timeseries files
-        (``step6_roi_timeseries_magnitude.pkl`` or
+        (``step6_roi_timeseries_signed.pkl``,
+        ``step6_roi_timeseries_magnitude.pkl``, or legacy
         ``step6_roi_timeseries.pkl``).  When provided, *all* listed files
         must be present.
     data_subdir : str, default ``"data"``
