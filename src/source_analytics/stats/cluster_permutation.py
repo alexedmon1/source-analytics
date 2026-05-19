@@ -68,7 +68,10 @@ def hedges_g(data_a: np.ndarray, data_b: np.ndarray) -> np.ndarray:
     var_b = data_b.var(axis=0, ddof=1)
 
     pooled_std = np.sqrt(((n_a - 1) * var_a + (n_b - 1) * var_b) / (n_a + n_b - 2))
-    pooled_std = np.maximum(pooled_std, np.finfo(float).eps)
+    # Substitute placeholder only for non-positive pooled SDs (degenerate
+    # constant-data case). np.maximum(..., eps) would silently floor small but
+    # legitimate SDs, deflating Hedges' g — visible in the slope_g=0/t=4 mismatch.
+    pooled_std = np.where(pooled_std > 0, pooled_std, np.finfo(float).tiny)
 
     d = (mean_a - mean_b) / pooled_std
 

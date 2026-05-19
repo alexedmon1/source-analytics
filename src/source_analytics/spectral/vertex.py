@@ -105,7 +105,13 @@ def extract_band_power_vertices(
     else:
         total_power = trapezoid(psd, freqs, axis=-1)
 
-    total_power = np.maximum(total_power, np.finfo(float).eps)
+    # Substitute a non-zero placeholder only where total is non-positive, to
+    # avoid division by zero. Using np.maximum(..., eps) here would silently
+    # floor every legitimately small total power (source-localized PSDs can
+    # integrate to values well below machine epsilon ~2e-16), corrupting the
+    # relative metric. See ROI band_power.extract_band_power for the scalar
+    # equivalent of this guard.
+    total_power = np.where(total_power > 0, total_power, np.finfo(float).tiny)
 
     result = {}
     for band_name, (fmin, fmax) in bands.items():
@@ -163,7 +169,9 @@ def compute_falff(
 
     gamma_power = trapezoid(psd[:, gamma_mask], freqs[gamma_mask], axis=-1)
     total_power = trapezoid(psd[:, total_mask], freqs[total_mask], axis=-1)
-    total_power = np.maximum(total_power, np.finfo(float).eps)
+    # See extract_band_power_vertices: substitute only for non-positive totals
+    # to avoid division by zero without flooring legitimately small denominators.
+    total_power = np.where(total_power > 0, total_power, np.finfo(float).tiny)
 
     return gamma_power / total_power
 
@@ -190,7 +198,12 @@ def compute_spectral_slope(
     """
     mask = (freqs >= fit_range[0]) & (freqs <= fit_range[1])
     log_f = np.log10(freqs[mask])
-    log_psd = np.log10(np.maximum(psd[:, mask], np.finfo(float).eps))
+    # Floor only non-positive PSDs (which shouldn't occur for Welch output but
+    # are guarded against -inf). Source-localized PSD values commonly fall
+    # below np.finfo(float).eps (~2e-16); using eps as the floor would
+    # collapse the log spectrum onto a constant and zero out every slope.
+    safe_psd = np.where(psd[:, mask] > 0, psd[:, mask], np.finfo(float).tiny)
+    log_psd = np.log10(safe_psd)
 
     # Vectorized least-squares: slope = cov(x, y) / var(x) for each vertex
     n = log_f.shape[0]

@@ -209,7 +209,10 @@ def load_roi_categories(atlas_dir: str | Path) -> dict[str, list[str]]:
     if not categories_path.exists():
         return {}
     with open(categories_path) as f:
-        return yaml.safe_load(f) or {}
+        raw = yaml.safe_load(f) or {}
+    # Drop reserved metadata keys (e.g., backward-compat alias maps) so they
+    # are not mistaken for an extra category by downstream consumers.
+    return {k: v for k, v in raw.items() if k != "deprecated_aliases"}
 
 
 def load_vertex_roi_labels(

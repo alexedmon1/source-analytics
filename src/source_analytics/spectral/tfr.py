@@ -247,7 +247,10 @@ def compute_ersp(
     bl_end = min(n_times, bl_end)
 
     baseline_power = np.mean(avg_power[:, bl_start:bl_end], axis=1, keepdims=True)
-    baseline_power = np.maximum(baseline_power, np.finfo(float).eps)
+    # Guard the denominator without flooring legitimate small baselines.
+    baseline_power = np.where(
+        baseline_power > 0, baseline_power, np.finfo(float).tiny
+    )
     ersp = 10.0 * np.log10(avg_power / baseline_power)
     return ersp
 

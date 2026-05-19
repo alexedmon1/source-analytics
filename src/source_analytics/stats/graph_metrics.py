@@ -465,7 +465,8 @@ def _vectorized_welch_t(A: np.ndarray, B: np.ndarray) -> np.ndarray:
     var_b = B.var(axis=0, ddof=1)
 
     se = np.sqrt(var_a / n_a + var_b / n_b)
-    se = np.maximum(se, np.finfo(float).eps)
+    # Guard against div-by-zero without flooring legitimate small SEs.
+    se = np.where(se > 0, se, np.finfo(float).tiny)
 
     t_matrix = (mean_a - mean_b) / se
     # Only keep upper triangle (symmetric)
