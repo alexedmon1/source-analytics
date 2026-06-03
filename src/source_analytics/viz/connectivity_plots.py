@@ -237,7 +237,7 @@ def plot_significance_circos(
 
     n_sig = int(sig_mask[np.triu_indices_from(sig_mask, k=1)].sum())
 
-    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    fig, ax = plt.subplots(1, 1, figsize=(7.5, 7.5))
     plot_circos(
         diff, roi_labels, region_names, region_sizes, ax,
         cmap="RdBu_r",
@@ -371,7 +371,7 @@ def plot_circos(
     r_region_outer = 1.0  # outer region band
 
     # Tighter limits when ROI labels are hidden
-    lim = 1.7 if show_roi_labels else 1.35
+    lim = 1.42 if show_roi_labels else 1.2
     ax.set_xlim(-lim, lim)
     ax.set_ylim(-lim, lim)
     ax.set_aspect("equal")
@@ -392,23 +392,20 @@ def plot_circos(
         )
         ax.add_patch(wedge)
 
-        # Region label at midpoint of region arc
+        # Region label: tangential, forming a ring just outside the node band
+        # (between the colored ROI nodes and the per-ROI labels).
         mid_angle = np.radians((theta1 + theta2) / 2)
-        label_r = 1.12 if show_roi_labels else 1.08
-        label_fs = 12 if show_roi_labels else 12
-        lx = label_r * np.cos(mid_angle)
-        ly = label_r * np.sin(mid_angle)
-        rotation = np.degrees(mid_angle)
-        ha = "left"
-        if 90 < rotation % 360 < 270:
-            rotation += 180
-            ha = "right"
+        r_region_label = r_region_outer + 0.055
+        rot = (np.degrees(mid_angle) - 90.0) % 360.0
+        if 90.0 < rot < 270.0:
+            rot = (rot + 180.0) % 360.0
         ax.text(
-            lx, ly, region_names[ri],
-            ha=ha, va="center",
-            fontsize=label_fs, fontweight="bold",
-            rotation=rotation,
-            rotation_mode="anchor",
+            r_region_label * np.cos(mid_angle),
+            r_region_label * np.sin(mid_angle),
+            region_names[ri],
+            ha="center", va="center",
+            fontsize=8, fontweight="bold",
+            rotation=rot, rotation_mode="anchor",
             color=region_colors[ri],
         )
         roi_i += sz
@@ -428,11 +425,11 @@ def plot_circos(
         )
         ax.add_patch(wedge)
 
-        # ROI label (skip when show_roi_labels=False for cleaner output)
+        # ROI label, radial, just outside the region-name ring
         if show_roi_labels:
             mid_angle = np.radians((theta1 + theta2) / 2)
-            lx = 1.35 * np.cos(mid_angle)
-            ly = 1.35 * np.sin(mid_angle)
+            lx = 1.13 * np.cos(mid_angle)
+            ly = 1.13 * np.sin(mid_angle)
             rotation = np.degrees(mid_angle)
             ha = "left"
             if 90 < rotation % 360 < 270:
@@ -441,7 +438,7 @@ def plot_circos(
             ax.text(
                 lx, ly, short_labels[i],
                 ha=ha, va="center",
-                fontsize=8,
+                fontsize=7,
                 rotation=rotation,
                 rotation_mode="anchor",
                 color="0.2",
