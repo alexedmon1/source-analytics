@@ -67,12 +67,29 @@ secondary under its primary).
 
 ## Sequence / status
 
-1. [done] all-5-metrics config + roi_network re-run (verify output).
-2. [in progress] ANALYSIS_META in source-analytics core.
-3. [todo] lightbox reads ANALYSIS_META → manifest domain/supplements.
-4. [todo] lightbox nav + merged domain pages (secondaries nested).
-5. [todo] rebuild gallery; verify Connectivity = connectivity + network together,
-   Spectral = psd + aperiodic, etc.
+1. [done] all-5-metrics config + roi_network re-run. Output verified:
+   `roi_nbs_results.csv` 658 rows over all 5 metrics (aec, coherence, dwpli,
+   imag_coherence, pli), 40 FDR-significant components; `roi_network_stats.csv`
+   graph metrics likewise span all 5. (Config fix: `connectivity_metrics` must
+   live under `paradigms.resting.analyses.roi_network`, since the CLI reads the
+   per-analysis block via `for_paradigm_analysis`, not the top-level section.)
+2. [done] `domain` + `supplements` added to `ANALYSIS_METADATA` in `core.py`;
+   `analysis_meta()` accessor exposes it (canonical names only).
+3. [done] lightbox reads `analysis_meta()` from the SA venv (`builder._read_analysis_meta`)
+   → `manifest` attaches `meta {domain, supplements, description}` per analysis.
+4. [done] lightbox nav + merged domain pages: nav lists domains (not 12 flat
+   analyses); `renderDomain` shows one page per (paradigm × domain) with an
+   analysis pill bar, each secondary flagged "supplemental" and nested right
+   after its primary; pill content (Summary/Figures/Tables) fills lazily.
+5. [done] rebuild gallery; verify Connectivity = connectivity + network (+ TE)
+   together, Spectral = psd + aperiodic, etc.
+
+### vertex follow-up (deferred)
+`vertex_network` reads a single `metric` (default imag_coherence) and computes
+connectivity from the STC itself — it does NOT loop `connectivity_metrics` the
+way `roi_network` does. All-5-metrics at vertex level therefore needs a loop
+refactor of `vertex_network_analysis.py` plus an expensive vertex-resolution NBS
+run (5 metrics × 5000 perms). Not in the ROI-driven MS2 figures, so deferred.
 
 ## Verification
 

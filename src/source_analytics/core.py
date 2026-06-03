@@ -85,31 +85,49 @@ def resolve_analysis_name(name: str) -> str:
     return name
 
 
-# Metadata for grouping and display
+# Metadata for grouping and display.
+#   domain      = how analyses are grouped/listed (by the data they use)
+#   supplements = a SECONDARY analysis that can only run after the named primary
+#                 (it consumes the primary's output). Absent = primary.
 ANALYSIS_METADATA: dict[str, dict[str, str]] = {
-    "roi_psd":              {"category": "resting", "level": "roi",        "description": "PSD (power spectral density)"},
-    "roi_aperiodic":        {"category": "resting", "level": "roi",        "description": "1/f aperiodic decomposition"},
-    "roi_connectivity":     {"category": "resting", "level": "roi",        "description": "ROI pairwise connectivity"},
-    "roi_pac":              {"category": "resting", "level": "roi",        "description": "PAC (phase-amplitude coupling)"},
-    "roi_network":          {"category": "resting", "level": "roi",        "description": "ROI-level graph theory network metrics"},
-    "vertex_network":       {"category": "resting", "level": "vertex",     "description": "Vertex-level graph theory network metrics"},
-    "roi_transfer_entropy": {"category": "resting", "level": "roi",        "description": "Directed information flow"},
-    "vertex_mvpa":          {"category": "resting", "level": "vertex",     "description": "MVPA (SVM pattern classification)"},
-    "vertex_cluster":       {"category": "resting", "level": "vertex",     "description": "Vertex-level cluster permutation"},
-    "vertex_spatial":       {"category": "resting", "level": "vertex",     "description": "Spatial GLS (vertex-level generalized least squares)"},
-    "vertex_specparam":     {"category": "resting", "level": "vertex",     "description": "Vertex-level spectral parameterization"},
-    "vertex_connectivity":  {"category": "resting", "level": "vertex",     "description": "Vertex pairwise connectivity"},
-    "electrode_psd":        {"category": "resting", "level": "electrode",  "description": "Sensor-level PSD analysis"},
-    "electrode_aperiodic":  {"category": "resting", "level": "electrode",  "description": "Sensor-level aperiodic (1/f) analysis"},
-    "electrode_comparison": {"category": "resting", "level": "electrode",  "description": "Source vs electrode comparison"},
-    "roi_evoked":           {"category": "evoked",  "level": "roi",        "description": "ITC, ERSP, STP for trial-based paradigms"},
-    "electrode_evoked":     {"category": "evoked",  "level": "electrode",  "description": "Electrode-level ITC, ERSP, STP for trial-based paradigms"},
+    "roi_psd":              {"category": "resting", "level": "roi",        "domain": "Spectral",        "description": "PSD (power spectral density)"},
+    "roi_aperiodic":        {"category": "resting", "level": "roi",        "domain": "Spectral",        "description": "1/f aperiodic decomposition"},
+    "roi_connectivity":     {"category": "resting", "level": "roi",        "domain": "Connectivity",    "description": "ROI pairwise connectivity"},
+    "roi_pac":              {"category": "resting", "level": "roi",        "domain": "Cross-frequency", "description": "PAC (phase-amplitude coupling)"},
+    "roi_network":          {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level graph theory network metrics (NBS + graph)"},
+    "vertex_network":       {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level graph theory network metrics (NBS + graph)"},
+    "roi_transfer_entropy": {"category": "resting", "level": "roi",        "domain": "Connectivity",    "description": "Directed information flow (transfer entropy)"},
+    "vertex_mvpa":          {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "MVPA (SVM pattern classification)"},
+    "vertex_cluster":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Vertex-level cluster permutation"},
+    "vertex_spatial":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Spatial GLS (vertex-level generalized least squares)"},
+    "vertex_specparam":     {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Vertex-level spectral parameterization"},
+    "vertex_connectivity":  {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "description": "Vertex pairwise connectivity"},
+    "electrode_psd":        {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "description": "Sensor-level PSD analysis"},
+    "electrode_aperiodic":  {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "description": "Sensor-level aperiodic (1/f) analysis"},
+    "electrode_comparison": {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "supplements": "electrode_psd",       "description": "Source vs electrode comparison"},
+    "roi_evoked":           {"category": "evoked",  "level": "roi",        "domain": "Evoked",          "description": "ITC, ERSP, STP for trial-based paradigms"},
+    "electrode_evoked":     {"category": "evoked",  "level": "electrode",  "domain": "Evoked",          "description": "Electrode-level ITC, ERSP, STP for trial-based paradigms"},
 }
 
 # Add metadata entries for deprecated aliases (point to same metadata)
 for _old, _new in _DEPRECATED_NAMES.items():
     if _new in ANALYSIS_METADATA:
         ANALYSIS_METADATA[_old] = ANALYSIS_METADATA[_new]
+
+
+def analysis_meta(include_aliases: bool = False) -> dict[str, dict[str, str]]:
+    """Return a copy of the analysis metadata (domain / supplements / etc.).
+
+    Stable accessor for external tools (e.g. the gallery builder reads this via
+    the source-analytics interpreter to group analyses by domain and nest each
+    secondary under the primary it ``supplements``). Canonical names only unless
+    ``include_aliases`` is set.
+    """
+    return {
+        name: dict(meta)
+        for name, meta in ANALYSIS_METADATA.items()
+        if include_aliases or name not in _DEPRECATED_NAMES
+    }
 
 
 class StudyAnalyzer:
