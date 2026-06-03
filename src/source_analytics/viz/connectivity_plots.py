@@ -371,7 +371,7 @@ def plot_circos(
     r_region_outer = 1.0  # outer region band
 
     # Tighter limits when ROI labels are hidden
-    lim = 1.42 if show_roi_labels else 1.2
+    lim = 1.52 if show_roi_labels else 1.2
     ax.set_xlim(-lim, lim)
     ax.set_ylim(-lim, lim)
     ax.set_aspect("equal")
@@ -393,9 +393,11 @@ def plot_circos(
         ax.add_patch(wedge)
 
         # Region label: tangential, forming a ring just outside the node band
-        # (between the colored ROI nodes and the per-ROI labels).
+        # (between the colored ROI nodes and the per-ROI labels). Alternate the
+        # radius region-to-region so adjacent labels (esp. narrow 2-ROI regions)
+        # don't collide tangentially.
         mid_angle = np.radians((theta1 + theta2) / 2)
-        r_region_label = r_region_outer + 0.055
+        r_region_label = r_region_outer + (0.05 if ri % 2 == 0 else 0.155)
         rot = (np.degrees(mid_angle) - 90.0) % 360.0
         if 90.0 < rot < 270.0:
             rot = (rot + 180.0) % 360.0
@@ -425,11 +427,11 @@ def plot_circos(
         )
         ax.add_patch(wedge)
 
-        # ROI label, radial, just outside the region-name ring
+        # ROI label, radial, just outside the (staggered) region-name ring
         if show_roi_labels:
             mid_angle = np.radians((theta1 + theta2) / 2)
-            lx = 1.13 * np.cos(mid_angle)
-            ly = 1.13 * np.sin(mid_angle)
+            lx = 1.24 * np.cos(mid_angle)
+            ly = 1.24 * np.sin(mid_angle)
             rotation = np.degrees(mid_angle)
             ha = "left"
             if 90 < rotation % 360 < 270:
