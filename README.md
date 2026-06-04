@@ -1,12 +1,20 @@
 # source-analytics
 
-Statistical analysis toolkit for source-localized EEG data. Reads pipeline output from the [source_localization](https://github.com/alexedmon1/AlexProjects) package and runs group-level analyses with publication-quality statistics and figures.
+Statistical analysis toolkit for source-localized EEG data. Reads pipeline output from the [source-localization](../source-localization) package and runs group-level analyses with publication-quality statistics and figures. Its stat tables feed directly into [source-lightbox](../source-lightbox), which renders the gallery.
 
-13 analysis modules spanning spectral power, connectivity, cross-frequency coupling, graph theory, machine learning, and spatial modeling -- organized across three data levels:
+Analyses are organized along **two orthogonal axes** — see
+[Analyses, domains & run order](#analyses-domains--run-order) for the full map:
 
-- **ROI-level** (46 ROIs): ROI PSD, ROI aperiodic, ROI connectivity (6 metrics), ROI transfer entropy, ROI PAC
-- **Vertex-level** (154 vertices): vertex cluster spectral, vertex connectivity (FCD), vertex specparam, vertex MVPA, network (graph theory + NBS), vertex spatial
-- **Electrode-level** (validation): electrode PSD, electrode vs source comparison
+- **Level** — the data an analysis reads: **ROI** (32–46 atlas ROIs), **vertex**
+  (whole-brain source vertices), or **electrode** (scalp, for validation).
+- **Domain** — what it measures: **Spectral**, **Connectivity**,
+  **Cross-frequency**, **Sensor-level**.
+
+A few analyses are **supplementary** (secondary): they consume another analysis's
+output and therefore must run *after* it. The two graph-theory modules are the
+main case — `roi_network` needs `roi_connectivity`, `vertex_network` needs
+`vertex_connectivity`. The toolkit records this in `ANALYSIS_METADATA` (`core.py`)
+so both the run order and the gallery's grouping follow from it.
 
 **Python** handles orchestration, signal processing, and data I/O. **R** handles statistics (linear mixed models via lme4) and visualization (ggplot2). Vertex-level modules use Python for statistics (cluster permutation) and visualization (glass brain plots), with R for report generation.
 
@@ -38,57 +46,167 @@ install.packages(c(
 
 ## Usage
 
-```bash
-# Run PSD analysis
-source-analytics run --study /path/to/analysis.yaml --analysis roi_psd
+Everything runs through one CLI. Subcommands: `run`, `validate`, `list`,
+`figure`, `init`.
 
-# Validate study config and data discovery
-source-analytics validate --study /path/to/analysis.yaml
+```bash
+# One analysis. --paradigm selects the block under paradigms: in the config.
+source-analytics run --study study.yaml --paradigm resting --analysis roi_psd
+
+# Re-run an analysis whose output dir already exists
+source-analytics run --study study.yaml --paradigm resting --analysis roi_network --force
+
+# Re-run only some lifecycle steps (setup, process, aggregate, statistics, figures, summary)
+source-analytics run --study study.yaml --paradigm resting --analysis roi_psd --steps statistics,summary
+
+# Validate the config + data discovery before a long run
+source-analytics validate --study study.yaml
 
 # List available analyses
 source-analytics list
 ```
 
+`--paradigm` is required for multi-paradigm configs and names a key under
+`paradigms:` (e.g. `resting`, `vertex`). It is **not** the same as *level*: the
+`resting` paradigm holds the ROI and electrode analyses; the `vertex` paradigm
+holds the vertex analyses (they read a different reconstruction). The analysis
+must also be listed under that paradigm's `analyses:` block.
+
+> **Supplementary analyses must run after their primary** — see the run order in
+> [Analyses, domains & run order](#analyses-domains--run-order). The toolkit does
+> not auto-run dependencies; if you run `roi_network` before `roi_connectivity`
+> it errors that the edges CSV is missing.
+
+### Running everything, in order
+
+A study run is just the analyses invoked in dependency order. The canonical
+FORGE recipe lives at `scripts/run_treatment_analyses.sh` (study) /
+`scripts/run_ms1_analytics_parallel.sh`; the essential order is:
+
+```bash
+SA="source-analytics run --study study.yaml --paradigm"
+
+# Spectral + connectivity primaries (any order)
+$SA resting --analysis roi_psd
+$SA resting --analysis roi_aperiodic
+$SA resting --analysis roi_connectivity        # PRIMARY
+$SA resting --analysis roi_pac
+$SA resting --analysis roi_transfer_entropy
+$SA resting --analysis roi_network             # supplements roi_connectivity → run after it
+
+$SA resting --analysis electrode_psd           # PRIMARY
+$SA resting --analysis electrode_comparison    # supplements electrode_psd → run after it
+
+$SA vertex  --analysis vertex_cluster
+$SA vertex  --analysis vertex_mvpa
+$SA vertex  --analysis vertex_specparam
+$SA vertex  --analysis vertex_spatial
+$SA vertex  --analysis vertex_connectivity     # PRIMARY (slow; computes connectivity matrices)
+$SA vertex  --analysis vertex_network          # supplements vertex_connectivity → run after it
+```
+
 ## Study Configuration
 
-Each study is configured with a YAML file (`analysis.yaml`) that lives alongside the study data. The config defines groups, contrasts, frequency bands, ROI categories, and data discovery settings.
+One YAML file drives the whole study — and the **same file** is read by
+`source-lightbox` to build the gallery. The study-design keys (groups, contrasts,
+bands) are global; the **per-paradigm `analyses:` block** is where each analysis
+gets its data location and parameters. The minimal shape:
 
 ```yaml
 name: "My Study"
-output_dir: "/path/to/output"
 
-groups:
-  GROUP_A: "Group A Label"
-  GROUP_B: "Group B Label"
+# ── Study design (global) ──────────────────────────────────────────
+groups:                              # raw group id → display label
+  WT_VEH: "WT Vehicle"
+  KO_VEH: "KO Vehicle"
+group_order: [WT_VEH, KO_VEH]        # plot/x-axis order
+group_colors: {WT_VEH: "#3498DB", KO_VEH: "#E74C3C"}
 
-group_order: [GROUP_A, GROUP_B]
-group_colors:
-  GROUP_A: "#3498DB"
-  GROUP_B: "#E74C3C"
+contrasts:                           # each = one group-vs-group test
+  - name: disease_effect             # used in table/file names
+    label: "Disease effect (KO vs WT)"   # human label (axes, digests)
+    group: "Disease effect"          # tier heading (groups contrasts in the gallery)
+    group_a: KO_VEH                  # "A − B": positive effect = higher in A
+    group_b: WT_VEH
 
-contrasts:
-  - name: main_effect
-    group_a: GROUP_A
-    group_b: GROUP_B
-
-bands:
+bands:                               # name → [fmin, fmax] Hz
   Delta: [1, 4]
   Theta: [4, 8]
   Alpha: [8, 13]
   Beta: [13, 30]
   Low Gamma: [30, 55]
-  High Gamma: [65, 100]
+  High Gamma: [65, 80]
 
-roi_categories:
-  Frontal:
-    - Cortex_Frontal_L
-    - Cortex_Frontal_R
+circos_metrics: [imag_coherence, dwpli, pli, aec, coherence]   # gallery circos chords
 
-discovery:
-  root_dir: "/path/to/source_localization/output"
-  group_mapping:
-    "Raw Group Name": GROUP_A
+# ── Random epoch sampling (global default; per-analysis override below) ──
+epoch_sampling:
+  enabled: true
+  epoch_duration_sec: 2.0
+  n_epochs: 80
+  n_bootstrap: 500                   # 0 = use the full timeseries, no sampling
+
+# ── Output locations (shared with source-lightbox) ─────────────────
+paths:
+  analytics: ./analytics             # working dir: ANALYSIS_SUMMARY.md, data/
+  results:   ./results               # published tables/ + figures/  (gallery reads this)
+
+# ── Paradigms: where the data is + which analyses to run ───────────
+paradigms:
+  resting:
+    data_dir:    ./localization/rest_roi/derivatives   # reconstruction output root
+    data_subdir: pipeline/data
+    analyses:
+      roi_psd: {}
+      roi_aperiodic: {}
+      roi_connectivity:
+        epoch_sampling: {n_bootstrap: 0}               # per-analysis override
+      roi_network:                                     # supplements roi_connectivity
+        threshold_method: proportional
+        threshold_value: 0.15
+        nbs_threshold: 2.5
+        nbs_permutations: 5000
+        connectivity_metrics: [imag_coherence, dwpli, pli, aec, coherence]
+      electrode_psd: {}
+      electrode_comparison: {}                         # supplements electrode_psd
+
+  vertex:
+    data_dir:    ./localization/rest_shell/derivatives
+    data_subdir: pipeline/data
+    analyses:
+      vertex_connectivity:                             # PRIMARY for the vertex graph theory
+        vertex_filter: {z_min: 0.0}
+        metrics: [imag_coherence, dwpli, pli, aec, coherence]   # all 5 share one STFT pass
+      vertex_network:                                  # supplements vertex_connectivity
+        nbs_threshold: 3.0
+        nbs_permutations: 5000
+        connectivity_metrics: [imag_coherence, dwpli, pli, aec, coherence]
 ```
+
+### What each key feeds
+
+| Key | Consumed by | Purpose |
+|---|---|---|
+| `groups`, `group_order`, `group_colors` | all analyses | group identity, plot order/colour |
+| `contrasts[]` `{name, group_a, group_b}` | statistics | the group-vs-group tests (A − B) |
+| `contrasts[]` `{label, group}` | figures, gallery | readable labels + tier grouping |
+| `bands` | all spectral/connectivity | frequency bands analysed |
+| `epoch_sampling` | spectral/connectivity | random-epoch resampling (`n_bootstrap: 0` = full timeseries) |
+| `paths.{analytics, results}` | I/O + gallery | working vs published output trees |
+| `paradigms.<p>.data_dir` / `data_subdir` | discovery | where subject reconstructions live |
+| `paradigms.<p>.analyses.<a>` | that analysis | enables it + sets its parameters |
+
+The per-analysis block is merged into `config.raw[<analysis>]` by
+`config.for_paradigm_analysis()`, so any analysis-specific key (e.g.
+`connectivity_metrics`, `nbs_permutations`, `vertex_filter`) **must live under
+`paradigms.<paradigm>.analyses.<analysis>`**, not at the top level.
+
+> **Connectivity metrics.** The network/graph analyses run on every metric in
+> `connectivity_metrics`. At the vertex level, set `vertex_connectivity.metrics`
+> to the same list so the primary precomputes all of them in one shared-STFT pass
+> (`compute_..._epochs_multi`); `vertex_network` then loads them per metric
+> instead of recomputing. (Note: `aec` is computed outside the shared STFT and is
+> the slow one — drop it from the list if runtime matters more than completeness.)
 
 ## Input Data
 
@@ -142,6 +260,37 @@ Python                                         R
 ```
 
 Python calls `Rscript` automatically -- no manual R interaction needed.
+
+## Analyses, domains & run order
+
+The full set, by **level** (data read) and **domain** (what it measures).
+**Primary** analyses compute from raw timeseries/STC; **supplementary** ones
+consume a primary's output and must run after it.
+
+| Analysis | Level | Domain | Kind |
+|---|---|---|---|
+| `roi_psd` | ROI | Spectral | primary |
+| `roi_aperiodic` | ROI | Spectral | primary |
+| `roi_connectivity` | ROI | Connectivity | primary |
+| `roi_network` | ROI | Connectivity | **supplements `roi_connectivity`** |
+| `roi_pac` | ROI | Cross-frequency | primary |
+| `roi_transfer_entropy` | ROI | Connectivity | primary |
+| `vertex_cluster` | vertex | Spectral | primary |
+| `vertex_mvpa` | vertex | Spectral | primary |
+| `vertex_specparam` | vertex | Spectral | primary |
+| `vertex_spatial` | vertex | Spectral | primary |
+| `vertex_connectivity` | vertex | Connectivity | primary |
+| `vertex_network` | vertex | Connectivity | **supplements `vertex_connectivity`** |
+| `electrode_psd` | electrode | Sensor-level | primary |
+| `electrode_aperiodic` | electrode | Sensor-level | primary |
+| `electrode_comparison` | electrode | Sensor-level | **supplements `electrode_psd`** |
+
+This table is generated from `ANALYSIS_METADATA` in `core.py` (`domain` +
+`supplements`), the single source of truth; `analysis_meta()` exposes it, and
+`source-lightbox` reads it to group the gallery by domain and nest each
+supplementary analysis under its primary. **Domain** decides where an analysis is
+*listed*; **`supplements`** is a real *dependency* — that's what sets the run
+order in [Running everything, in order](#running-everything-in-order).
 
 ## Analysis Modules
 

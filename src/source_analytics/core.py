@@ -19,8 +19,16 @@ from .analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
 from .analyses.vertex_connectivity_analysis import VertexConnectivityAnalysis
 from .analyses.vertex_specparam_analysis import VertexSpecparamAnalysis
 from .analyses.vertex_mvpa_analysis import VertexMVPAAnalysis
-from .analyses.roi_network_analysis import ROINetworkAnalysis
-from .analyses.vertex_network_analysis import VertexNetworkAnalysis
+from .analyses.roi_network_analysis import (
+    ROINetworkAnalysis,
+    ROIGraphAnalysis,
+    ROINBSAnalysis,
+)
+from .analyses.vertex_network_analysis import (
+    VertexNetworkAnalysis,
+    VertexGraphAnalysis,
+    VertexNBSAnalysis,
+)
 from .analyses.vertex_spatial_analysis import VertexSpatialAnalysis
 from .analyses.roi_transfer_entropy_analysis import ROITransferEntropyAnalysis
 from .analyses.roi_evoked_analysis import ROIEvokedAnalysis
@@ -42,8 +50,12 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "vertex_connectivity": VertexConnectivityAnalysis,
     "vertex_specparam": VertexSpecparamAnalysis,
     "vertex_mvpa": VertexMVPAAnalysis,
-    "roi_network": ROINetworkAnalysis,
-    "vertex_network": VertexNetworkAnalysis,
+    "roi_graph": ROIGraphAnalysis,
+    "roi_nbs": ROINBSAnalysis,
+    "vertex_graph": VertexGraphAnalysis,
+    "vertex_nbs": VertexNBSAnalysis,
+    "roi_network": ROINetworkAnalysis,      # combined alias (graph + NBS)
+    "vertex_network": VertexNetworkAnalysis,  # combined alias (graph + NBS)
     "vertex_spatial": VertexSpatialAnalysis,
     "roi_transfer_entropy": ROITransferEntropyAnalysis,
     "roi_evoked": ROIEvokedAnalysis,
@@ -94,8 +106,12 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
     "roi_aperiodic":        {"category": "resting", "level": "roi",        "domain": "Spectral",        "description": "1/f aperiodic decomposition"},
     "roi_connectivity":     {"category": "resting", "level": "roi",        "domain": "Connectivity",    "description": "ROI pairwise connectivity"},
     "roi_pac":              {"category": "resting", "level": "roi",        "domain": "Cross-frequency", "description": "PAC (phase-amplitude coupling)"},
-    "roi_network":          {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level graph theory network metrics (NBS + graph)"},
-    "vertex_network":       {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level graph theory network metrics (NBS + graph)"},
+    "roi_graph":            {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level graph-theoretic metrics (degree/clustering/betweenness)"},
+    "roi_nbs":              {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level Network-Based Statistic (sub-network test)"},
+    "vertex_graph":         {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level multi-density AUC graph metrics"},
+    "vertex_nbs":           {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level Network-Based Statistic (sub-network test)"},
+    "roi_network":          {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level graph theory + NBS (combined alias of roi_graph + roi_nbs)"},
+    "vertex_network":       {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level graph theory + NBS (combined alias of vertex_graph + vertex_nbs)"},
     "roi_transfer_entropy": {"category": "resting", "level": "roi",        "domain": "Connectivity",    "description": "Directed information flow (transfer entropy)"},
     "vertex_mvpa":          {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "MVPA (SVM pattern classification)"},
     "vertex_cluster":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Vertex-level cluster permutation"},
