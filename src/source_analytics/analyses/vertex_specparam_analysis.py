@@ -214,6 +214,8 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 }
 
                 for vi in range(len(result.t_map)):
+                    cid = int(result.cluster_labels[vi])
+                    cp = float(result.cluster_pvalues[cid - 1]) if cid > 0 else float("nan")
                     all_stats.append({
                         "contrast": contrast.name,
                         "parameter": param_name,
@@ -221,7 +223,11 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                         "t": float(result.t_map[vi]),
                         "p": float(result.p_map[vi]),
                         "hedges_g": float(g_map[vi]),
-                        "cluster_id": int(result.cluster_labels[vi]),
+                        "cluster_id": cid,
+                        # Corrected per-cluster p and significance — cluster_id alone
+                        # is NOT significance (clusters are candidates pre-permutation).
+                        "cluster_p": cp,
+                        "significant": bool(cid > 0 and cp < 0.05),
                     })
 
             # Per-band chi-squared tests on peak presence + optional
@@ -303,6 +309,8 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                     }
 
                     for vi in range(len(result.t_map)):
+                        cid = int(result.cluster_labels[vi])
+                        cp = float(result.cluster_pvalues[cid - 1]) if cid > 0 else float("nan")
                         all_stats.append({
                             "contrast": contrast.name,
                             "parameter": f"{key}_peak_power",
@@ -310,7 +318,9 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                             "t": float(result.t_map[vi]),
                             "p": float(result.p_map[vi]),
                             "hedges_g": float(g_map[vi]),
-                            "cluster_id": int(result.cluster_labels[vi]),
+                            "cluster_id": cid,
+                            "cluster_p": cp,
+                            "significant": bool(cid > 0 and cp < 0.05),
                         })
 
             if all_chi2_stats:

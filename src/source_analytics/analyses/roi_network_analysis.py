@@ -180,6 +180,8 @@ class _ROINetworkBase(NetworkAnalysisBase):
     def _graph_statistics(self) -> None:
         from scipy.stats import false_discovery_control, ttest_ind
 
+        from ..stats.cluster_permutation import hedges_g
+
         all_stats = []
         for contrast in self.config.contrasts:
             group_a_uids = [u for u, g in self._subject_groups.items() if g == contrast.group_a]
@@ -204,6 +206,9 @@ class _ROINetworkBase(NetworkAnalysisBase):
 
                         data_a = np.array(vals_a)
                         data_b = np.array(vals_b)
+                        # Per-ROI Hedges' g (positive = group_a higher), matching
+                        # the vertex_graph stats schema so the gallery digest fires.
+                        g_vec = hedges_g(data_a, data_b)
                         for ri in range(data_a.shape[1]):
                             t_stat, p_val = ttest_ind(
                                 data_a[:, ri], data_b[:, ri], equal_var=False)
@@ -213,6 +218,7 @@ class _ROINetworkBase(NetworkAnalysisBase):
                                 "roi": self._roi_labels[ri],
                                 "mean_a": float(data_a[:, ri].mean()),
                                 "mean_b": float(data_b[:, ri].mean()),
+                                "hedges_g": float(g_vec[ri]),
                                 "t": float(t_stat), "p": float(p_val),
                             })
 
@@ -239,6 +245,10 @@ class _ROINetworkBase(NetworkAnalysisBase):
                 p_fdr_sorted[i] = min(p_fdr_sorted[i], p_fdr_sorted[i + 1])
             p_fdr[sorted_idx] = p_fdr_sorted
             stats_df["p_fdr"] = p_fdr
+
+        # FDR-corrected significance flag (per-ROI multiplicity), matching the
+        # gold-standard `significant` column the gallery summary digest reads.
+        stats_df["significant"] = stats_df["p_fdr"] < 0.05
 
         stats_df.to_csv(self.tbl_dir / f"{self.name}_stats.csv", index=False)
         logger.info("Exported %s_stats.csv (%d rows)", self.name, len(stats_df))
