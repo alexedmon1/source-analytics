@@ -24,13 +24,141 @@ def _load_atlas_roi_categories(atlas_name: str | None) -> dict[str, list[str]]:
         return {}
 
 
+# Hypothesis-testing contrast vocabularies (see HYPOTHESIS_CONTRASTS_PLAN.md).
+VALID_CONTRAST_ROLES = {"phenotype", "rescue", "normalization", "exploratory"}
+VALID_CONTRAST_TESTS = {"difference", "equivalence"}
+VALID_MARGIN_MODES = {"gap_fraction", "sd"}
+
+
 @dataclass
 class Contrast:
-    """A between-group contrast for statistical testing."""
+    """A between-group contrast for statistical testing.
+
+    The ``role``/``test``/``gate_on``/``equivalence_margin`` fields support the
+    hypothesis-testing framework (phenotype → rescue → normalization gating with
+    TOST equivalence). They are optional: a contrast that declares none behaves
+    as a plain two-sided difference test, exactly as before. Phase 0 parses and
+    validates these fields but the stats engine does not yet act on them.
+    """
 
     name: str
     group_a: str
     group_b: str
+    label: str | None = None
+    group: str | None = None
+    role: str = "exploratory"
+    test: str = "difference"
+    gate_on: list[str] = field(default_factory=list)
+    equivalence_margin: dict[str, Any] | None = None
+
+    @classmethod
+    def from_dict(cls, c: dict) -> Contrast:
+        """Build a Contrast from a raw YAML contrast mapping, with validation."""
+        name = c["name"]
+
+        role = c.get("role", "exploratory")
+        if role not in VALID_CONTRAST_ROLES:
+            raise ValueError(
+                f"Contrast '{name}': invalid role '{role}'. "
+                f"Expected one of {sorted(VALID_CONTRAST_ROLES)}."
+            )
+
+        test = c.get("test", "difference")
+        if test not in VALID_CONTRAST_TESTS:
+            raise ValueError(
+                f"Contrast '{name}': invalid test '{test}'. "
+                f"Expected one of {sorted(VALID_CONTRAST_TESTS)}."
+            )
+
+        gate_on_raw = c.get("gate_on")
+        if gate_on_raw is None:
+            gate_on = []
+        elif isinstance(gate_on_raw, str):
+            gate_on = [gate_on_raw]
+        else:
+            gate_on = list(gate_on_raw)
+
+        margin = c.get("equivalence_margin")
+        if margin is not None:
+            _validate_margin(name, margin)
+
+        return cls(
+            name=name,
+            group_a=c["group_a"],
+            group_b=c["group_b"],
+            label=c.get("label"),
+            group=c.get("group"),
+            role=role,
+            test=test,
+            gate_on=gate_on,
+            equivalence_margin=margin,
+        )
+
+
+def _validate_margin(contrast_name: str, margin: Any) -> None:
+    """Validate an equivalence_margin mapping ({mode, value})."""
+    if not isinstance(margin, dict):
+        raise ValueError(
+            f"Contrast '{contrast_name}': equivalence_margin must be a mapping "
+            f"with 'mode' and 'value', got {type(margin).__name__}."
+        )
+    mode = margin.get("mode")
+    if mode not in VALID_MARGIN_MODES:
+        raise ValueError(
+            f"Contrast '{contrast_name}': equivalence_margin.mode '{mode}' "
+            f"invalid. Expected one of {sorted(VALID_MARGIN_MODES)}."
+        )
+    value = margin.get("value")
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+        raise ValueError(
+            f"Contrast '{contrast_name}': equivalence_margin.value must be a "
+            f"positive number, got {value!r}."
+        )
+
+
+def _validate_contrast_graph(
+    contrasts: list[Contrast], hypothesis_testing: dict[str, Any]
+) -> None:
+    """Validate the gating DAG and equivalence-margin resolvability.
+
+    Raises ValueError on: a ``gate_on`` reference to an unknown contrast, a
+    cycle in the gating graph, or an equivalence contrast with no resolvable
+    margin (neither per-contrast nor a study-level default).
+    """
+    by_name = {c.name: c for c in contrasts}
+    has_default_margin = bool(hypothesis_testing.get("default_equivalence_margin"))
+
+    for c in contrasts:
+        for parent in c.gate_on:
+            if parent not in by_name:
+                raise ValueError(
+                    f"Contrast '{c.name}': gate_on references unknown contrast "
+                    f"'{parent}'. Known contrasts: {sorted(by_name)}."
+                )
+        if c.test == "equivalence" and c.equivalence_margin is None and not has_default_margin:
+            raise ValueError(
+                f"Contrast '{c.name}': test=equivalence requires an "
+                f"equivalence_margin or a hypothesis_testing."
+                f"default_equivalence_margin study default."
+            )
+
+    # Cycle detection over the gate_on dependency graph (child depends on parents).
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = {c.name: WHITE for c in contrasts}
+
+    def _visit(node: str, stack: list[str]) -> None:
+        color[node] = GRAY
+        for parent in by_name[node].gate_on:
+            if color[parent] == GRAY:
+                cycle = " -> ".join(stack[stack.index(parent):] + [parent])
+                raise ValueError(f"Cycle in contrast gate_on graph: {cycle}")
+            if color[parent] == WHITE:
+                _visit(parent, stack + [parent])
+        color[node] = BLACK
+
+    for c in contrasts:
+        if color[c.name] == WHITE:
+            _visit(c.name, [c.name])
 
 
 @dataclass
@@ -83,6 +211,7 @@ class StudyConfig:
     evoked: dict[str, Any] = field(default_factory=dict)
     paradigms: dict[str, dict] = field(default_factory=dict, repr=False)
     paradigm_name: str | None = None
+    hypothesis_testing: dict[str, Any] = field(default_factory=dict)
     raw: dict = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -157,10 +286,9 @@ class StudyConfig:
             "data_subdir": "pipeline/data",
         }
 
-        contrasts = [
-            Contrast(name=c["name"], group_a=c["group_a"], group_b=c["group_b"])
-            for c in data.get("contrasts", [])
-        ]
+        contrasts = [Contrast.from_dict(c) for c in data.get("contrasts", [])]
+        hypothesis_testing = data.get("hypothesis_testing", {})
+        _validate_contrast_graph(contrasts, hypothesis_testing)
 
         bands = {
             name: tuple(limits) for name, limits in data.get("bands", {}).items()
@@ -203,6 +331,7 @@ class StudyConfig:
             electrode=data.get("electrode", {}),
             evoked=data.get("evoked", {}),
             paradigms=paradigms,
+            hypothesis_testing=hypothesis_testing,
             raw=data,
         )
 
@@ -240,10 +369,9 @@ class StudyConfig:
         if "root_dir" not in discovery:
             discovery["root_dir"] = str(config_dir.parent / "derivatives")
 
-        contrasts = [
-            Contrast(name=c["name"], group_a=c["group_a"], group_b=c["group_b"])
-            for c in data.get("contrasts", [])
-        ]
+        contrasts = [Contrast.from_dict(c) for c in data.get("contrasts", [])]
+        hypothesis_testing = data.get("hypothesis_testing", {})
+        _validate_contrast_graph(contrasts, hypothesis_testing)
 
         bands = {
             name: tuple(limits) for name, limits in data.get("bands", {}).items()
@@ -285,6 +413,7 @@ class StudyConfig:
             electrode=data.get("electrode", {}),
             evoked=data.get("evoked", {}),
             paradigms=paradigms,
+            hypothesis_testing=hypothesis_testing,
             raw=data,
         )
 
@@ -351,6 +480,7 @@ class StudyConfig:
             electrode=pdata.get("electrode", self.electrode),
             evoked=pdata.get("evoked", self.evoked),
             paradigm_name=name,
+            hypothesis_testing=self.hypothesis_testing,
             raw={**self.raw, **pdata},
         )
 
@@ -445,6 +575,7 @@ class StudyConfig:
             electrode=electrode if isinstance(electrode, dict) else {},
             evoked=evoked if isinstance(evoked, dict) else {},
             paradigm_name=paradigm,
+            hypothesis_testing=self.hypothesis_testing,
             raw=raw,
         )
 
