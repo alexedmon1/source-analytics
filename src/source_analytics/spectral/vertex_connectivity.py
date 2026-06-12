@@ -10,6 +10,8 @@ Supported metrics:
 - imag_coherence: |Im(coherency)| — volume-conduction resistant
 - pli: Phase Lag Index |mean(sign(Im(CSD)))| (Stam 2007)
 - dwpli: Debiased weighted PLI (Vinck 2011)
+- wpli: Weighted PLI, non-debiased (Vinck 2011)
+- dpli: Directed PLI (Stam & van Straaten 2012) — asymmetric; dpli[a,b]>0.5 ⇒ a leads b
 - aec: Orthogonalized amplitude envelope correlation (Hipp 2012)
 - partial_corr: Partial correlation via precision matrix
 """
@@ -23,7 +25,7 @@ from scipy.signal import stft, hilbert, butter, sosfiltfilt
 
 logger = logging.getLogger(__name__)
 
-_SPECTRAL_METRICS = {"coherence", "imag_coherence", "pli", "dwpli"}
+_SPECTRAL_METRICS = {"coherence", "imag_coherence", "pli", "dwpli", "wpli", "dpli"}
 _ALL_METRICS = _SPECTRAL_METRICS | {"aec", "partial_corr"}
 
 
@@ -170,6 +172,66 @@ def _compute_dwpli(Zxx_band, n_vertices):
     return dwpli
 
 
+def _compute_wpli(Zxx_band, n_vertices):
+    """Weighted PLI, non-debiased (Vinck 2011), vectorized.
+
+    wPLI_f = |sum_t Im(CSD)| / sum_t |Im(CSD)| per frequency, then averaged
+    over band. Symmetric. (dwPLI is the bias-corrected variant; both are kept
+    so the debiasing effect can be compared.)
+    """
+    tiny = np.finfo(float).tiny
+    n_band_freq = Zxx_band.shape[1]
+    n_seg = Zxx_band.shape[2]
+    if n_seg == 0 or n_band_freq == 0:
+        return np.zeros((n_vertices, n_vertices))
+
+    sum_im = np.zeros((n_vertices, n_vertices, n_band_freq), dtype=np.float64)
+    sum_abs_im = np.zeros_like(sum_im)
+
+    for seg_idx in range(n_seg):
+        Z_seg = Zxx_band[:, :, seg_idx]
+        for fi in range(n_band_freq):
+            z = Z_seg[:, fi]
+            im_csd = np.imag(np.outer(z, np.conj(z)))
+            sum_im[:, :, fi] += im_csd
+            sum_abs_im[:, :, fi] += np.abs(im_csd)
+
+    valid = sum_abs_im > tiny
+    wpli_per_freq = np.zeros_like(sum_im)
+    wpli_per_freq[valid] = np.abs(sum_im[valid]) / sum_abs_im[valid]
+    wpli = np.mean(wpli_per_freq, axis=2)
+    np.fill_diagonal(wpli, 0.0)
+    return wpli
+
+
+def _compute_dpli(Zxx_band, n_vertices):
+    """Directed PLI (Stam & van Straaten 2012), vectorized.
+
+    dPLI_f = mean_t H(Im(CSD)) per frequency, averaged over band, where H is
+    the Heaviside step (H(0)=0.5). **Asymmetric**: with CSD[a,b]=z_a·conj(z_b),
+    Im is antisymmetric, so dPLI[a,b] = 1 − dPLI[b,a]. dPLI[a,b] > 0.5 ⇒ vertex
+    a phase-leads vertex b; 0.5 ⇒ no preferred lead/lag. The returned matrix is
+    NOT symmetric — callers that symmetrize (NBS, graph) must handle dPLI
+    explicitly as ordered a→b edges.
+    """
+    n_band_freq = Zxx_band.shape[1]
+    n_seg = Zxx_band.shape[2]
+    if n_seg == 0 or n_band_freq == 0:
+        return np.zeros((n_vertices, n_vertices))
+
+    h_sum = np.zeros((n_vertices, n_vertices, n_band_freq), dtype=np.float64)
+    for seg_idx in range(n_seg):
+        Z_seg = Zxx_band[:, :, seg_idx]
+        for fi in range(n_band_freq):
+            z = Z_seg[:, fi]
+            im_csd = np.imag(np.outer(z, np.conj(z)))
+            h_sum[:, :, fi] += 0.5 * (np.sign(im_csd) + 1.0)
+
+    dpli = np.mean(h_sum / n_seg, axis=2)
+    np.fill_diagonal(dpli, 0.0)
+    return dpli
+
+
 def _compute_aec(stc_data, sfreq, band, n_vertices):
     """Orthogonalized amplitude envelope correlation (Hipp et al. 2012).
 
@@ -309,6 +371,10 @@ def compute_vertex_connectivity_matrix(
         return _compute_pli(Zxx_band, n_vertices)
     elif metric == "dwpli":
         return _compute_dwpli(Zxx_band, n_vertices)
+    elif metric == "wpli":
+        return _compute_wpli(Zxx_band, n_vertices)
+    elif metric == "dpli":
+        return _compute_dpli(Zxx_band, n_vertices)
 
     raise ValueError(f"Unhandled metric: {metric}")  # pragma: no cover
 
@@ -376,6 +442,10 @@ def compute_vertex_connectivity_matrix_multi(
                 results["pli"] = _compute_pli(Zxx_band, n_vertices)
             if "dwpli" in spectral_requested:
                 results["dwpli"] = _compute_dwpli(Zxx_band, n_vertices)
+            if "wpli" in spectral_requested:
+                results["wpli"] = _compute_wpli(Zxx_band, n_vertices)
+            if "dpli" in spectral_requested:
+                results["dpli"] = _compute_dpli(Zxx_band, n_vertices)
 
     # Non-spectral metrics
     if "aec" in metrics:

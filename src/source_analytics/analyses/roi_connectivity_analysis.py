@@ -51,7 +51,10 @@ class ConnectivityAnalysis(BaseAnalysis):
 
     # Metrics the ROI kernel emits (computed together in one shared pass;
     # selection only restricts which are written/plotted).
-    _ROI_METRICS = ["coherence", "imag_coherence", "pli", "dwpli", "aec", "partial_corr"]
+    _ROI_METRICS = [
+        "coherence", "imag_coherence", "pli", "dwpli", "wpli", "dpli",
+        "aec", "partial_corr",
+    ]
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)

@@ -1,4 +1,4 @@
-"""Functional connectivity: coherence, imaginary coherence, PLI, dwPLI, AEC, and partial correlation."""
+"""Functional connectivity: coherence, imaginary coherence, PLI, dwPLI, wPLI, dPLI, AEC, and partial correlation."""
 
 from __future__ import annotations
 
@@ -25,6 +25,9 @@ def compute_connectivity_matrix(
     - **imag_coherence**: mean |Im(Cxy)| (volume-conduction resistant)
     - **pli**: phase lag index |mean(sign(Im(Pxy)))| (Stam 2007)
     - **dwpli**: debiased weighted PLI (Vinck 2011) — per-segment STFT
+    - **wpli**: weighted PLI, non-debiased (Vinck 2011) — per-segment STFT
+    - **dpli**: directed PLI (Stam & van Straaten 2012) — **asymmetric**,
+      dPLI[i,j]>0.5 ⇒ i leads j; dPLI[j,i] = 1 − dPLI[i,j]
     - **aec**: orthogonalized amplitude envelope correlation (Hipp 2012)
     - **partial_corr**: partial correlation via precision matrix
 
@@ -116,10 +119,11 @@ def compute_connectivity_matrix(
                 band_results[band_name]["imag_coherence"][i, j] = icoh_mean
                 band_results[band_name]["imag_coherence"][j, i] = icoh_mean
 
-    # --- PLI + dwPLI via per-segment STFT (Stam 2007; Vinck 2011) ---
-    # Both metrics require per-segment cross-spectra, so compute together.
-    _compute_pli_dwpli(ts_list, sfreq, n_rois, nperseg, noverlap, window,
-                       band_masks, band_results)
+    # --- PLI + dwPLI + wPLI + dPLI via per-segment STFT ---
+    # (Stam 2007; Vinck 2011; Stam & van Straaten 2012). All four share the
+    # per-segment cross-spectra, so they are computed together in one pass.
+    _compute_pli_family(ts_list, sfreq, n_rois, nperseg, noverlap, window,
+                        band_masks, band_results)
 
     # --- Orthogonalized AEC (Hipp et al. 2012) ---
     for band_name, (fmin, fmax) in bands.items():
@@ -139,7 +143,7 @@ def compute_connectivity_matrix(
     return band_results, roi_names
 
 
-def _compute_pli_dwpli(
+def _compute_pli_family(
     ts_list: list[np.ndarray],
     sfreq: float,
     n_rois: int,
@@ -149,16 +153,28 @@ def _compute_pli_dwpli(
     band_masks: dict[str, np.ndarray],
     band_results: dict[str, dict[str, np.ndarray]],
 ) -> None:
-    """Compute PLI and debiased weighted PLI from per-segment STFT in-place.
+    """Compute PLI, dwPLI, wPLI and dPLI from per-segment STFT in-place.
 
-    PLI (Stam 2007): |mean_segments(sign(Im(CSD_segment)))| per frequency,
-    then averaged over the band. Uses per-segment cross-spectra so that
-    phase-sign information is preserved (not collapsed by Welch averaging).
+    All four are functions of the imaginary part of the per-segment
+    cross-spectrum, so they share one STFT pass.
 
-    dwPLI (Vinck 2011): debiased weighted PLI per frequency across segments,
-    then averaged over band.
+    PLI (Stam 2007): |mean_segments(sign(Im(CSD)))| per frequency, averaged
+    over the band. Symmetric.
 
-    dwPLI_f = (sum_t(Im)^2 - sum_t(Im^2)) / (sum_t(|Im|)^2 - sum_t(Im^2))
+    dwPLI (Vinck 2011): debiased weighted PLI per frequency, averaged over band.
+    dwPLI_f = (sum_t(Im)^2 - sum_t(Im^2)) / (sum_t(|Im|)^2 - sum_t(Im^2)).
+    Symmetric.
+
+    wPLI (Vinck 2011, non-debiased): |sum_t Im| / sum_t |Im| per frequency,
+    averaged over band. Symmetric. (dwPLI is the bias-corrected variant;
+    keeping both lets reviewers compare.)
+
+    dPLI (Stam & van Straaten 2012): directed PLI, mean_t H(Im(CSD)) per
+    frequency, averaged over band, where H is the Heaviside step (H(0)=0.5).
+    **Asymmetric**: dPLI[i, j] in (0.5, 1] means ROI i phase-leads ROI j;
+    dPLI[j, i] = 1 - dPLI[i, j] (exactly, since Im(S_ji) = -Im(S_ij)). 0.5 =
+    no lead/lag preference. Downstream consumers that assume symmetric
+    matrices must treat dPLI specially (ordered i->j edges).
     """
     tiny = np.finfo(float).tiny
 
@@ -169,14 +185,12 @@ def _compute_pli_dwpli(
                          noverlap=noverlap, boundary=None, padded=False)
         stft_data.append(Zxx.astype(np.complex128))
 
-    # Initialize PLI and dwPLI matrices
+    # Initialize matrices
     for band_name in band_masks:
-        band_results[band_name]["pli"] = np.zeros(
-            (n_rois, n_rois), dtype=np.float64,
-        )
-        band_results[band_name]["dwpli"] = np.zeros(
-            (n_rois, n_rois), dtype=np.float64,
-        )
+        for m in ("pli", "dwpli", "wpli", "dpli"):
+            band_results[band_name][m] = np.zeros(
+                (n_rois, n_rois), dtype=np.float64,
+            )
 
     for i in range(n_rois):
         for j in range(i + 1, n_rois):
@@ -191,25 +205,40 @@ def _compute_pli_dwpli(
                 pli_per_freq = np.abs(np.mean(sign_im, axis=1))  # (n_band_freqs,)
                 pli_val = float(np.mean(pli_per_freq))
 
-                # dwPLI per frequency bin (across segments), then average over band
                 sum_im = np.sum(im_csd, axis=1)
                 sum_im_sq = np.sum(im_csd ** 2, axis=1)
-                sum_abs_im_sq = np.sum(np.abs(im_csd), axis=1) ** 2
+                sum_abs_im = np.sum(np.abs(im_csd), axis=1)
 
+                # dwPLI per frequency bin (across segments), then mean over band
                 numer = sum_im ** 2 - sum_im_sq
-                denom = sum_abs_im_sq - sum_im_sq
-
+                denom = sum_abs_im ** 2 - sum_im_sq
                 valid = np.abs(denom) > tiny
                 dwpli_freq = np.zeros(len(sum_im))
                 dwpli_freq[valid] = numer[valid] / denom[valid]
                 dwpli_freq = np.clip(dwpli_freq, 0.0, 1.0)
-
                 dwpli_val = float(np.mean(dwpli_freq))
+
+                # wPLI (non-debiased): |sum Im| / sum |Im| per freq, mean over band
+                w_valid = sum_abs_im > tiny
+                wpli_freq = np.zeros(len(sum_im))
+                wpli_freq[w_valid] = np.abs(sum_im[w_valid]) / sum_abs_im[w_valid]
+                wpli_val = float(np.mean(wpli_freq))
+
+                # dPLI (directed): mean_segments(Heaviside(Im)) per freq, mean over
+                # band. Heaviside with H(0)=0.5 → 0.5*(sign(x)+1) maps -1/0/+1
+                # to 0/0.5/1. dPLI[j,i] = 1 - dPLI[i,j] exactly.
+                heaviside = 0.5 * (np.sign(im_csd) + 1.0)
+                dpli_per_freq = np.mean(heaviside, axis=1)  # (n_band_freqs,)
+                dpli_ij = float(np.mean(dpli_per_freq))
 
                 band_results[band_name]["pli"][i, j] = pli_val
                 band_results[band_name]["pli"][j, i] = pli_val
                 band_results[band_name]["dwpli"][i, j] = dwpli_val
                 band_results[band_name]["dwpli"][j, i] = dwpli_val
+                band_results[band_name]["wpli"][i, j] = wpli_val
+                band_results[band_name]["wpli"][j, i] = wpli_val
+                band_results[band_name]["dpli"][i, j] = dpli_ij
+                band_results[band_name]["dpli"][j, i] = 1.0 - dpli_ij
 
 
 def _band_orthogonalized_aec(
