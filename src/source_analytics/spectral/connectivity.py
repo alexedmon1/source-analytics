@@ -241,26 +241,41 @@ def _compute_pli_family(
                 band_results[band_name]["dpli"][j, i] = 1.0 - dpli_ij
 
 
+def _orthogonalize_log_power(z_ref: np.ndarray, z_other: np.ndarray, eps: float) -> float:
+    """Hipp-2012 orthogonalized log-power correlation, one direction.
+
+    Orthogonalizes ``z_other`` w.r.t. ``z_ref`` via the Hipp projection
+    ``Y_⊥X = imag(Y · X*/|X|)`` (removes the zero-lag, real-axis component that
+    volume conduction produces), then returns the Pearson correlation of the
+    **log-power** envelopes ``log|X|²`` and ``log(Y_⊥X)²``.
+    """
+    y_orth = np.imag(z_other * np.conj(z_ref) / (np.abs(z_ref) + eps))
+    log_pow_ref = np.log(np.abs(z_ref) ** 2 + eps)
+    log_pow_orth = np.log(y_orth ** 2 + eps)
+    return float(np.corrcoef(log_pow_ref, log_pow_orth)[0, 1])
+
+
 def _band_orthogonalized_aec(
     ts_list: list[np.ndarray],
     sfreq: float,
     fmin: float,
     fmax: float,
 ) -> np.ndarray:
-    """Orthogonalized amplitude envelope correlation (Hipp et al. 2012).
+    """Orthogonalized amplitude envelope correlation (Hipp et al. 2012, Nat Neurosci).
 
-    Band-pass filters each ROI, computes the analytic signal via Hilbert
-    transform, then for each pair orthogonalizes one signal w.r.t. the other
-    (regression in complex domain) to remove zero-lag volume conduction.
-    The AEC is the Pearson correlation of the envelopes, symmetrized over
-    both directions.
+    Band-pass filters each ROI, takes the analytic signal (Hilbert), then for
+    each pair orthogonalizes one signal w.r.t. the other via Hipp's projection
+    ``Y_⊥X = imag(Y · X*/|X|)`` — which discards the zero-lag (real-axis) shared
+    component that volume conduction produces — and correlates the **log-power**
+    envelopes (square → log → Pearson). Directional, so both directions are
+    averaged. See CONNECTIVITY_METHODS.md.
 
     Returns
     -------
     aec : ndarray (n_rois, n_rois)
         Symmetric orthogonalized AEC matrix, diagonal = 1.
     """
-    tiny = np.finfo(float).tiny
+    eps = np.finfo(float).tiny
     n = len(ts_list)
     min_len = min(len(ts) for ts in ts_list)
 
@@ -276,26 +291,13 @@ def _band_orthogonalized_aec(
         filtered = sosfiltfilt(sos, ts[:min_len])
         analytic[:, i] = hilbert(filtered)
 
-    envelopes = np.abs(analytic)
     aec = np.eye(n, dtype=np.float64)
-
     for i in range(n):
         for j in range(i + 1, n):
             zi = analytic[:, i]
             zj = analytic[:, j]
-
-            # Direction 1: orthogonalize j w.r.t. i
-            #   Remove component of zj in phase with zi (zero-lag coupling)
-            beta_ji = np.real(zj * np.conj(zi)) / (np.abs(zi) ** 2 + tiny)
-            zj_orth = zj - beta_ji * zi
-            r1 = np.corrcoef(envelopes[:, i], np.abs(zj_orth))[0, 1]
-
-            # Direction 2: orthogonalize i w.r.t. j
-            beta_ij = np.real(zi * np.conj(zj)) / (np.abs(zj) ** 2 + tiny)
-            zi_orth = zi - beta_ij * zj
-            r2 = np.corrcoef(envelopes[:, j], np.abs(zi_orth))[0, 1]
-
-            # Symmetrize
+            r1 = _orthogonalize_log_power(zi, zj, eps)   # j orthogonalized w.r.t. i
+            r2 = _orthogonalize_log_power(zj, zi, eps)   # i orthogonalized w.r.t. j
             val = (r1 + r2) / 2.0
             aec[i, j] = val
             aec[j, i] = val

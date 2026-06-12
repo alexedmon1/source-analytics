@@ -232,12 +232,25 @@ def _compute_dpli(Zxx_band, n_vertices):
     return dpli
 
 
-def _compute_aec(stc_data, sfreq, band, n_vertices):
-    """Orthogonalized amplitude envelope correlation (Hipp et al. 2012).
+def _orth_log_power(z_ref, z_other, eps):
+    """Hipp-2012 orthogonalized log-power correlation, one direction.
 
-    Band-filter, Hilbert, orthogonalize, correlate envelopes.
+    ``Y_⊥X = imag(Y · X*/|X|)`` then Pearson of ``log|X|²`` vs ``log(Y_⊥X)²``.
     """
-    tiny = np.finfo(float).tiny
+    y_orth = np.imag(z_other * np.conj(z_ref) / (np.abs(z_ref) + eps))
+    log_pow_ref = np.log(np.abs(z_ref) ** 2 + eps)
+    log_pow_orth = np.log(y_orth ** 2 + eps)
+    return float(np.corrcoef(log_pow_ref, log_pow_orth)[0, 1])
+
+
+def _compute_aec(stc_data, sfreq, band, n_vertices):
+    """Orthogonalized amplitude envelope correlation (Hipp et al. 2012, Nat Neurosci).
+
+    Hipp orthogonalization ``Y_⊥X = imag(Y·X*/|X|)`` (removes zero-lag volume
+    conduction), then Pearson of the log-power envelopes (square → log →
+    correlate), averaged over both directions. See CONNECTIVITY_METHODS.md.
+    """
+    eps = np.finfo(float).tiny
     fmin, fmax = band
     nyq = sfreq / 2
     lo = max(fmin / nyq, 1e-5)
@@ -251,24 +264,13 @@ def _compute_aec(stc_data, sfreq, band, n_vertices):
         filtered = sosfiltfilt(sos, stc_data[i])
         analytic[:, i] = hilbert(filtered)
 
-    envelopes = np.abs(analytic)
     aec = np.zeros((n_vertices, n_vertices), dtype=np.float64)
-
     for i in range(n_vertices):
         for j in range(i + 1, n_vertices):
             zi = analytic[:, i]
             zj = analytic[:, j]
-
-            # Direction 1: orthogonalize j w.r.t. i
-            beta_ji = np.real(zj * np.conj(zi)) / (np.abs(zi) ** 2 + tiny)
-            zj_orth = zj - beta_ji * zi
-            r1 = np.corrcoef(envelopes[:, i], np.abs(zj_orth))[0, 1]
-
-            # Direction 2: orthogonalize i w.r.t. j
-            beta_ij = np.real(zi * np.conj(zj)) / (np.abs(zj) ** 2 + tiny)
-            zi_orth = zi - beta_ij * zj
-            r2 = np.corrcoef(envelopes[:, j], np.abs(zi_orth))[0, 1]
-
+            r1 = _orth_log_power(zi, zj, eps)   # j orthogonalized w.r.t. i
+            r2 = _orth_log_power(zj, zi, eps)   # i orthogonalized w.r.t. j
             val = (r1 + r2) / 2.0
             aec[i, j] = val
             aec[j, i] = val

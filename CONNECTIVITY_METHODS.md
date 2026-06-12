@@ -54,14 +54,11 @@ Conventions: `S_xy(f)` = cross-spectral density, `S_xx` = auto-spectrum,
 - **Our code:** `0.5·(sign(ℑ(S_ij)) + 1)` averaged → maps ℑ>0/=0/<0 to 1/0.5/0 = `H(ℑ(S_ij))`. `S_ij = Z_i·conj(Z_j)` so `phase(S_ij)=φ_i−φ_j`; ℑ>0 ⇒ i leads j ⇒ dPLI>0.5. ✅ **Matches**, convention = "row leads column" (same as dyconnmap). `dpli[j,i]=1−dpli[i,j]`.
 - **Note:** directed; **excluded from the undirected graph/NBS layer** (`_DIRECTED_METRICS` guard). Confidence: high for `(1/N)ΣH(Δφ)`; the `H(0)=0.5` micro-detail is standard Heaviside (medium — not re-printed in open sources).
 
-### Orthogonalized amplitude envelope correlation — `aec`  ⚠ DEVIATION
-- **Reference (cited):** **Hipp JF, Hawellek DJ, Corbetta M, Siegel M, Engel AK (2012).** "Large-scale cortical correlation structure of spontaneous oscillatory activity." *Nat Neurosci* 15(6):884–890. (Independent variant: **Brookes MJ et al. 2012**, *PNAS* 109:16783–16788, symmetric pairwise regression.)
-- **Hipp equation:** `Y_⊥X(t,f) = imag(Y(t,f)·X(t,f)*/|X(t,f)|)`; then **square → log-transform → Pearson** of log-power envelopes; orthogonalization is directional so **both directions averaged**.
-- **Our code (`_band_orthogonalized_aec`, `_compute_aec`):** `β = Re(z_j·conj(z_i))/|z_i|²`; `z_j⊥ = z_j − β·z_i`; `r = Pearson(|z_i|, |z_j⊥|)`; average both directions.
-- **⚠ DEVIATIONS from Hipp 2012:**
-  1. Orthogonalization is **real-regression (Brookes-style)**, not Hipp's `imag(Y·X*/|X|)` projection.
-  2. We correlate **raw amplitude envelopes**, omitting Hipp's **square + log-power** step.
-  - The both-directions averaging matches. Net: our `aec` is closer to **Brookes 2012** than Hipp 2012, minus log-power. → see Deviations §, item A.
+### Orthogonalized amplitude envelope correlation — `aec`
+- **Reference:** **Hipp JF, Hawellek DJ, Corbetta M, Siegel M, Engel AK (2012).** "Large-scale cortical correlation structure of spontaneous oscillatory activity." *Nat Neurosci* 15(6):884–890.
+- **Equation:** `Y_⊥X(t,f) = imag(Y(t,f)·X(t,f)*/|X(t,f)|)`; then **square → log-transform → Pearson** of log-power envelopes; orthogonalization is directional so **both directions averaged**.
+- **Our code (`_orthogonalize_log_power`/`_band_orthogonalized_aec`; `_orth_log_power`/`_compute_aec`):** `Y_⊥X = imag(z_other·conj(z_ref)/|z_ref|)`; `r = Pearson(log|z_ref|², log(Y_⊥X)²)`; average both directions. ✅ **Matches Hipp 2012** (aligned 2026-06-12, deviation A resolved).
+- **Test:** `tests/test_aec.py` — genuine lagged amplitude coupling detected; zero-lag (volume-conduction) mixture suppressed. Confidence: high (Hipp PMC3861400 read directly).
 
 ### Partial correlation — `partial_corr`
 - **Reference:** **Marrelec G, Krainik A, Duffau H, et al. (2006).** "Partial correlation for functional brain interactivity investigation in functional MRI." *NeuroImage* 32(1):228–237. (Statistical identity classical.)
@@ -115,12 +112,9 @@ These are where our implementation does not exactly follow the cited paper. Each
 needs a call: align the code to the canonical method, or keep the current choice
 and cite/justify it.
 
-- **A — AEC vs Hipp 2012.** Our `aec` uses Brookes-style real-regression
-  orthogonalization and **omits the square→log-power** step (correlates raw
-  amplitude envelopes). Options: (1) align to **Hipp 2012** exactly
-  (`imag(Y·X*/|X|)` + log-power); (2) re-cite as **Brookes 2012**-style and add
-  the log-power step; (3) keep as-is and document as "orthogonalized amplitude
-  (not log-power) envelope correlation." Affects an existing, already-used metric.
+- **A — AEC vs Hipp 2012. ✅ RESOLVED 2026-06-12 — aligned to Hipp 2012 exactly**
+  (`imag(Y·X*/|X|)` orthogonalization + square→log-power→Pearson, both directions
+  averaged). Changes previously-computed `aec` values — re-run required.
 - **B — AAC design fork.** Choose and document: amplitude vs power envelope;
   raw vs orthogonalized; Pearson vs Spearman. Current: amplitude / raw / Pearson.
   Cite **Bruns 2000** (+ **Masimore 2004** if power/comodulogram form adopted).
