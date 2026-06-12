@@ -28,6 +28,11 @@ from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
 
+# Connectivity metrics whose matrices are asymmetric/directional. The graph + NBS
+# layer is undirected (upper-triangle threshold + symmetrize), so these are
+# excluded from it. dPLI is centered at 0.5 (no lead/lag preference), not 0.
+_DIRECTED_METRICS = frozenset({"dpli"})
+
 
 class NetworkAnalysisBase(BaseAnalysis):
     """Common config + NBS execution for graph/NBS/combined network analyses."""
@@ -65,6 +70,21 @@ class NetworkAnalysisBase(BaseAnalysis):
         ]
         # Restrict to --metric / --select metric=... if requested.
         self._connectivity_metrics = self._select("metric", self._connectivity_metrics)
+        # The graph/NBS layer is undirected: it thresholds the upper triangle and
+        # symmetrizes (nx.from_numpy_array / np.triu+T). Directed metrics (dPLI,
+        # centered at 0.5) would yield meaningless graphs, so drop them with a
+        # warning rather than silently produce garbage.
+        directed = [m for m in self._connectivity_metrics if m in _DIRECTED_METRICS]
+        if directed:
+            logger.warning(
+                "%s: directed metric(s) %s are not valid for the undirected "
+                "graph/NBS layer — skipping. (Directed network analysis is a "
+                "separate, future capability.)",
+                self.name, directed,
+            )
+            self._connectivity_metrics = [
+                m for m in self._connectivity_metrics if m not in _DIRECTED_METRICS
+            ]
         self._nbs_threshold = float(cfg.get("nbs_threshold", self._default_nbs_threshold))
         self._nbs_permutations = int(cfg.get("nbs_permutations", 5000))
 
