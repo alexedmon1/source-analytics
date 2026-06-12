@@ -12,7 +12,7 @@ from .analyses.base import BaseAnalysis
 from .analyses.roi_psd_analysis import ROIPsdAnalysis
 from .analyses.roi_aperiodic_analysis import ROIAperiodicAnalysis
 from .analyses.roi_connectivity_analysis import ConnectivityAnalysis
-from .analyses.roi_pac_analysis import ROIPacAnalysis
+from .analyses.roi_cross_freq_analysis import ROICrossFreqAnalysis
 from .analyses.vertex_cluster_analysis import VertexClusterAnalysis
 from .analyses.electrode_analysis import ElectrodeAnalysis
 from .analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
@@ -42,7 +42,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "roi_psd": ROIPsdAnalysis,
     "roi_aperiodic": ROIAperiodicAnalysis,
     "roi_connectivity": ConnectivityAnalysis,
-    "roi_pac": ROIPacAnalysis,
+    "roi_cross_freq": ROICrossFreqAnalysis,
     "vertex_cluster": VertexClusterAnalysis,
     "electrode_psd": ElectrodeAnalysis,
     "electrode_aperiodic": ElectrodeAperiodicAnalysis,
@@ -66,7 +66,8 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
 _DEPRECATED_NAMES: dict[str, str] = {
     "psd": "roi_psd",
     "aperiodic": "roi_aperiodic",
-    "pac": "roi_pac",
+    "pac": "roi_cross_freq",
+    "roi_pac": "roi_cross_freq",
     "wholebrain": "vertex_cluster",
     "spatial_lmm": "vertex_spatial",
     "specparam_vertex": "vertex_specparam",
@@ -106,7 +107,7 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
     "roi_psd":              {"category": "resting", "level": "roi",        "domain": "Spectral",        "description": "PSD (power spectral density)"},
     "roi_aperiodic":        {"category": "resting", "level": "roi",        "domain": "Spectral",        "description": "1/f aperiodic decomposition"},
     "roi_connectivity":     {"category": "resting", "level": "roi",        "domain": "Connectivity",    "description": "ROI pairwise connectivity"},
-    "roi_pac":              {"category": "resting", "level": "roi",        "domain": "Cross-frequency", "description": "PAC (phase-amplitude coupling)"},
+    "roi_cross_freq":       {"category": "resting", "level": "roi",        "domain": "Cross-frequency", "description": "Cross-frequency coupling (PAC, AAC, n:m PPC)"},
     "roi_graph":            {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level graph-theoretic metrics (degree/clustering/betweenness)"},
     "roi_nbs":              {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level Network-Based Statistic (sub-network test)"},
     "vertex_graph":         {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level multi-density AUC graph metrics"},

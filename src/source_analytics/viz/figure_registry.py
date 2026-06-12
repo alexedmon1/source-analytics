@@ -74,8 +74,8 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
         band_col="band",
         estimate_label="Mean Difference",
     ),
-    "roi_pac": TableSchema(
-        posthoc_file="roi_pac_global.csv",
+    "roi_cross_freq": TableSchema(
+        posthoc_file="roi_pac_global.csv",  # PAC R script output name unchanged
         estimate_col=None,  # computed as mean_a - mean_b
         label_col="freq_pair",
         band_col=None,
@@ -137,7 +137,8 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
 # Backward-compatible aliases for old analysis names
 for _old, _new in [
     ("psd", "roi_psd"), ("aperiodic", "roi_aperiodic"), ("evoked", "roi_evoked"),
-    ("pac", "roi_pac"), ("wholebrain", "vertex_cluster"), ("spatial_lmm", "vertex_spatial"),
+    ("pac", "roi_cross_freq"), ("roi_pac", "roi_cross_freq"),
+    ("wholebrain", "vertex_cluster"), ("spatial_lmm", "vertex_spatial"),
     ("specparam_vertex", "vertex_specparam"), ("mvpa", "vertex_mvpa"),
 ]:
     if _new in TABLE_SCHEMAS:
@@ -232,11 +233,11 @@ def _register_all() -> None:
 
     # Analyses that support the standard heatmap + volcano
     heatmap_analyses = [
-        "roi_psd", "roi_aperiodic", "roi_evoked", "roi_connectivity", "roi_pac",
+        "roi_psd", "roi_aperiodic", "roi_evoked", "roi_connectivity", "roi_cross_freq",
         "vertex_spatial",
     ]
     volcano_analyses = [
-        "roi_psd", "roi_aperiodic", "roi_evoked", "roi_connectivity", "roi_pac",
+        "roi_psd", "roi_aperiodic", "roi_evoked", "roi_connectivity", "roi_cross_freq",
         "vertex_spatial",
     ]
 

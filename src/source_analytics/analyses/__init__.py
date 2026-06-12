@@ -4,7 +4,7 @@ from .base import BaseAnalysis, find_r_script_dir
 from .roi_psd_analysis import ROIPsdAnalysis
 from .roi_aperiodic_analysis import ROIAperiodicAnalysis
 from .roi_connectivity_analysis import ConnectivityAnalysis
-from .roi_pac_analysis import ROIPacAnalysis
+from .roi_cross_freq_analysis import ROICrossFreqAnalysis
 from .vertex_cluster_analysis import VertexClusterAnalysis
 from .electrode_analysis import ElectrodeAnalysis
 from .electrode_comparison_analysis import ElectrodeComparisonAnalysis
@@ -20,7 +20,8 @@ from .roi_directed_analysis import ROIDirectedAnalysis
 # Backward-compatible aliases
 PSDAnalysis = ROIPsdAnalysis
 AperiodicAnalysis = ROIAperiodicAnalysis
-PACAnalysis = ROIPacAnalysis
+ROIPacAnalysis = ROICrossFreqAnalysis  # renamed -> roi_cross_freq
+PACAnalysis = ROICrossFreqAnalysis
 WholebrainAnalysis = VertexClusterAnalysis
 MVPAAnalysis = VertexMVPAAnalysis
 SpecparamVertexAnalysis = VertexSpecparamAnalysis
@@ -35,6 +36,7 @@ __all__ = [
     "ROIPsdAnalysis",
     "ROIAperiodicAnalysis",
     "ConnectivityAnalysis",
+    "ROICrossFreqAnalysis",
     "ROIPacAnalysis",
     "VertexClusterAnalysis",
     "ElectrodeAnalysis",

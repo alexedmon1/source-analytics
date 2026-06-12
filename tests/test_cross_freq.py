@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from source_analytics.spectral.cross_freq import compute_aac, compute_ppc
+from source_analytics.analyses.roi_cross_freq_analysis import _nm_ratio
 
 FS = 200.0
 DUR = 20.0
@@ -79,6 +80,16 @@ def test_ppc_range_and_self():
     y = np.sin(2 * np.pi * 20 * t)
     ppc = compute_ppc(np.vstack([x, y]), FS, BAND_LOW, BAND_HIGH, n=2, m=1)
     assert ppc.min() >= 0.0 and ppc.max() <= 1.0
+
+
+# ------------------------------------------------------- n:m ratio helper
+def test_nm_ratio():
+    # theta(~7) -> low gamma(~42): ~6:1
+    assert _nm_ratio((4, 10), (30, 55)) == (6, 1)
+    # delta(~2.5) -> alpha(~11.5): ~5:1 (rounds)
+    assert _nm_ratio((1, 4), (10, 13))[1] == 1
+    # same band -> 1:1
+    assert _nm_ratio((8, 12), (8, 12)) == (1, 1)
 
 
 def test_ppc_unlocked_pair_low():
