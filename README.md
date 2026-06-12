@@ -3,12 +3,12 @@
 Statistical analysis toolkit for source-localized EEG data. Reads pipeline output from the [source-localization](../source-localization) package and runs group-level analyses with publication-quality statistics and figures. Its stat tables feed directly into [source-lightbox](../source-lightbox), which renders the gallery.
 
 Analyses are organized along **two orthogonal axes** — see
-[Analyses, domains & run order](#analyses-domains--run-order) for the full map:
+[Analyses by category](#analyses-by-category-with-implementation-references) for the full map:
 
 - **Level** — the data an analysis reads: **ROI** (32–46 atlas ROIs), **vertex**
   (whole-brain source vertices), or **electrode** (scalp, for validation).
 - **Domain** — what it measures: **Spectral**, **Connectivity**,
-  **Cross-frequency**, **Sensor-level**.
+  **Cross-frequency**, **Directed**, **Sensor-level**, **Evoked**.
 
 A few analyses are **supplementary** (secondary): they consume another analysis's
 output and therefore must run *after* it. The two graph-theory modules are the
@@ -73,7 +73,7 @@ holds the vertex analyses (they read a different reconstruction). The analysis
 must also be listed under that paradigm's `analyses:` block.
 
 > **Supplementary analyses must run after their primary** — see the run order in
-> [Analyses, domains & run order](#analyses-domains--run-order). The toolkit does
+> [Analyses by category](#analyses-by-category-with-implementation-references). The toolkit does
 > not auto-run dependencies; if you run `roi_network` before `roi_connectivity`
 > it errors that the edges CSV is missing.
 
@@ -90,9 +90,10 @@ SA="source-analytics run --study study.yaml --paradigm"
 $SA resting --analysis roi_psd
 $SA resting --analysis roi_aperiodic
 $SA resting --analysis roi_connectivity        # PRIMARY
-$SA resting --analysis roi_pac
-$SA resting --analysis roi_transfer_entropy
-$SA resting --analysis roi_network             # supplements roi_connectivity → run after it
+$SA resting --analysis roi_cross_freq          # PAC + AAC + PPC (--metric to pick one)
+$SA resting --analysis roi_directed            # transfer entropy (DTF planned)
+$SA resting --analysis roi_graph               # supplements roi_connectivity → run after it
+$SA resting --analysis roi_nbs                 # supplements roi_connectivity → run after it
 
 $SA resting --analysis electrode_psd           # PRIMARY
 $SA resting --analysis electrode_comparison    # supplements electrode_psd → run after it
@@ -102,7 +103,9 @@ $SA vertex  --analysis vertex_mvpa
 $SA vertex  --analysis vertex_specparam
 $SA vertex  --analysis vertex_spatial
 $SA vertex  --analysis vertex_connectivity     # PRIMARY (slow; computes connectivity matrices)
-$SA vertex  --analysis vertex_network          # supplements vertex_connectivity → run after it
+$SA vertex  --analysis vertex_cross_freq        # local PAC + AAC + PPC (full vertex resolution)
+$SA vertex  --analysis vertex_graph            # supplements vertex_connectivity → run after it
+$SA vertex  --analysis vertex_nbs              # supplements vertex_connectivity → run after it
 ```
 
 ## Study Configuration
@@ -212,7 +215,7 @@ The per-analysis block is merged into `config.raw[<analysis>]` by
 
 source-analytics reads output files produced by the source_localization pipeline. Each subject directory contains:
 
-**ROI-level analyses** (roi_psd, roi_aperiodic, roi_connectivity, roi_transfer_entropy, roi_pac) -- default discovery:
+**ROI-level analyses** (roi_psd, roi_aperiodic, roi_connectivity, roi_directed, roi_cross_freq) -- default discovery:
 
 | File | Format | Contents |
 |------|--------|----------|
@@ -261,36 +264,63 @@ Python                                         R
 
 Python calls `Rscript` automatically -- no manual R interaction needed.
 
-## Analyses, domains & run order
+## Analyses by category, with implementation references
 
-The full set, by **level** (data read) and **domain** (what it measures).
-**Primary** analyses compute from raw timeseries/STC; **supplementary** ones
-consume a primary's output and must run after it.
+Analyses are grouped by **category (domain)** — what they measure. Each row lists
+the analyses in that category, the level(s) they run at, the measures/metrics
+they compute, and the **primary literature** the implementation follows.
 
-| Analysis | Level | Domain | Kind |
+> **Method provenance is tracked in [`CONNECTIVITY_METHODS.md`](CONNECTIVITY_METHODS.md)** —
+> the source of truth for every connectivity / coupling metric: canonical
+> reference, defining equation, our `file:function`, and any deviation, each
+> verified against fetched primary sources. Citations below for the
+> connectivity / cross-frequency / directed families are condensed from it.
+> References for the spectral / graph families are the standard canonical sources
+> (verify before manuscript submission — only the connectivity family has been
+> formally equation-checked).
+
+| Category | Analyses (level) | Measures | Implementation reference(s) |
 |---|---|---|---|
-| `roi_psd` | ROI | Spectral | primary |
-| `roi_aperiodic` | ROI | Spectral | primary |
-| `roi_connectivity` | ROI | Connectivity | primary |
-| `roi_network` | ROI | Connectivity | **supplements `roi_connectivity`** |
-| `roi_pac` | ROI | Cross-frequency | primary |
-| `roi_transfer_entropy` | ROI | Connectivity | primary |
-| `vertex_cluster` | vertex | Spectral | primary |
-| `vertex_mvpa` | vertex | Spectral | primary |
-| `vertex_specparam` | vertex | Spectral | primary |
-| `vertex_spatial` | vertex | Spectral | primary |
-| `vertex_connectivity` | vertex | Connectivity | primary |
-| `vertex_network` | vertex | Connectivity | **supplements `vertex_connectivity`** |
-| `electrode_psd` | electrode | Sensor-level | primary |
-| `electrode_aperiodic` | electrode | Sensor-level | primary |
-| `electrode_comparison` | electrode | Sensor-level | **supplements `electrode_psd`** |
+| **Spectral** | `roi_psd`, `electrode_psd` (ROI/electrode); `vertex_cluster`, `vertex_spatial` (vertex) | band power (Welch PSD), spatial GLS, cluster-corrected vertex maps | Welch 1967; cluster permutation Maris & Oostenveld 2007 |
+| | `roi_aperiodic`, `electrode_aperiodic`, `vertex_specparam` | 1/f aperiodic (offset, exponent) + oscillatory peaks | Donoghue et al. 2020, *Nat Neurosci* (specparam) |
+| | `vertex_mvpa` | multivariate pattern decoding (linear SVM) | standard MVPA (linear SVM, permutation-tested) |
+| **Connectivity** (same-frequency FC) | `roi_connectivity`, `vertex_connectivity` | coherence; imaginary coherence; PLI; wPLI; dwPLI; dPLI; AEC; partial correlation | Nolte 2004 (imcoh); Stam 2007 (PLI); Vinck 2011 (wPLI/dwPLI); Stam & van Straaten 2012 (dPLI); Hipp 2012 (AEC); Marrelec 2006 (partial corr) — see `CONNECTIVITY_METHODS.md` |
+| | `roi_graph`/`roi_nbs`, `vertex_graph`/`vertex_nbs` *(supplements `*_connectivity`)* | graph-theoretic metrics; Network-Based Statistic | Rubinov & Sporns 2010 (graph); Zalesky et al. 2010 (NBS) |
+| **Cross-frequency** | `roi_cross_freq`, `vertex_cross_freq` | PAC (Modulation Index); cross-frequency AAC; n:m PPC | Tort et al. 2010 (PAC MI); Bruns 2000 / Masimore 2004 (AAC); Tass 1998 / Palva 2005 (PPC) — see `CONNECTIVITY_METHODS.md` |
+| **Directed** | `roi_directed` | transfer entropy (`te`, `net_te`); DTF planned | Schreiber 2000 (transfer entropy) |
+| **Sensor-level** | `electrode_comparison` *(supplements `electrode_psd`)* | source-vs-electrode validation comparison | — (internal comparison) |
+| **Evoked** | `roi_evoked`, `electrode_evoked` | ITC, ERSP, single-trial power (trial paradigms) | standard time-frequency (Hilbert/wavelet ITC/ERSP) |
 
-This table is generated from `ANALYSIS_METADATA` in `core.py` (`domain` +
+Each analysis is `--metric`-selectable where it computes multiple measures (e.g.
+`--metric wpli`, `--metric pac`); see [Selecting metrics & bands](#selecting-metrics--bands).
+
+**Renamed (2026-06):** `roi_pac` → `roi_cross_freq` (now also AAC + PPC);
+`roi_transfer_entropy` → `roi_directed`. Old names still work as deprecated
+aliases.
+
+This grouping is generated from `ANALYSIS_METADATA` in `core.py` (`domain` +
 `supplements`), the single source of truth; `analysis_meta()` exposes it, and
 `source-lightbox` reads it to group the gallery by domain and nest each
 supplementary analysis under its primary. **Domain** decides where an analysis is
 *listed*; **`supplements`** is a real *dependency* — that's what sets the run
 order in [Running everything, in order](#running-everything-in-order).
+
+### Selecting metrics & bands
+
+Multi-output analyses honour a sub-output filter so you compute exactly what you
+want, not the whole group — without losing the shared STFT/Hilbert compute pass:
+
+```bash
+# just two connectivity metrics
+source-analytics run --study study.yaml --paradigm vertex --analysis vertex_connectivity --metric dwpli,wpli
+# one band; one cross-frequency measure
+source-analytics run --study study.yaml --paradigm vertex --analysis vertex_cross_freq --metric ppc --band low_gamma
+# generic form
+source-analytics run ... --select metric=pli --select band=beta,low_gamma
+```
+
+`source-analytics list` tags each analysis with its selectable dimensions
+(`[--select: metric, band]`).
 
 ## Analysis Modules
 
@@ -380,11 +410,16 @@ ROI-to-ROI functional connectivity using **signed** (phase-preserving) source ti
 | Metric | Description | Volume conduction resistant |
 |--------|-------------|:--:|
 | **Coherence** | Magnitude-squared coherence (Welch CSD) | No |
-| **Imaginary Coherence** | mean \|Im(Cxy)\| -- zero-lag immune (Nolte 2004) | Yes |
-| **PLI** | Phase Lag Index \|mean(sign(Im(Pxy)))\| (Stam 2007) | Yes |
-| **dwPLI** | Debiased Weighted PLI -- per-segment STFT-based (Vinck 2011) | Yes |
-| **AEC** | Orthogonalized Amplitude Envelope Correlation (Hipp 2012) | Yes |
-| **Partial Correlation** | Conditional independence via precision matrix (Ledoit-Wolf shrinkage) | Yes |
+| **Imaginary Coherence** | Im(Cxy)/√(Sxx·Syy) -- zero-lag immune (Nolte 2004) | Yes |
+| **PLI** | Phase Lag Index \|⟨sign(Im(Pxy))⟩\| (Stam 2007) | Yes |
+| **wPLI** | Weighted PLI \|E{Im}\|/E{\|Im\|} (Vinck 2011) | Yes |
+| **dwPLI** | Debiased weighted PLI² (Vinck 2011) | Yes |
+| **dPLI** | Directed PLI ⟨H(Im)⟩ -- **asymmetric**, i>0.5 leads j (Stam & van Straaten 2012) | Yes |
+| **AEC** | Orthogonalized amplitude envelope correlation, imag-projection + log-power (Hipp 2012) | Yes |
+| **Partial Correlation** | Conditional independence via precision matrix, LW shrinkage (Marrelec 2006) | Yes |
+
+Full equations, our implementation, and provenance: [`CONNECTIVITY_METHODS.md`](CONNECTIVITY_METHODS.md).
+`dpli` is directed and is auto-excluded from the undirected graph/NBS layer.
 
 **Python side:**
 - Cross-spectral density via `scipy.signal.csd` (Welch, 2s Hann, 50% overlap)
@@ -436,7 +471,7 @@ Directed transfer entropy between all ROI pairs, quantifying how much past activ
 **Output:**
 
 ```
-output_dir/roi_transfer_entropy/
+output_dir/roi_directed/
   ANALYSIS_SUMMARY.md
   data/
     transfer_entropy_edges.csv    # subject x directed roi_pair x band (TE + net TE)
@@ -474,7 +509,7 @@ Cross-frequency phase-amplitude coupling via the Modulation Index (Tort et al., 
 **Output:**
 
 ```
-output_dir/roi_pac/
+output_dir/roi_cross_freq/
   ANALYSIS_SUMMARY.md
   data/
     pac_values.csv              # subject x roi x freq_pair (z-scored MI)
