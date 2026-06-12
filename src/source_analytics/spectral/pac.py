@@ -304,6 +304,70 @@ def compute_pac_zscore(
     return mi, float(z_score), surr_mean, surr_std
 
 
+def compute_local_pac_vertices(
+    stc_data: np.ndarray,
+    sfreq: float,
+    phase_band: tuple[float, float],
+    amp_band: tuple[float, float],
+    n_bins: int = 18,
+    n_surrogates: int = 100,
+    min_shift_sec: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Within-vertex PAC z-score map — one MI per vertex (whole-brain, not pairwise).
+
+    For each vertex the phase (``phase_band``) and amplitude (``amp_band``) are
+    taken from that **same** vertex's time course, so the result is a per-vertex
+    local coupling map — the Tier-A measure that demonstrates the source
+    (vertex) spatial advantage for cross-frequency coupling. The bandpass +
+    Hilbert front-end is vectorized over vertices; the surrogate circular-shift
+    z-scoring loops per vertex (reuses ``_compute_mi_batch``).
+
+    Parameters
+    ----------
+    stc_data : ndarray (n_vertices, n_times)
+        Signed source time courses.
+    phase_band, amp_band : (fmin, fmax)
+    n_surrogates : int
+        Circular-shift surrogates per vertex (kept modest — this runs per vertex).
+
+    Returns
+    -------
+    z : ndarray (n_vertices,)
+        Surrogate z-scored MI per vertex.
+    mi : ndarray (n_vertices,)
+        Raw Modulation Index per vertex.
+    """
+    stc_data = np.atleast_2d(stc_data)
+    n_vertices, n_samples = stc_data.shape
+
+    sos_phase = _design_bandpass(phase_band[0], phase_band[1], sfreq)
+    sos_amp = _design_bandpass(amp_band[0], amp_band[1], sfreq)
+    phase = np.angle(hilbert(sosfiltfilt(sos_phase, stc_data, axis=1), axis=1))
+    amplitude = np.abs(hilbert(sosfiltfilt(sos_amp, stc_data, axis=1), axis=1))
+
+    bin_edges = np.linspace(-np.pi, np.pi, n_bins + 1)
+    min_shift = max(int(min_shift_sec * sfreq), 1)
+    max_shift = n_samples - min_shift
+
+    z = np.zeros(n_vertices)
+    mi = np.zeros(n_vertices)
+    rng = np.random.default_rng()
+    for v in range(n_vertices):
+        ph = phase[v]
+        am = amplitude[v]
+        mi_v = _compute_mi_from_phase_amp(ph, am, n_bins, bin_edges)
+        mi[v] = mi_v
+        if max_shift <= min_shift:
+            continue
+        bin_idx = np.clip(np.digitize(ph, bin_edges) - 1, 0, n_bins - 1)
+        shifts = rng.integers(min_shift, max_shift, size=n_surrogates)
+        surr = _compute_mi_batch(bin_idx, am, n_bins, shifts)
+        sd = float(np.std(surr))
+        z[v] = (mi_v - float(np.mean(surr))) / sd if sd > 0 else 0.0
+
+    return z, mi
+
+
 def get_valid_pac_pairs(
     bands: dict[str, tuple[float, float]],
     min_ratio: float = 2.5,
