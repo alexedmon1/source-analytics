@@ -15,7 +15,7 @@ from .roi_network_analysis import ROINetworkAnalysis
 from .vertex_network_analysis import VertexNetworkAnalysis
 from .vertex_spatial_analysis import VertexSpatialAnalysis
 from .roi_evoked_analysis import ROIEvokedAnalysis
-from .roi_transfer_entropy_analysis import ROITransferEntropyAnalysis
+from .roi_directed_analysis import ROIDirectedAnalysis
 
 # Backward-compatible aliases
 PSDAnalysis = ROIPsdAnalysis
@@ -26,7 +26,8 @@ MVPAAnalysis = VertexMVPAAnalysis
 SpecparamVertexAnalysis = VertexSpecparamAnalysis
 SpatialLMMAnalysis = VertexSpatialAnalysis
 EvokedAnalysis = ROIEvokedAnalysis
-TransferEntropyAnalysis = ROITransferEntropyAnalysis
+ROITransferEntropyAnalysis = ROIDirectedAnalysis  # renamed -> roi_directed
+TransferEntropyAnalysis = ROIDirectedAnalysis
 
 __all__ = [
     "BaseAnalysis",
@@ -45,6 +46,7 @@ __all__ = [
     "VertexNetworkAnalysis",
     "VertexSpatialAnalysis",
     "ROIEvokedAnalysis",
+    "ROIDirectedAnalysis",
     "ROITransferEntropyAnalysis",
     # Backward-compatible aliases
     "PSDAnalysis",

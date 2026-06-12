@@ -1,4 +1,9 @@
-"""Transfer Entropy Analysis: directed information-theoretic connectivity between ROI pairs."""
+"""ROI directed connectivity: information-theoretic / directed influence between ROI pairs.
+
+The home for directed connectivity metrics. Currently transfer entropy (te,
+net_te); DTF (directed transfer function, MVAR-based) is planned and will be
+added as an additional ``--metric`` here rather than as a separate module.
+"""
 
 from __future__ import annotations
 
@@ -34,27 +39,36 @@ def _find_r_script_dir() -> Path:
     )
 
 
-class ROITransferEntropyAnalysis(BaseAnalysis):
-    """Directed transfer entropy analysis between ROI pairs.
+class ROIDirectedAnalysis(BaseAnalysis):
+    """ROI-level directed connectivity (transfer entropy; DTF planned).
 
     Uses **signed** (phase-preserving) ROI timeseries to compute binned
     transfer entropy for all n*(n-1) directed ROI pairs (40 brain ROIs →
     1,560 directed pairs; 6 corpus callosum white matter tracts excluded).
 
-    Python computes TE matrices and exports directed edge-level CSV.
+    Python computes directed matrices and exports directed edge-level CSV.
     R (lme4, ggplot2) handles global t-tests, directional paired t-tests,
     region-pair LMM, and summary report.
+
+    ``--metric`` selects which directed measure(s) to compute. Today only
+    ``te`` (transfer entropy) is implemented; ``dtf`` will join here.
     """
 
-    name = "roi_transfer_entropy"
-    SELECTABLE = {"band": "frequency band"}
+    name = "roi_directed"
+    SELECTABLE = {"metric": "directed measure", "band": "frequency band"}
+
+    # Directed measures this module can produce (shared signed-ROI front-end).
+    _DIRECTED_METRICS = ["te"]
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
         self._edge_rows: list[dict] = []
         self._sfreq: float | None = None
+        self._metrics: list[str] = list(self._DIRECTED_METRICS)
 
     def setup(self) -> None:
+        # Restrict to --metric / --select metric=... (only `te` exists today).
+        self._metrics = self._select("metric", self._DIRECTED_METRICS)
         self._edge_rows.clear()
 
     def process_subject(self, subject: SubjectInfo) -> None:

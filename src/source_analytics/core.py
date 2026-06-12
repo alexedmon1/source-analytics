@@ -30,7 +30,7 @@ from .analyses.vertex_network_analysis import (
     VertexNBSAnalysis,
 )
 from .analyses.vertex_spatial_analysis import VertexSpatialAnalysis
-from .analyses.roi_transfer_entropy_analysis import ROITransferEntropyAnalysis
+from .analyses.roi_directed_analysis import ROIDirectedAnalysis
 from .analyses.roi_evoked_analysis import ROIEvokedAnalysis
 from .analyses.electrode_evoked_analysis import ElectrodeEvokedAnalysis
 from .analyses.electrode_aperiodic_analysis import ElectrodeAperiodicAnalysis
@@ -57,7 +57,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "roi_network": ROINetworkAnalysis,      # combined alias (graph + NBS)
     "vertex_network": VertexNetworkAnalysis,  # combined alias (graph + NBS)
     "vertex_spatial": VertexSpatialAnalysis,
-    "roi_transfer_entropy": ROITransferEntropyAnalysis,
+    "roi_directed": ROIDirectedAnalysis,
     "roi_evoked": ROIEvokedAnalysis,
     "electrode_evoked": ElectrodeEvokedAnalysis,
 }
@@ -71,7 +71,8 @@ _DEPRECATED_NAMES: dict[str, str] = {
     "spatial_lmm": "vertex_spatial",
     "specparam_vertex": "vertex_specparam",
     "mvpa": "vertex_mvpa",
-    "transfer_entropy": "roi_transfer_entropy",
+    "transfer_entropy": "roi_directed",
+    "roi_transfer_entropy": "roi_directed",
     "evoked": "roi_evoked",
     "electrode": "electrode_psd",
 }
@@ -112,7 +113,7 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
     "vertex_nbs":           {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level Network-Based Statistic (sub-network test)"},
     "roi_network":          {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level graph theory + NBS (combined alias of roi_graph + roi_nbs)"},
     "vertex_network":       {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level graph theory + NBS (combined alias of vertex_graph + vertex_nbs)"},
-    "roi_transfer_entropy": {"category": "resting", "level": "roi",        "domain": "Connectivity",    "description": "Directed information flow (transfer entropy)"},
+    "roi_directed":         {"category": "resting", "level": "roi",        "domain": "Directed",        "description": "Directed connectivity (transfer entropy; DTF planned)"},
     "vertex_mvpa":          {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "MVPA (SVM pattern classification)"},
     "vertex_cluster":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Vertex-level cluster permutation"},
     "vertex_spatial":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Spatial GLS (vertex-level generalized least squares)"},
