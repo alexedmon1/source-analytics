@@ -75,15 +75,11 @@ Conventions: `S_xy(f)` = cross-spectral density, `S_xx` = auto-spectrum,
 - **Our code (`_compute_mi_from_phase_amp`, `compute_pac_zscore`, `compute_local_pac_vertices`):** identical KL/log(N) MI, 18-bin default. ✅ **Matches.** Vertex local-PAC = same MI with phase & amplitude from the **same vertex** → one MI per vertex (whole-brain map).
 - **⚠ Minor:** surrogates via **circular time-shift** of the amplitude envelope (standard single-trial alternative) rather than Tort's trial-shuffle. Equivalent intent; document. Confidence: high (primary PDF read directly).
 
-### Cross-frequency amplitude–amplitude coupling — `aac`  ⚠ DESIGN FORK
-- **Reference:** **no single canonical paper.** Conceptual primary: **Bruns A, Eckhorn R, Jokeit H, Ebner A (2000).** "Amplitude envelope correlation detects coupling among incoherent brain signals." *NeuroReport* 11(7):1509–1514. Cross-frequency comodulogram computation: **Masimore B, Kakalios J, Redish AD (2004).** *J Neurosci Methods* 138(1):97–105.
-- **Equation:** correlation between the band-X amplitude envelope and band-Y amplitude envelope across time.
-- **Our code (`compute_aac`):** `M[i,j] = Pearson(env_X(i), env_Y(j))`, raw amplitude envelopes, **not orthogonalized**, Pearson. Symmetric for equal bands.
-- **⚠ FORKS (genuinely unsettled in the field — state our choice explicitly in the paper):**
-  - amplitude (ours) vs **power** envelope (Masimore) — *we use amplitude*.
-  - **raw** (ours) vs orthogonalized envelopes — *we use raw* (cross-frequency is partly self-protected from zero-lag leakage but not immune).
-  - **Pearson** (ours) vs Spearman — *we use Pearson*.
-  → see Deviations §, item B. Confidence: medium (no canonical source; Masimore attribution secondhand).
+### Cross-frequency amplitude–amplitude (power–power) coupling — `aac`
+- **Reference:** no single canonical paper. Conceptual primary: **Bruns A, Eckhorn R, Jokeit H, Ebner A (2000).** "Amplitude envelope correlation detects coupling among incoherent brain signals." *NeuroReport* 11(7):1509–1514. Cross-frequency power-comodulogram computation: **Masimore B, Kakalios J, Redish AD (2004).** *J Neurosci Methods* 138(1):97–105.
+- **Equation:** correlation between the band-X power envelope and band-Y power envelope across time.
+- **Our code (`compute_aac`):** `M[i,j] = Pearson(P_X(i), P_Y(j))`, **power** (squared amplitude) envelopes, **raw** (not orthogonalized), **Pearson**. Symmetric for equal bands. ✅ **Choice fixed 2026-06-12** (deviation B resolved) — power form per the Masimore comodulogram lineage.
+- **Note:** raw (un-orthogonalized) envelopes — cross-frequency is partly self-protected from zero-lag leakage but not immune; state explicitly in the manuscript. Confidence: medium (no canonical source; Masimore attribution secondhand).
 
 ### n:m phase–phase coupling — `ppc`  ⚠ INCOMPLETE
 - **Reference:** concept origin **Tass P, Rosenblum MG, Weule J, et al. (1998).** "Detection of n:m phase locking from noisy data: application to MEG." *Phys Rev Lett* 81(15):3291–3294. Cross-frequency PLV estimator in human EEG/MEG: **Palva JM, Palva S, Kaila K (2005).** "Phase synchrony among neuronal oscillations in the human cortex." *J Neurosci* 25(15):3962–3972.
@@ -115,9 +111,8 @@ and cite/justify it.
 - **A — AEC vs Hipp 2012. ✅ RESOLVED 2026-06-12 — aligned to Hipp 2012 exactly**
   (`imag(Y·X*/|X|)` orthogonalization + square→log-power→Pearson, both directions
   averaged). Changes previously-computed `aec` values — re-run required.
-- **B — AAC design fork.** Choose and document: amplitude vs power envelope;
-  raw vs orthogonalized; Pearson vs Spearman. Current: amplitude / raw / Pearson.
-  Cite **Bruns 2000** (+ **Masimore 2004** if power/comodulogram form adopted).
+- **B — AAC design fork. ✅ RESOLVED 2026-06-12 — power / raw / Pearson**
+  (Masimore-2004 comodulogram lineage; cite Bruns 2000 + Masimore 2004).
 - **C — PPC surrogate significance.** Add surrogate-based significance (and/or
   analytic bias correction) for `ppc`; currently a raw, positively-biased PLF
   point estimate. Decide surrogate method (time-shift / shuffle / phase-random).

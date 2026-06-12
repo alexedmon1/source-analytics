@@ -51,15 +51,21 @@ def compute_aac(
     band_x: tuple[float, float],
     band_y: tuple[float, float],
 ) -> np.ndarray:
-    """Cross-frequency amplitude–amplitude coupling.
+    """Cross-frequency amplitude–amplitude (power–power) coupling.
 
-    Returns the N×N matrix ``M[i, j] = pearson_corr(env_X(i), env_Y(j))`` where
-    ``env_X`` is the Hilbert amplitude envelope in ``band_x`` and ``env_Y`` in
-    ``band_y``. Asymmetric when ``band_x != band_y`` (M[i,j] pairs X@i with Y@j);
-    symmetric and ≈ envelope correlation when the bands are equal. Range [-1, 1].
+    Returns the N×N matrix ``M[i, j] = pearson_corr(P_X(i), P_Y(j))`` where
+    ``P_X`` is the band-X **power** envelope (squared Hilbert amplitude) and
+    ``P_Y`` the band-Y power envelope. Asymmetric when ``band_x != band_y``
+    (M[i,j] pairs X@i with Y@j); symmetric when the bands are equal. Range [-1, 1].
+
+    Design choices (cross-frequency AAC has no single canonical paper; see
+    CONNECTIVITY_METHODS.md): **power** (squared) envelopes — the FFT/comodulogram
+    lineage (Masimore et al. 2004, *J Neurosci Methods*); **Pearson**; **raw**
+    (not orthogonalized) envelopes. Conceptual primary: Bruns et al. 2000,
+    *NeuroReport* (amplitude envelope correlation among incoherent signals).
     """
-    ax = np.abs(_band_analytic(data, sfreq, *band_x))  # (T, N)
-    ay = np.abs(_band_analytic(data, sfreq, *band_y))  # (T, N)
+    ax = np.abs(_band_analytic(data, sfreq, *band_x)) ** 2  # (T, N) band-X power
+    ay = np.abs(_band_analytic(data, sfreq, *band_y)) ** 2  # (T, N) band-Y power
 
     axc = ax - ax.mean(axis=0)
     ayc = ay - ay.mean(axis=0)
