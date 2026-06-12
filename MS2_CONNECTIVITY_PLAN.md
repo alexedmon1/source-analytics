@@ -32,27 +32,33 @@ the top of next session and confirm or redline before coding.
 
 ### D1 — Node-reduction for the expensive measures
 
-The plain phase/amplitude FC metrics are all-pairs-feasible at vertex scale. The
-**directed + cross-frequency** family is not (DTF needs a joint MVAR over all nodes;
-pairwise PAC/PPC/comodulograms are N² × frequency-grid). Splitting by feasibility:
+**✅ DECIDED 2026-06-12 (user, revised twice in-session): NO vertex→ROI reduction in the
+initial build. Vertex stays at full vertex resolution.**
 
-**▶ DEFAULT (recommended): two resolution tiers, node-reduction only where forced.**
+Reasoning: parcellating the ~215 vertices to Allen-32 **is** the ROI analysis — a vertex
+"reduced-node" tier just re-derives the ROI pipeline and undercuts the entire reason the
+vertex (methods) paper exists. ROI-reduction of vertex data is a **later descriptive**
+lens, not the initial method.
 
-- **Tier A — whole-brain vertex, all-pairs (carries the spatial thesis):**
-  AEC, imaginary coherence, PLI, wPLI, dwPLI, **dPLI**, and **local within-vertex PAC**
-  (phase & amplitude from the same vertex → one MI per vertex per band-pair → whole-brain
-  PAC map). These are where "vertex beats sensor" is demonstrated.
-- **Tier B — reduced-node (parcellated), framed as model-based confirmation:**
-  cross-region PAC, comodulograms, phase–phase (n:m) coupling, and DTF. Reduce the ~215
-  vertices to the existing **Allen-32 parcellation of the vertex set** (reuse the ROI
-  assignment machinery; no new atlas). DTF over ~32 nodes is numerically stable; a
-  freq×freq comodulogram per node is tractable.
-- Make the reduced-node count / parcellation a **config parameter** (`reduced_nodes:`),
-  defaulting to Allen-32, so it's tunable without code changes.
+- **Initial vertex build — everything that can run all-pairs, at full vertex resolution:**
+  FC-six (AEC · imag_coherence · PLI · wPLI · dwPLI · **dPLI**) + **AAC** + **PPC** (the
+  AAC/PPC kernels turned out to be cheap all-pairs matmuls — no MVAR, no per-edge model)
+  + **local within-vertex PAC map** (phase & amplitude from the same vertex → one MI per
+  vertex per band-pair; per-vertex, not pairwise). AAC/PPC group significance comes from
+  the gating engine + edge-FDR (no per-subject surrogates — they're a correlation / a
+  bounded PLV, not spectrally biased like raw PAC MI).
+- **DEFERRED out of the initial cut — DTF + full comodulograms.** DTF is the one measure
+  that genuinely can't run all-pairs at ~215 vertices (joint MVAR unstable: params grow as
+  N²·order ≫ samples). Rather than reduce-to-ROI now, it's out of the initial build; when
+  it returns it uses the **ROI-reduction-as-description** path (explicitly a coarse
+  descriptive cross-check, NOT a headline).
+- The `reduced_nodes:` / parcellation config is therefore a **later, optional** feature
+  (keyed to whichever atlas the study specifies; default Allen-32 when used), not part of
+  the initial vertex build.
 
-Rationale: dPLI is the cheap directed measure that scales to vertex all-pairs, so the
-*directed* whole-brain story is carried by dPLI; DTF is the coarser spectral-Granger
-cross-check at parcel resolution. We never parcellate the measures that are supposed to
+Superseded rationale (kept for context): dPLI is the cheap directed measure that scales to
+vertex all-pairs, so the *directed* whole-brain story is carried by dPLI; DTF is the coarser
+spectral-Granger cross-check at parcel resolution. We never parcellate the measures that are supposed to
 demonstrate the vertex advantage.
 
 ### D2 — Headline of the preliminary assertion
@@ -124,10 +130,11 @@ To build:
 - `vertex_connectivity` already multi-metric — adding wPLI/dPLI to the kernel auto-flows
   through its `connectivity_metrics` list (verify the asymmetric dPLI matrix serializes and
   plots correctly).
-- **NEW `vertex_pac`** — local within-vertex PAC maps (Tier A) + parcel comodulograms (Tier B).
-- **NEW `vertex_cfc`** — cross-frequency AAC + phase–phase coupling (Tier B parcel-level;
-  AAC can also run Tier A whole-brain like AEC).
-- **NEW `vertex_directed`** — DTF (Tier B) ± vertex TE.
+- **NEW `vertex_cross_freq`** (mirrors the ROI consolidation `roi_cross_freq`) — local
+  within-vertex PAC maps + **AAC + PPC at full vertex all-pairs** (per D1). Full
+  freq×freq comodulograms DEFERRED.
+- **NEW `vertex_directed`** — DEFERRED. DTF can't run all-pairs at ~215 vertices; returns
+  later via the ROI-reduction descriptive path. (Vertex TE similarly heavy.)
 - **NEW `electrode_connectivity`** — the comparator. FC-six on electrode time series
   (reuse `connectivity.py`). Mirror PAC/directed at sensor in Cut 2.
 
@@ -206,11 +213,16 @@ P1+P2 = Cut 1 (unblocks preliminary assertion). P3–P5 = Cut 2. P6 depends on t
 
 ## 9. Open questions / risks (resolve next session)
 
-1. **Confirm D1/D2/D3 defaults** above.
+1. ~~Confirm D1/D2/D3~~ **RESOLVED 2026-06-12.** D1: no vertex→ROI reduction initially —
+   full-vertex all-pairs for FC-six + AAC + PPC + local PAC; DTF + full comodulograms
+   DEFERRED (not reduced-to-ROI now). D3 staging confirmed (FC-six done → Cut 2 = local
+   PAC + the deferred family). D2 (methods-claim headline) stands.
 2. **Does treatment-rescue stay in MS2** or fully move to the other manuscript? (Affects
    whether P6 gating/TOST is in MS2 scope or just the disease phenotype.)
-3. **Parcellation choice** for Tier B — Allen-32 (default) vs a finer/data-driven set.
-4. **DTF library vs custom** (P5).
+3. ~~Parcellation choice for Tier B~~ **MOOT for the initial build** (no reduction). If/when
+   the ROI-reduction descriptive lens is built, it keys to the study's configured atlas
+   (default Allen-32), reusing the vertex→ROI assignment machinery.
+4. **DTF library vs custom** — deferred along with DTF itself (no longer Cut-2-blocking).
 5. **Weighted-directional hybrid** — user confirmed plain dPLI; revisit only if reviewers ask.
 6. Reconcile this connectivity reframe with the existing MS2 prose
    (`[[project_ms2_resume_2026-05-21]]`, broadband/Phase-2-failure narrative) — the drafted
