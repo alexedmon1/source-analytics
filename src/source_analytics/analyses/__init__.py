@@ -5,6 +5,7 @@ from .roi_psd_analysis import ROIPsdAnalysis
 from .roi_aperiodic_analysis import ROIAperiodicAnalysis
 from .roi_connectivity_analysis import ConnectivityAnalysis
 from .roi_cross_freq_analysis import ROICrossFreqAnalysis
+from .vertex_cross_freq_analysis import VertexCrossFreqAnalysis
 from .vertex_cluster_analysis import VertexClusterAnalysis
 from .electrode_analysis import ElectrodeAnalysis
 from .electrode_comparison_analysis import ElectrodeComparisonAnalysis
@@ -37,6 +38,7 @@ __all__ = [
     "ROIAperiodicAnalysis",
     "ConnectivityAnalysis",
     "ROICrossFreqAnalysis",
+    "VertexCrossFreqAnalysis",
     "ROIPacAnalysis",
     "VertexClusterAnalysis",
     "ElectrodeAnalysis",

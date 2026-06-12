@@ -13,6 +13,7 @@ from .analyses.roi_psd_analysis import ROIPsdAnalysis
 from .analyses.roi_aperiodic_analysis import ROIAperiodicAnalysis
 from .analyses.roi_connectivity_analysis import ConnectivityAnalysis
 from .analyses.roi_cross_freq_analysis import ROICrossFreqAnalysis
+from .analyses.vertex_cross_freq_analysis import VertexCrossFreqAnalysis
 from .analyses.vertex_cluster_analysis import VertexClusterAnalysis
 from .analyses.electrode_analysis import ElectrodeAnalysis
 from .analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
@@ -48,6 +49,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "electrode_aperiodic": ElectrodeAperiodicAnalysis,
     "electrode_comparison": ElectrodeComparisonAnalysis,
     "vertex_connectivity": VertexConnectivityAnalysis,
+    "vertex_cross_freq": VertexCrossFreqAnalysis,
     "vertex_specparam": VertexSpecparamAnalysis,
     "vertex_mvpa": VertexMVPAAnalysis,
     "roi_graph": ROIGraphAnalysis,
@@ -120,6 +122,7 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
     "vertex_spatial":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Spatial GLS (vertex-level generalized least squares)"},
     "vertex_specparam":     {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Vertex-level spectral parameterization"},
     "vertex_connectivity":  {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "description": "Vertex pairwise connectivity"},
+    "vertex_cross_freq":    {"category": "resting", "level": "vertex",     "domain": "Cross-frequency", "description": "Vertex cross-frequency coupling (local PAC, AAC, n:m PPC)"},
     "electrode_psd":        {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "description": "Sensor-level PSD analysis"},
     "electrode_aperiodic":  {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "description": "Sensor-level aperiodic (1/f) analysis"},
     "electrode_comparison": {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "supplements": "electrode_psd",       "description": "Source vs electrode comparison"},
