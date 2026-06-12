@@ -47,13 +47,21 @@ class ConnectivityAnalysis(BaseAnalysis):
     """
 
     name = "roi_connectivity"
+    SELECTABLE = {"metric": "connectivity metric", "band": "frequency band"}
+
+    # Metrics the ROI kernel emits (computed together in one shared pass;
+    # selection only restricts which are written/plotted).
+    _ROI_METRICS = ["coherence", "imag_coherence", "pli", "dwpli", "aec", "partial_corr"]
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
         self._edge_rows: list[dict] = []
         self._sfreq: float | None = None
+        self._metrics: list[str] = list(self._ROI_METRICS)
 
     def setup(self) -> None:
+        # Restrict emitted metrics to --metric / --select metric=... if given.
+        self._metrics = self._select("metric", self._ROI_METRICS)
         self._edge_rows.clear()
 
     def process_subject(self, subject: SubjectInfo) -> None:
@@ -85,7 +93,7 @@ class ConnectivityAnalysis(BaseAnalysis):
 
         for draw_ts in draws:
             band_results, roi_names = compute_connectivity_matrix(
-                draw_ts, sfreq, self.config.bands,
+                draw_ts, sfreq, self._selected_bands(),
             )
             if avg_results is None:
                 # First draw — initialize accumulators
@@ -107,15 +115,14 @@ class ConnectivityAnalysis(BaseAnalysis):
 
         n_rois = len(roi_names)
 
-        # Flatten upper triangle to edge rows
+        # Flatten upper triangle to edge rows. Emit only the selected metrics
+        # (all are computed together in compute_connectivity_matrix; --metric
+        # restricts which columns are written).
         for band_name, metrics in avg_results.items():
-            coh_mat = metrics["coherence"]
-            icoh_mat = metrics["imag_coherence"]
-            pli_mat = metrics.get("pli")
-            dwpli_mat = metrics.get("dwpli")
-            aec_mat = metrics.get("aec")
-            pcorr_mat = metrics.get("partial_corr")
-
+            sel_mats = {
+                m: metrics[m] for m in self._metrics
+                if metrics.get(m) is not None
+            }
             for i in range(n_rois):
                 for j in range(i + 1, n_rois):
                     row = {
@@ -124,17 +131,9 @@ class ConnectivityAnalysis(BaseAnalysis):
                         "band": band_name,
                         "roi1": roi_names[i],
                         "roi2": roi_names[j],
-                        "coherence": float(coh_mat[i, j]),
-                        "imag_coherence": float(icoh_mat[i, j]),
                     }
-                    if pli_mat is not None:
-                        row["pli"] = float(pli_mat[i, j])
-                    if dwpli_mat is not None:
-                        row["dwpli"] = float(dwpli_mat[i, j])
-                    if aec_mat is not None:
-                        row["aec"] = float(aec_mat[i, j])
-                    if pcorr_mat is not None:
-                        row["partial_corr"] = float(pcorr_mat[i, j])
+                    for m, mat in sel_mats.items():
+                        row[m] = float(mat[i, j])
                     self._edge_rows.append(row)
 
     def aggregate(self) -> None:
@@ -192,16 +191,9 @@ class ConnectivityAnalysis(BaseAnalysis):
             posthoc_df = pd.read_csv(posthoc_path)
             logger.info("Loaded posthoc results: %d rows", len(posthoc_df))
 
-        metrics = ["coherence", "imag_coherence"]
-        if "pli" in edges_df.columns:
-            metrics.append("pli")
-        if "dwpli" in edges_df.columns:
-            metrics.append("dwpli")
-        if "aec" in edges_df.columns:
-            metrics.append("aec")
-        if "partial_corr" in edges_df.columns:
-            metrics.append("partial_corr")
-        bands = list(self.config.bands.keys())
+        # Plot the selected metrics that are actually present in the CSV.
+        metrics = [m for m in self._metrics if m in edges_df.columns]
+        bands = list(self._selected_bands().keys())
         contrasts = self.config.contrasts
 
         if not contrasts:

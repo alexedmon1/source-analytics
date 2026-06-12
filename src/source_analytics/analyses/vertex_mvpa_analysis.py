@@ -47,6 +47,7 @@ class VertexMVPAAnalysis(BaseAnalysis):
     """Whole-brain vertex-level MVPA classification analysis."""
 
     name = "vertex_mvpa"
+    SELECTABLE = {"band": "frequency band"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -112,7 +113,7 @@ class VertexMVPAAnalysis(BaseAnalysis):
             freqs, psd = compute_psd_vertices(stc_data, sfreq, fmax=fmax)
 
         band_power = extract_band_power_vertices(
-            freqs, psd, self.config.bands, noise_exclude=self._noise_exclude,
+            freqs, psd, self._selected_bands(), noise_exclude=self._noise_exclude,
         )
 
         self._subject_groups[uid] = subject.group
@@ -171,7 +172,7 @@ class VertexMVPAAnalysis(BaseAnalysis):
                 [0] * len(group_a_uids) + [1] * len(group_b_uids)
             )
 
-            for band_name in self.config.bands:
+            for band_name in self._selected_bands():
                 # Build feature matrix: (n_subjects, n_vertices)
                 features = np.array([
                     self._subject_data[uid]["band_power"][band_name]["relative"]

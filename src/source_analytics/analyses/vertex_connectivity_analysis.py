@@ -38,6 +38,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
     """All-to-all vertex connectivity with FCD mapping (multi-metric)."""
 
     name = "vertex_connectivity"
+    SELECTABLE = {"metric": "connectivity metric", "band": "frequency band"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -71,6 +72,9 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         self._cluster_results: dict = {}
 
     def setup(self) -> None:
+        # Restrict to --metric / --select metric=... if requested (shared STFT
+        # pass is preserved — fewer metrics are emitted from the same pass).
+        self._metrics = self._select("metric", self._metrics)
         self._fcd_rows.clear()
         self._subject_data.clear()
         self._subject_groups.clear()
@@ -110,7 +114,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
 
         use_multi = len(self._metrics) > 1
 
-        for band_name, (fmin, fmax) in self.config.bands.items():
+        for band_name, (fmin, fmax) in self._selected_bands().items():
             logger.info(
                 "  Computing %s connectivity (%s)...",
                 band_name, ", ".join(self._metrics),
@@ -230,7 +234,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
             label_a = self.config.get_group_label(contrast.group_a)
             label_b = self.config.get_group_label(contrast.group_b)
 
-            for band_name in self.config.bands:
+            for band_name in self._selected_bands():
                 for metric in self._metrics:
                     data_a = np.array([
                         self._subject_data[uid]["fcd"][band_name][metric]

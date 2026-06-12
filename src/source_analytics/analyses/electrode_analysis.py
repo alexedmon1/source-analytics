@@ -50,6 +50,7 @@ class ElectrodeAnalysis(BaseAnalysis):
     """
 
     name = "electrode_psd"
+    SELECTABLE = {"band": "frequency band"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -214,7 +215,7 @@ class ElectrodeAnalysis(BaseAnalysis):
                     freqs_out = freqs
                 ch_psd_accum.setdefault(ch_name, []).append(psd)
 
-                bp = extract_band_power(freqs, psd, self.config.bands)
+                bp = extract_band_power(freqs, psd, self._selected_bands())
                 for band_name, power_vals in bp.items():
                     key = (ch_name, band_name)
                     ch_bp_accum.setdefault(key, []).append(power_vals)

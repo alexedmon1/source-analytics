@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 class NetworkAnalysisBase(BaseAnalysis):
     """Common config + NBS execution for graph/NBS/combined network analyses."""
 
+    SELECTABLE = {"metric": "connectivity metric", "band": "frequency band"}
+
     # Subclasses override these.
     _default_nbs_threshold: float = 2.5
     _nbs_results_filename: str = "nbs_results.csv"
@@ -61,6 +63,8 @@ class NetworkAnalysisBase(BaseAnalysis):
         self._connectivity_metrics = cfg.get("connectivity_metrics") or [
             cfg.get("metric", "imag_coherence")
         ]
+        # Restrict to --metric / --select metric=... if requested.
+        self._connectivity_metrics = self._select("metric", self._connectivity_metrics)
         self._nbs_threshold = float(cfg.get("nbs_threshold", self._default_nbs_threshold))
         self._nbs_permutations = int(cfg.get("nbs_permutations", 5000))
 
@@ -82,7 +86,7 @@ class NetworkAnalysisBase(BaseAnalysis):
             group_b = [u for u, g in self._subject_groups.items() if g == contrast.group_b]
             if not group_a or not group_b:
                 continue
-            for band_name in self.config.bands:
+            for band_name in self._selected_bands():
                 for metric in self._connectivity_metrics:
                     mats_a = [
                         self._conn_matrices[u][band_name][metric] for u in group_a

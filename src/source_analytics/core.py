@@ -186,7 +186,12 @@ class StudyAnalyzer:
         """Filter subjects to only those in the specified groups."""
         return [s for s in self.subjects if s.group in groups]
 
-    def run_analysis(self, analysis_name: str, steps: set[str] | None = None) -> None:
+    def run_analysis(
+        self,
+        analysis_name: str,
+        steps: set[str] | None = None,
+        select: dict[str, frozenset[str]] | None = None,
+    ) -> None:
         """Run a single named analysis.
 
         Parameters
@@ -195,6 +200,9 @@ class StudyAnalyzer:
             Name of the analysis to run (must be in ANALYSIS_REGISTRY).
         steps : set[str] | None
             If provided, only run these lifecycle steps.
+        select : dict[str, frozenset[str]] | None
+            If provided, restrict each module's sub-outputs (metric/band/...) to
+            the requested members. Forwarded to ``BaseAnalysis.run``.
         """
         if analysis_name not in ANALYSIS_REGISTRY:
             available = ", ".join(
@@ -224,7 +232,7 @@ class StudyAnalyzer:
             "Running '%s' on %d subjects (%d groups)",
             canonical_name, len(subjects), len(set(s.group for s in subjects)),
         )
-        analysis.run(subjects, steps=steps)
+        analysis.run(subjects, steps=steps, select=select)
 
     def validate(self) -> list[str]:
         """Validate the study configuration and subject discovery."""

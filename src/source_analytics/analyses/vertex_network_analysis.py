@@ -134,7 +134,7 @@ class _VertexNetworkBase(NetworkAnalysisBase):
         self._subject_groups[uid] = subject.group
 
         subject_conn: dict[str, dict[str, np.ndarray]] = {}
-        for band_name, (fmin, fmax) in self.config.bands.items():
+        for band_name, (fmin, fmax) in self._selected_bands().items():
             band_conn: dict[str, np.ndarray] = {}
             for metric in self._connectivity_metrics:
                 conn_mat = self._load_precomputed_conn(uid, band_name, metric)
@@ -229,7 +229,7 @@ class _VertexNetworkBase(NetworkAnalysisBase):
                 continue
             label_a = self.config.get_group_label(contrast.group_a)
             label_b = self.config.get_group_label(contrast.group_b)
-            for band_name in self.config.bands:
+            for band_name in self._selected_bands():
                 for metric in self._connectivity_metrics:
                     auc_a = [self._subject_aucs[u][band_name][metric] for u in group_a
                              if metric in self._subject_aucs.get(u, {}).get(band_name, {})]

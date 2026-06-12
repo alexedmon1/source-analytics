@@ -68,6 +68,7 @@ class VertexClusterAnalysis(BaseAnalysis):
     """
 
     name = "vertex_cluster"
+    SELECTABLE = {"band": "frequency band"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -149,7 +150,7 @@ class VertexClusterAnalysis(BaseAnalysis):
 
         # Extract band power metrics
         band_power = extract_band_power_vertices(
-            freqs, psd, self.config.bands,
+            freqs, psd, self._selected_bands(),
             noise_exclude=self._noise_exclude,
         )
 
@@ -288,7 +289,7 @@ class VertexClusterAnalysis(BaseAnalysis):
 
             # --- Band power metrics ---
             band_cluster_results = {}
-            for band_name in self.config.bands:
+            for band_name in self._selected_bands():
                 for metric in ["relative", "absolute"]:
                     data_a = np.array([
                         self._subject_data[uid]["band_power"][band_name][metric]

@@ -44,6 +44,7 @@ class VertexSpatialAnalysis(BaseAnalysis):
     """Vertex-level spatial analysis (R-primary)."""
 
     name = "vertex_spatial"
+    SELECTABLE = {"band": "frequency band"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -115,7 +116,7 @@ class VertexSpatialAnalysis(BaseAnalysis):
             freqs, psd = compute_psd_vertices(stc_data, sfreq, fmax=fmax)
 
         band_power = extract_band_power_vertices(
-            freqs, psd, self.config.bands, noise_exclude=self._noise_exclude,
+            freqs, psd, self._selected_bands(), noise_exclude=self._noise_exclude,
         )
 
         n_vertices = stc_data.shape[0]

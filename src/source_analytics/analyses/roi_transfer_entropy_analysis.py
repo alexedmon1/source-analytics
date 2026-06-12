@@ -47,6 +47,7 @@ class ROITransferEntropyAnalysis(BaseAnalysis):
     """
 
     name = "roi_transfer_entropy"
+    SELECTABLE = {"band": "frequency band"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -85,7 +86,7 @@ class ROITransferEntropyAnalysis(BaseAnalysis):
 
         for draw_ts in draws:
             band_results, roi_names = compute_transfer_entropy(
-                draw_ts, sfreq, self.config.bands,
+                draw_ts, sfreq, self._selected_bands(),
             )
             if avg_results is None:
                 avg_results = {

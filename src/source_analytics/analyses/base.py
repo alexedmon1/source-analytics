@@ -42,10 +42,20 @@ class BaseAnalysis(ABC):
 
     name: str = "base"
 
+    # Sub-output dimensions this analysis can filter via ``--select`` (and the
+    # ``--metric`` / ``--band`` shorthands). Maps dimension name -> short label
+    # used in ``--list`` / help. Empty = the whole module is the unit (no
+    # per-output selection). Declaring a dim is a promise that ``setup`` (or
+    # earlier) routes the corresponding configured list through ``self._select``.
+    SELECTABLE: dict[str, str] = {}
+
     def __init__(self, config: StudyConfig, output_dir: Path):
         self.config = config
         self.output_dir = output_dir
         self._generate_figures = True
+        # Active sub-output selection (dim -> normalized allowed values), set by
+        # run(select=...). Empty = run every configured sub-output. See _select.
+        self._selection: dict[str, frozenset[str]] = {}
         self.output_dir.mkdir(parents=True, exist_ok=True)
         (self.output_dir / "data").mkdir(exist_ok=True)
         # figures and tables go under results_dir
@@ -115,6 +125,63 @@ class BaseAnalysis(ABC):
             seed=self._epoch_seed,
             n_bootstrap=self._epoch_n_bootstrap,
         )
+
+    @staticmethod
+    def _select_norm(value: str) -> str:
+        """Normalize a metric/band token for selection matching.
+
+        Lowercases and collapses spaces/hyphens to underscores so that
+        ``--band "Low Gamma"``, ``low-gamma`` and ``low_gamma`` all match the
+        same configured band, and metric names are case-insensitive.
+        """
+        return str(value).strip().lower().replace(" ", "_").replace("-", "_")
+
+    def _select(self, dim: str, available: "list") -> "list":
+        """Filter a module's configured sub-outputs by an active ``--select``.
+
+        ``available`` is the list the module would otherwise process for this
+        dimension (e.g. its configured connectivity metrics, or its bands). If
+        the user requested ``--select {dim}=...`` (or ``--metric``/``--band``),
+        only the requested members are kept — matched via :meth:`_select_norm`,
+        order preserved from ``available``. With no active selection for ``dim``
+        the list is returned unchanged, so the default behaviour (run all) is
+        untouched. Raises ``ValueError`` if a selection is active but matches
+        nothing (a typo'd request should fail loudly, not silently run zero
+        work). Requested-but-absent members are warned and ignored.
+        """
+        wanted = self._selection.get(dim)
+        if not wanted:
+            return list(available)
+        norm_map = {self._select_norm(a): a for a in available}
+        keep = [a for a in available if self._select_norm(a) in wanted]
+        unknown = set(wanted) - set(norm_map)
+        if unknown:
+            logger.warning(
+                "%s: --select %s requested %s not in available set %s; ignoring",
+                self.name, dim, sorted(unknown), sorted(norm_map),
+            )
+        if not keep:
+            raise ValueError(
+                f"{self.name}: --select {dim}={sorted(wanted)} matched none of "
+                f"the available {dim}(s) {sorted(norm_map)}"
+            )
+        logger.info("%s: --select %s -> %s", self.name, dim, keep)
+        return keep
+
+    def _selected_bands(self) -> dict:
+        """``config.bands`` filtered by an active ``--select band=...``.
+
+        Convenience for the many modules that iterate frequency bands: use
+        ``self._selected_bands().items()`` in place of ``self.config.bands``.
+        Returns all bands when no band selection is active. Cached per run so
+        repeated per-subject calls don't re-log the active filter.
+        """
+        cache = getattr(self, "_bands_cache", None)
+        if cache is None:
+            names = self._select("band", list(self.config.bands.keys()))
+            cache = {n: self.config.bands[n] for n in names}
+            self._bands_cache = cache
+        return cache
 
     @abstractmethod
     def setup(self) -> None:
@@ -237,7 +304,12 @@ class BaseAnalysis(ABC):
             return ["--no-figures"]
         return []
 
-    def run(self, subjects: list[SubjectInfo], steps: set[str] | None = None) -> None:
+    def run(
+        self,
+        subjects: list[SubjectInfo],
+        steps: set[str] | None = None,
+        select: dict[str, frozenset[str]] | None = None,
+    ) -> None:
         """Execute the analysis lifecycle.
 
         Parameters
@@ -248,8 +320,15 @@ class BaseAnalysis(ABC):
             If provided, only run these steps (from VALID_STEPS).
             ``setup`` always runs. If None, run DEFAULT_RUN_STEPS
             (all steps except ``figures``).
+        select : dict[str, frozenset[str]] | None
+            Sub-output selection (dim -> normalized allowed values). Applied via
+            :meth:`_select` inside each module's ``setup``. Set before ``setup``
+            runs so the configured metric/band lists can be filtered. None = run
+            every configured sub-output.
         """
         logger.info("=== %s Analysis ===", self.name)
+        if select:
+            self._selection = select
         if steps is None:
             steps = DEFAULT_RUN_STEPS
         self._generate_figures = "figures" in steps

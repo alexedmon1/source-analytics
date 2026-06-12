@@ -118,7 +118,7 @@ class _ROINetworkBase(NetworkAnalysisBase):
             return
 
         subject_conn: dict[str, dict[str, np.ndarray]] = {}
-        for band_name in self.config.bands:
+        for band_name in self._selected_bands():
             band_df = subj_df[subj_df["band"] == band_name]
             if band_df.empty:
                 continue
@@ -189,7 +189,7 @@ class _ROINetworkBase(NetworkAnalysisBase):
             if not group_a_uids or not group_b_uids:
                 continue
 
-            for band_name in self.config.bands:
+            for band_name in self._selected_bands():
                 for metric in self._connectivity_metrics:
                     for nodal_metric in ["degree", "clustering", "betweenness"]:
                         vals_a, vals_b = [], []

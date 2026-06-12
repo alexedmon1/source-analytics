@@ -11,7 +11,7 @@ import yaml
 
 from .config import StudyConfig
 from .core import StudyAnalyzer, ANALYSIS_REGISTRY, ANALYSIS_METADATA
-from .analyses.base import VALID_STEPS
+from .analyses.base import VALID_STEPS, BaseAnalysis
 
 
 def setup_logging(verbose: bool = False):
@@ -36,12 +36,75 @@ def _print_study_summary(config: StudyConfig, analyzer: StudyAnalyzer):
     print()
 
 
-def _run_single(config: StudyConfig, analysis_name: str, steps: set[str] | None = None):
+def _run_single(
+    config: StudyConfig,
+    analysis_name: str,
+    steps: set[str] | None = None,
+    select: dict[str, frozenset[str]] | None = None,
+):
     """Run one analysis on a (possibly paradigm-scoped) config."""
     analyzer = StudyAnalyzer(config)
     _print_study_summary(config, analyzer)
-    analyzer.run_analysis(analysis_name, steps=steps)
+    analyzer.run_analysis(analysis_name, steps=steps, select=select)
     print(f"\nDone. Output: {config.output_dir / analysis_name}")
+
+
+def _parse_selection(args) -> dict[str, frozenset[str]] | None:
+    """Build the ``--select`` map (dim -> normalized values) from run args.
+
+    Accepts the ergonomic ``--metric``/``--band`` shorthands plus the generic
+    repeatable ``--select dim=v1,v2``. Values are normalized via
+    :meth:`BaseAnalysis._select_norm` so matching is case/format-insensitive.
+    Returns None when no selection was requested.
+    """
+    sel: dict[str, set[str]] = {}
+
+    def _add(dim: str, raw: str):
+        vals = {BaseAnalysis._select_norm(v) for v in raw.split(",") if v.strip()}
+        if vals:
+            sel.setdefault(dim, set()).update(vals)
+
+    if getattr(args, "metric", None):
+        _add("metric", args.metric)
+    if getattr(args, "band", None):
+        _add("band", args.band)
+    for item in getattr(args, "select", None) or []:
+        if "=" not in item:
+            print(f"ERROR: --select expects DIM=val[,val...] (got '{item}')", file=sys.stderr)
+            sys.exit(1)
+        dim, raw = item.split("=", 1)
+        _add(dim.strip(), raw)
+
+    if not sel:
+        return None
+
+    # Validate requested dims against what modules can actually filter. A dim no
+    # analysis declares is almost certainly a typo — fail loudly. When a single
+    # analysis is targeted, validate against that analysis specifically.
+    known_dims: set[str] = set()
+    for cls in ANALYSIS_REGISTRY.values():
+        known_dims |= set(getattr(cls, "SELECTABLE", {}) or {})
+    target_cls = ANALYSIS_REGISTRY.get(getattr(args, "analysis", None) or "")
+    target_dims = set(getattr(target_cls, "SELECTABLE", {}) or {}) if target_cls else None
+    for dim in sel:
+        if target_dims is not None:
+            if dim not in target_dims:
+                allowed = ", ".join(sorted(target_dims)) or "(none)"
+                print(
+                    f"ERROR: analysis '{args.analysis}' has no selectable dimension "
+                    f"'{dim}'. Selectable: {allowed}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+        elif dim not in known_dims:
+            print(
+                f"ERROR: unknown --select dimension '{dim}'. "
+                f"Known: {', '.join(sorted(known_dims))}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    return {d: frozenset(v) for d, v in sel.items()}
 
 
 def _check_output_clean(out_dir, analysis_name, *, strict, force):
@@ -75,6 +138,9 @@ def cmd_run(args):
             print(f"Valid steps: {', '.join(sorted(VALID_STEPS))}")
             sys.exit(1)
 
+    # Parse --metric / --band / --select sub-output selection
+    select = _parse_selection(args)
+
     strict = getattr(args, "strict_output", False)
     force = getattr(args, "force", False)
 
@@ -85,7 +151,7 @@ def cmd_run(args):
                 # Scope to one paradigm + one analysis
                 aconfig = config.for_paradigm_analysis(args.paradigm, args.analysis)
                 _check_output_clean(aconfig.output_dir, args.analysis, strict=strict, force=force)
-                _run_single(aconfig, args.analysis, steps=steps)
+                _run_single(aconfig, args.analysis, steps=steps, select=select)
             else:
                 # Run all analyses listed for this paradigm
                 analyses = config.get_paradigm_analyses(args.paradigm)
@@ -98,7 +164,7 @@ def cmd_run(args):
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(args.paradigm, analysis_name)
                     _check_output_clean(aconfig.output_dir, analysis_name, strict=strict, force=force)
-                    _run_single(aconfig, analysis_name, steps=steps)
+                    _run_single(aconfig, analysis_name, steps=steps, select=select)
                     print()
         else:
             if args.analysis:
@@ -117,7 +183,7 @@ def cmd_run(args):
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(pname, analysis_name)
                     _check_output_clean(aconfig.output_dir, analysis_name, strict=strict, force=force)
-                    _run_single(aconfig, analysis_name, steps=steps)
+                    _run_single(aconfig, analysis_name, steps=steps, select=select)
                     print()
     else:
         # Legacy single-paradigm config
@@ -127,7 +193,7 @@ def cmd_run(args):
         _check_output_clean(config.output_dir, args.analysis, strict=strict, force=force)
         analyzer = StudyAnalyzer(config)
         _print_study_summary(config, analyzer)
-        analyzer.run_analysis(args.analysis, steps=steps)
+        analyzer.run_analysis(args.analysis, steps=steps, select=select)
         print(f"\nDone. Output: {config.output_dir / args.analysis}")
 
 
@@ -293,7 +359,9 @@ def cmd_list(args):
         if key in groups:
             print(f"  {label}:")
             for name, desc in groups[key]:
-                print(f"    {name:<24s} {desc}")
+                dims = list(getattr(ANALYSIS_REGISTRY[name], "SELECTABLE", {}) or {})
+                tag = f"  [--select: {', '.join(dims)}]" if dims else ""
+                print(f"    {name:<24s} {desc}{tag}")
             print()
 
     # Any uncategorized
@@ -504,6 +572,27 @@ def main():
         "--steps",
         help="Comma-separated lifecycle steps to run (default: all). "
         f"Valid: {', '.join(sorted(VALID_STEPS))}",
+    )
+    p_run.add_argument(
+        "--metric",
+        help="Comma-separated connectivity metric(s) to compute, restricting a "
+        "module's configured set (e.g. --metric dwpli,wpli). Shared compute "
+        "passes are preserved; only the requested metrics are emitted. "
+        "Shorthand for --select metric=...",
+    )
+    p_run.add_argument(
+        "--band",
+        help="Comma-separated band(s) to compute, restricting a module's "
+        "configured bands (e.g. --band low_gamma). Case/format-insensitive. "
+        "Shorthand for --select band=...",
+    )
+    p_run.add_argument(
+        "--select",
+        action="append",
+        metavar="DIM=val[,val...]",
+        help="Generic sub-output selection (repeatable). DIM is a module's "
+        "selectable dimension (see `list`); values restrict that dimension. "
+        "e.g. --select metric=pli --select band=beta,low_gamma",
     )
     p_run.add_argument(
         "--strict-output",
