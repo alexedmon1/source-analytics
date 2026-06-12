@@ -86,15 +86,30 @@ def compute_ppc(
     band_y: tuple[float, float],
     n: int = 1,
     m: int = 1,
-) -> np.ndarray:
-    """n:m phase–phase coupling.
+    *,
+    n_surrogates: int = 0,
+    min_shift_sec: float = 1.0,
+    seed: int | None = None,
+):
+    """n:m phase–phase coupling (Palva et al. 2005 phase-locking factor).
 
     Returns the N×N matrix
-    ``PPC[i, j] = |mean_t exp(i·(n·φ_X(i) − m·φ_Y(j)))|`` where ``φ_X`` is the
-    instantaneous phase in ``band_x`` and ``φ_Y`` in ``band_y``. ``n:m`` is the
-    harmonic ratio (n·f_X ≈ m·f_Y; n = m = 1 is the same-frequency PLV). Range
-    [0, 1]; 1 = perfect n:m phase locking. The diagonal is within-signal n:m
-    coupling.
+    ``PPC[i, j] = |mean_t exp(i·(n·φ_X(i) − m·φ_Y(j)))|`` (the n:m PLF) where
+    ``φ_X`` is the instantaneous phase in ``band_x`` and ``φ_Y`` in ``band_y``.
+    ``n:m`` is the harmonic ratio (n·f_X ≈ m·f_Y; n = m = 1 is the same-frequency
+    PLV). Range [0, 1]; 1 = perfect n:m phase locking. The diagonal is
+    within-signal n:m coupling.
+
+    The raw PLF is positively biased at finite N (E[PLF] ≈ √π/(2√N) for random
+    phases). With ``n_surrogates > 0`` a **surrogate z-score** is returned
+    alongside the PLF: the band-Y phase is circularly time-shifted by random
+    amounts (preserving each signal's own phase statistics while destroying the
+    cross-frequency relationship), and ``z = (PLF − mean_surr) / std_surr``.
+
+    Returns
+    -------
+    plf : ndarray (N, N)                      if n_surrogates == 0
+    (plf, z) : tuple of ndarray (N, N), (N, N)  if n_surrogates > 0
     """
     px = np.angle(_band_analytic(data, sfreq, *band_x))  # (T, N)
     py = np.angle(_band_analytic(data, sfreq, *band_y))  # (T, N)
@@ -104,5 +119,25 @@ def compute_ppc(
 
     n_times = px.shape[0]
     # cross[i,j] = mean_t exp(i(n φ_X(i) − m φ_Y(j))) = mean_t ex[t,i]·conj(ey[t,j])
-    cross = (ex.T @ np.conj(ey)) / n_times
-    return np.abs(cross)
+    plf = np.abs((ex.T @ np.conj(ey)) / n_times)
+
+    if n_surrogates <= 0:
+        return plf
+
+    rng = np.random.default_rng(seed)
+    min_shift = max(int(min_shift_sec * sfreq), 1)
+    max_shift = n_times - min_shift
+    # Welford online mean/variance over surrogate PLF matrices
+    s_mean = np.zeros_like(plf)
+    s_m2 = np.zeros_like(plf)
+    for k in range(n_surrogates):
+        shift = (int(rng.integers(min_shift, max_shift))
+                 if max_shift > min_shift else min_shift)
+        ey_shift = np.roll(ey, shift, axis=0)
+        surr = np.abs((ex.T @ np.conj(ey_shift)) / n_times)
+        delta = surr - s_mean
+        s_mean += delta / (k + 1)
+        s_m2 += delta * (surr - s_mean)
+    s_std = np.sqrt(s_m2 / max(n_surrogates - 1, 1))
+    z = np.where(s_std > 0, (plf - s_mean) / s_std, 0.0)
+    return plf, z

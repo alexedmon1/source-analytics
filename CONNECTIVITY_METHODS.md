@@ -85,9 +85,14 @@ Conventions: `S_xy(f)` = cross-spectral density, `S_xx` = auto-spectrum,
 - **Reference:** concept origin **Tass P, Rosenblum MG, Weule J, et al. (1998).** "Detection of n:m phase locking from noisy data: application to MEG." *Phys Rev Lett* 81(15):3291–3294. Cross-frequency PLV estimator in human EEG/MEG: **Palva JM, Palva S, Kaila K (2005).** "Phase synchrony among neuronal oscillations in the human cortex." *J Neurosci* 25(15):3962–3972.
 - **Equation (Palva):** `PLF = |(1/N) Σ_t exp(i·φ_{n,m}(t))|`, `φ_{n,m} = n·φ_x − m·φ_y`. Range 0–1, symmetric. Palva tested **n=1, m∈{1…6}**.
 - **Our code (`compute_ppc`):** `|mean exp(i(n·φ_x − m·φ_y))|`. ✅ **Matches the PLF form.** n:m via `_nm_ratio` = `n=round(f_y/f_x), m=1` (harmonic ratio from band centers; band_x=slow).
-- **⚠ GAPS:**
-  1. **No surrogate significance.** PLV has positive finite-sample bias (`E[PLV]≈√π/(2√N)` for random phases); a raw point estimate is biased high. Palva used surrogate distributions. → see Deviations §, item C.
-  2. n:m **convention** (`n` on slow band, m=1) differs in labeling from Palva's `n=1, m∈{1..6}`; mathematically equivalent up to band ordering, but document it.
+- **Surrogate significance ✅ ADDED 2026-06-12 (deviation C resolved):** with
+  `n_surrogates>0`, `compute_ppc` also returns a **surrogate z-score** —
+  band-Y phase is circularly time-shifted by random amounts (preserves each
+  signal's phase stats, destroys the cross-frequency relationship), `z = (PLF −
+  mean_surr)/std_surr`. The `roi_cross_freq` module emits both `ppc` (PLF) and
+  `ppc_z`; surrogate count is `ppc_surrogates` (config, default 200).
+- **Note:** n:m convention (`n` on slow band, m=1) differs in labeling from
+  Palva's `n=1, m∈{1..6}` but is mathematically equivalent up to band ordering.
   Confidence: high for PLF formula; n:m selection has no field standard.
 
 ---
@@ -113,9 +118,11 @@ and cite/justify it.
   averaged). Changes previously-computed `aec` values — re-run required.
 - **B — AAC design fork. ✅ RESOLVED 2026-06-12 — power / raw / Pearson**
   (Masimore-2004 comodulogram lineage; cite Bruns 2000 + Masimore 2004).
-- **C — PPC surrogate significance.** Add surrogate-based significance (and/or
-  analytic bias correction) for `ppc`; currently a raw, positively-biased PLF
-  point estimate. Decide surrogate method (time-shift / shuffle / phase-random).
+- **C — PPC surrogate significance. ✅ RESOLVED 2026-06-12** — added circular
+  time-shift surrogate z-score (`compute_ppc(n_surrogates>0)` → `(plf, z)`;
+  module emits `ppc` + `ppc_z`).
+
+**All three deviations (A, B, C) resolved 2026-06-12.**
 
 ---
 

@@ -99,3 +99,25 @@ def test_ppc_unlocked_pair_low():
     b = np.sin(2 * np.pi * 20 * t + np.cumsum(rng.standard_normal(t.size)) * 0.05)
     ppc = compute_ppc(np.vstack([a, b]), FS, BAND_LOW, BAND_HIGH, n=2, m=1)
     assert ppc[0, 1] < 0.5
+
+
+# ------------------------------------------------- PPC surrogate significance
+def test_ppc_surrogate_zscore():
+    t = _t()
+    x = np.sin(2 * np.pi * 10 * t)
+    y = np.sin(2 * np.pi * 20 * t)            # locked 2:1 to x
+    rng = np.random.default_rng(7)
+    drift = np.cumsum(rng.standard_normal(t.size)) * 0.05
+    y_free = np.sin(2 * np.pi * 20 * t + drift)  # unlocked control
+
+    plf, z = compute_ppc(
+        np.vstack([x, y, y_free]), FS, BAND_LOW, BAND_HIGH,
+        n=2, m=1, n_surrogates=100, seed=0,
+    )
+    # locked pair survives surrogate correction with a large z; unlocked near 0
+    assert z.shape == plf.shape == (3, 3)
+    assert z[0, 1] > 5.0
+    assert abs(z[0, 2]) < 3.0
+    # backward-compat: no surrogates -> bare PLF matrix
+    plf_only = compute_ppc(np.vstack([x, y]), FS, BAND_LOW, BAND_HIGH, n=2, m=1)
+    assert plf_only.shape == (2, 2)

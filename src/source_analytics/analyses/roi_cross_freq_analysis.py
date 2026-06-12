@@ -81,6 +81,9 @@ class ROICrossFreqAnalysis(BaseAnalysis):
         self._ppc_rows: list[dict] = []
         self._sfreq: float | None = None
         self._metrics: list[str] = list(self._CROSS_FREQ_METRICS)
+        cfg = config.raw.get(self.name, {})
+        # Surrogate count for PPC significance (Palva 2005). 0 = raw PLF only.
+        self._ppc_surrogates = int(cfg.get("ppc_surrogates", 200))
 
     def setup(self) -> None:
         # Restrict to --metric / --select metric=... (pac/aac/ppc).
@@ -149,7 +152,8 @@ class ROICrossFreqAnalysis(BaseAnalysis):
         """AAC / PPC: ROI×ROI matrix per band pair, averaged over draws → edges.
 
         Corpus-callosum WM tracts are excluded (these are edge measures, like
-        the FC connectivity module).
+        the FC connectivity module). PPC additionally emits a surrogate z-score
+        (``ppc_z``) for significance (Palva 2005).
         """
         rows_out = self._aac_rows if metric == "aac" else self._ppc_rows
         bands = self.config.bands
@@ -159,26 +163,37 @@ class ROICrossFreqAnalysis(BaseAnalysis):
             band_y = bands[amp_band]
             n, m = _nm_ratio(band_x, band_y) if metric == "ppc" else (1, 1)
 
-            avg = None
+            accum: dict[str, np.ndarray] | None = None
             roi_names = None
             for draw_ts in draws:
                 names = [r for r in sorted(draw_ts.keys()) if r not in CC_ROIS]
                 roi_names = names
                 data = np.vstack([draw_ts[r] for r in names])
                 if metric == "aac":
-                    mat = compute_aac(data, sfreq, band_x, band_y)
+                    out = {"aac": compute_aac(data, sfreq, band_x, band_y)}
+                elif self._ppc_surrogates > 0:
+                    plf, z = compute_ppc(
+                        data, sfreq, band_x, band_y, n=n, m=m,
+                        n_surrogates=self._ppc_surrogates, seed=42,
+                    )
+                    out = {"ppc": plf, "ppc_z": z}
                 else:
-                    mat = compute_ppc(data, sfreq, band_x, band_y, n=n, m=m)
-                avg = mat.copy() if avg is None else avg + mat
-            if avg is None:
+                    out = {"ppc": compute_ppc(data, sfreq, band_x, band_y, n=n, m=m)}
+                if accum is None:
+                    accum = {k: v.copy() for k, v in out.items()}
+                else:
+                    for k in accum:
+                        accum[k] += out[k]
+            if accum is None:
                 continue
-            avg /= len(draws)
+            for k in accum:
+                accum[k] /= len(draws)
 
             freq_pair = f"{phase_band}-{amp_band}"
             n_rois = len(roi_names)
             for i in range(n_rois):
                 for j in range(n_rois):
-                    rows_out.append({
+                    row = {
                         "subject": uid,
                         "group": group,
                         "phase_band": phase_band,
@@ -187,8 +202,10 @@ class ROICrossFreqAnalysis(BaseAnalysis):
                         "n": n, "m": m,
                         "roi_x": roi_names[i],
                         "roi_y": roi_names[j],
-                        metric: float(avg[i, j]),
-                    })
+                    }
+                    for k in accum:
+                        row[k] = float(accum[k][i, j])
+                    rows_out.append(row)
 
     # ----------------------------------------------------------- aggregate
     def aggregate(self) -> None:
