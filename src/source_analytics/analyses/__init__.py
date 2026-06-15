@@ -9,6 +9,7 @@ from .vertex_cross_freq_analysis import VertexCrossFreqAnalysis
 from .vertex_cluster_analysis import VertexClusterAnalysis
 from .electrode_analysis import ElectrodeAnalysis
 from .electrode_comparison_analysis import ElectrodeComparisonAnalysis
+from .electrode_connectivity_analysis import ElectrodeConnectivityAnalysis
 from .vertex_connectivity_analysis import VertexConnectivityAnalysis
 from .vertex_specparam_analysis import VertexSpecparamAnalysis
 from .vertex_mvpa_analysis import VertexMVPAAnalysis
@@ -43,6 +44,7 @@ __all__ = [
     "VertexClusterAnalysis",
     "ElectrodeAnalysis",
     "ElectrodeComparisonAnalysis",
+    "ElectrodeConnectivityAnalysis",
     "VertexConnectivityAnalysis",
     "VertexSpecparamAnalysis",
     "VertexMVPAAnalysis",
