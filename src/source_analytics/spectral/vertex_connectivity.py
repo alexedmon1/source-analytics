@@ -19,6 +19,8 @@ Supported metrics:
 from __future__ import annotations
 
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from scipy.signal import stft, hilbert, butter, sosfiltfilt
@@ -264,17 +266,44 @@ def _compute_aec(stc_data, sfreq, band, n_vertices):
         filtered = sosfiltfilt(sos, stc_data[i])
         analytic[:, i] = hilbert(filtered)
 
-    aec = np.zeros((n_vertices, n_vertices), dtype=np.float64)
-    for i in range(n_vertices):
-        for j in range(i + 1, n_vertices):
-            zi = analytic[:, i]
-            zj = analytic[:, j]
-            r1 = _orth_log_power(zi, zj, eps)   # j orthogonalized w.r.t. i
-            r2 = _orth_log_power(zj, zi, eps)   # i orthogonalized w.r.t. j
-            val = (r1 + r2) / 2.0
-            aec[i, j] = val
-            aec[j, i] = val
+    # Vectorized Hipp AEC. The directed matrix m[i, j] = corr(log|z_i|^2,
+    # log(imag(z_j · z_i*/|z_i|))^2) is built one reference row at a time: for
+    # each vertex i, orthogonalize ALL other vertices against it at once and
+    # correlate the log-power envelopes. This replaces the O(n^2) Python pair
+    # loop with n vectorized passes (identical math); AEC = (m + m^T) / 2.
+    # The per-row work is dominated by GIL-releasing numpy ufuncs (log, complex
+    # multiply), so the rows are computed across a thread pool for a ~linear,
+    # bit-exact speedup. Worker count is bounded by memory (each row holds a few
+    # (T, n) temporaries) so large timeseries don't blow the heap.
+    log_pow = np.log(np.abs(analytic) ** 2 + eps)        # (T, n) = log|z_j|^2 cols
+    m = np.empty((n_vertices, n_vertices), dtype=np.float64)
 
+    def _row(i):
+        z_ref = analytic[:, i]
+        scale = np.conj(z_ref) / (np.abs(z_ref) + eps)   # (T,)
+        y_orth = np.imag(analytic * scale[:, None])      # (T, n) others ⊥ i
+        log_pow_orth = np.log(y_orth ** 2 + eps)         # (T, n)
+        a = log_pow[:, i] - log_pow[:, i].mean()         # (T,) log|z_i|^2 centered
+        B = log_pow_orth - log_pow_orth.mean(axis=0)     # (T, n) centered
+        denom = np.sqrt((a * a).sum()) * np.sqrt((B * B).sum(axis=0))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return i, (a @ B) / denom                    # corr per column
+
+    cpu_cap = min(8, max(1, (os.cpu_count() or 2) - 2))
+    per_worker = 3 * n_times * n_vertices * 8            # ~bytes of (T,n) temps
+    mem_cap = max(1, int(4e9 // max(per_worker, 1)))     # keep peak heap ~<4 GB
+    workers = max(1, min(cpu_cap, mem_cap))
+
+    if workers == 1:
+        for i in range(n_vertices):
+            m[i] = _row(i)[1]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for i, row in ex.map(_row, range(n_vertices)):
+                m[i] = row
+
+    aec = (m + m.T) / 2.0
+    np.fill_diagonal(aec, 0.0)
     return aec
 
 
