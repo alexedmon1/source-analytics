@@ -33,6 +33,7 @@ from .analyses.vertex_network_analysis import (
 )
 from .analyses.vertex_spatial_analysis import VertexSpatialAnalysis
 from .analyses.roi_directed_analysis import ROIDirectedAnalysis
+from .analyses.vertex_directed_analysis import VertexDirectedAnalysis
 from .analyses.roi_evoked_analysis import ROIEvokedAnalysis
 from .analyses.vertex_evoked_analysis import VertexEvokedAnalysis
 from .analyses.electrode_evoked_analysis import ElectrodeEvokedAnalysis
@@ -63,6 +64,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "vertex_network": VertexNetworkAnalysis,  # combined alias (graph + NBS)
     "vertex_spatial": VertexSpatialAnalysis,
     "roi_directed": ROIDirectedAnalysis,
+    "vertex_directed": VertexDirectedAnalysis,
     "roi_evoked": ROIEvokedAnalysis,
     "vertex_evoked": VertexEvokedAnalysis,
     "electrode_evoked": ElectrodeEvokedAnalysis,
@@ -120,7 +122,8 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
     "vertex_nbs":           {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level Network-Based Statistic (sub-network test)"},
     "roi_network":          {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level graph theory + NBS (combined alias of roi_graph + roi_nbs)"},
     "vertex_network":       {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level graph theory + NBS (combined alias of vertex_graph + vertex_nbs)"},
-    "roi_directed":         {"category": "resting", "level": "roi",        "domain": "Directed",        "description": "Directed connectivity (transfer entropy; DTF planned)"},
+    "roi_directed":         {"category": "resting", "level": "roi",        "domain": "Directed",        "description": "Directed connectivity (transfer entropy + DTF)"},
+    "vertex_directed":      {"category": "resting", "level": "vertex",     "domain": "Directed",        "description": "Vertex DTF outflow/inflow/netflow (ridge-MVAR, cluster-corrected)"},
     "vertex_mvpa":          {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "MVPA (SVM pattern classification)"},
     "vertex_cluster":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Vertex-level cluster permutation"},
     "vertex_spatial":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Spatial GLS (vertex-level generalized least squares)"},
