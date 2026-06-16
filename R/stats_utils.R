@@ -723,3 +723,153 @@ run_posthoc_emmeans_region_nested <- function(band_df, contrasts, bands, roi_cat
   posthoc_df <- bind_rows(results)
   return(posthoc_df)
 }
+
+
+# ============================================================================
+# Hypothesis-testing engine (Phase 1): gating + equivalence (TOST)
+# ----------------------------------------------------------------------------
+# Generic post-processors over a per-cell post-hoc table (one row per
+# contrast x cell, with estimate / SE / df / q_value / hedges_g). They read the
+# study's declarative contrasts (role / test / gate_on / equivalence_margin) and
+# the hypothesis_testing config, then add gating + equivalence columns. The
+# hypothesis structure lives in the YAML; the engine is generic (works for any
+# module by passing the columns that identify a cell). See
+# HYPOTHESIS_CONTRASTS_PLAN.md §4.
+# ============================================================================
+
+#' TOST equivalence verdict for one cell: equivalent when the (1 - 2*alpha) CI of
+#' the estimate lies entirely within +/- margin.
+tost_equivalent <- function(estimate, SE, df, margin, alpha = 0.05) {
+  if (is.na(estimate) || is.na(SE) || is.na(margin) || margin <= 0) return(NA)
+  dof <- if (is.na(df) || df <= 0) Inf else df
+  zc <- qt(1 - alpha, df = dof)
+  lo <- estimate - zc * SE
+  hi <- estimate + zc * SE
+  (lo > -margin) && (hi < margin)
+}
+
+#' Per-cell equivalence margin from a margin spec.
+#'   gap_fraction: value * |phenotype estimate at cell| ("closed >= 1-value of deficit")
+#'   sd:           value * residual SD at cell
+.equivalence_margin <- function(spec, pheno_estimate, resid_sd) {
+  if (is.null(spec)) return(NA_real_)
+  mode <- spec$mode; value <- suppressWarnings(as.numeric(spec$value))
+  if (is.null(mode) || is.na(value)) return(NA_real_)
+  if (mode == "gap_fraction") {
+    if (is.na(pheno_estimate)) return(NA_real_)
+    return(value * abs(pheno_estimate))
+  } else if (mode == "sd") {
+    if (is.na(resid_sd)) return(NA_real_)
+    return(value * abs(resid_sd))
+  }
+  NA_real_
+}
+
+#' Apply hypothesis-testing gating + equivalence to a per-cell contrast table.
+#'
+#' Adds columns: role, test, gated_in, gate_parents, margin_used, equivalent.
+#' A gated contrast's cell is `gated_in` only when that cell is significant (at
+#' gate_alpha, post-FDR) for ALL of its gate parents. Equivalence contrasts get a
+#' TOST verdict per cell. Contrasts with no role/gate_on/test behave as before.
+#'
+#' @param df per-cell post-hoc data.frame
+#' @param contrasts list of contrast defs (from config$contrasts)
+#' @param hyp_cfg list with gate_alpha, default_equivalence_margin
+#' @param cell_cols columns identifying a cell, e.g. c("band","power_type","roi")
+apply_hypothesis_gating <- function(df, contrasts, hyp_cfg = list(),
+                                    cell_cols = c("band", "roi")) {
+  if (is.null(df) || nrow(df) == 0 || length(contrasts) == 0) return(df)
+  gate_alpha <- if (!is.null(hyp_cfg$gate_alpha)) as.numeric(hyp_cfg$gate_alpha) else 0.05
+  default_margin <- hyp_cfg$default_equivalence_margin
+
+  cmeta <- setNames(contrasts, vapply(contrasts, function(x) x$name, character(1)))
+  cell_cols <- intersect(cell_cols, names(df))
+  df$.cell <- do.call(paste, c(df[cell_cols], sep = ""))
+
+  # significance mask per contrast: cells significant at gate_alpha (post-FDR q)
+  masks <- lapply(split(df, df$contrast),
+                  function(s) s$.cell[!is.na(s$q_value) & s$q_value < gate_alpha])
+
+  # phenotype estimate per cell (for gap_fraction margins)
+  pheno_name <- NULL
+  for (x in contrasts) if (identical(x$role, "phenotype")) pheno_name <- x$name
+  pheno_est <- setNames(numeric(0), character(0))
+  if (!is.null(pheno_name) && pheno_name %in% df$contrast) {
+    ps <- df[df$contrast == pheno_name, ]
+    pheno_est <- setNames(ps$estimate, ps$.cell)
+  }
+
+  n <- nrow(df)
+  role <- rep("exploratory", n); test <- rep("difference", n)
+  gated_in <- rep(TRUE, n); gate_parents <- rep(NA_character_, n)
+  margin_used <- rep(NA_real_, n); equivalent <- rep(NA, n)
+
+  for (i in seq_len(n)) {
+    cm <- cmeta[[df$contrast[i]]]
+    if (is.null(cm)) next
+    if (!is.null(cm$role)) role[i] <- cm$role
+    if (!is.null(cm$test)) test[i] <- cm$test
+    parents <- cm$gate_on
+    if (!is.null(parents)) {
+      parents <- as.character(unlist(parents))
+      gate_parents[i] <- paste(parents, collapse = ",")
+      gated_in[i] <- all(vapply(parents,
+                                function(p) df$.cell[i] %in% masks[[p]], logical(1)))
+    }
+    if (identical(test[i], "equivalence")) {
+      spec <- cm$equivalence_margin; if (is.null(spec)) spec <- default_margin
+      resid_sd <- if (!is.null(df$hedges_g) && !is.na(df$hedges_g[i]) &&
+                      df$hedges_g[i] != 0) df$estimate[i] / df$hedges_g[i] else NA_real_
+      m <- .equivalence_margin(spec, pheno_est[df$.cell[i]], resid_sd)
+      margin_used[i] <- m
+      equivalent[i] <- tost_equivalent(df$estimate[i], df$SE[i], df$df[i], m, gate_alpha)
+    }
+  }
+  df$role <- role; df$test <- test
+  df$gated_in <- gated_in; df$gate_parents <- gate_parents
+  df$margin_used <- margin_used; df$equivalent <- equivalent
+  df$.cell <- NULL
+  df
+}
+
+#' Per-(treatment, cell) rescue verdict by combining gated rescue + normalization
+#' results. verdict in {not_in_phenotype, not_rescued, rescued_not_normalized,
+#' rescued_normalized}. Returns NULL when there are no rescue contrasts.
+build_rescue_verdicts <- function(gated_df, contrasts, cell_cols = c("band", "roi")) {
+  cell_cols <- intersect(cell_cols, names(gated_df))
+  rescue <- gated_df[gated_df$role == "rescue", , drop = FALSE]
+  norm <- gated_df[gated_df$role == "normalization", , drop = FALSE]
+  if (nrow(rescue) == 0) return(NULL)
+  ckey <- function(d, rows) do.call(paste, c(d[rows, cell_cols, drop = FALSE], sep = ""))
+  out <- list()
+  for (c in contrasts) {
+    if (!identical(c$role, "rescue")) next
+    treat <- c$group_a
+    rc <- rescue[rescue$contrast == c$name, , drop = FALSE]
+    norm_name <- NULL
+    for (nc in contrasts) if (identical(nc$role, "normalization") &&
+                              identical(nc$group_a, treat)) norm_name <- nc$name
+    nrows <- if (!is.null(norm_name)) norm[norm$contrast == norm_name, , drop = FALSE]
+             else norm[0, , drop = FALSE]
+    nk <- if (nrow(nrows) > 0) ckey(nrows, seq_len(nrow(nrows))) else character(0)
+    for (i in seq_len(nrow(rc))) {
+      key <- ckey(rc, i)
+      in_pheno <- isTRUE(rc$gated_in[i])
+      rescued <- in_pheno && isTRUE(rc$significant[i])
+      eq <- NA
+      if (length(nk) > 0) {
+        mi <- which(nk == key)
+        if (length(mi) > 0) eq <- isTRUE(nrows$equivalent[mi[1]])
+      }
+      verdict <- if (!in_pheno) "not_in_phenotype"
+                 else if (!rescued) "not_rescued"
+                 else if (isTRUE(eq)) "rescued_normalized"
+                 else "rescued_not_normalized"
+      row <- rc[i, cell_cols, drop = FALSE]
+      row$treatment <- treat; row$rescue_contrast <- c$name; row$verdict <- verdict
+      out[[length(out) + 1]] <- row
+    }
+  }
+  if (length(out) == 0) return(NULL)
+  do.call(rbind, out)
+}
