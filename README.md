@@ -287,9 +287,10 @@ they compute, and the **primary literature** the implementation follows.
 | **Connectivity** (same-frequency FC) | `roi_connectivity`, `vertex_connectivity` | coherence; imaginary coherence; PLI; wPLI; dwPLI; dPLI; AEC; partial correlation | Nolte 2004 (imcoh); Stam 2007 (PLI); Vinck 2011 (wPLI/dwPLI); Stam & van Straaten 2012 (dPLI); Hipp 2012 (AEC); Marrelec 2006 (partial corr) — see `CONNECTIVITY_METHODS.md` |
 | | `roi_graph`/`roi_nbs`, `vertex_graph`/`vertex_nbs` *(supplements `*_connectivity`)* | graph-theoretic metrics; Network-Based Statistic | Rubinov & Sporns 2010 (graph); Zalesky et al. 2010 (NBS) |
 | **Cross-frequency** | `roi_cross_freq`, `vertex_cross_freq` | PAC (Modulation Index); cross-frequency AAC; n:m PPC | Tort et al. 2010 (PAC MI); Bruns 2000 / Masimore 2004 (AAC); Tass 1998 / Palva 2005 (PPC) — see `CONNECTIVITY_METHODS.md` |
-| **Directed** | `roi_directed` | transfer entropy (`te`, `net_te`); DTF planned | Schreiber 2000 (transfer entropy) |
+| **Directed** | `roi_directed` (ROI); `vertex_directed` (vertex) | transfer entropy (`te`, `net_te`); DTF (`dtf`; vertex: outflow/inflow/netflow) via ridge-MVAR | Schreiber 2000 (transfer entropy); Kaminski & Blinowska 1991 (DTF) |
+| **Connectivity** (sensor) | `electrode_connectivity` | FC-six (coherence/imcoh/PLI/wPLI/dwPLI/dPLI) + per-channel FCD — the source-vs-sensor comparator | as Connectivity row — see `CONNECTIVITY_METHODS.md` |
 | **Sensor-level** | `electrode_comparison` *(supplements `electrode_psd`)* | source-vs-electrode validation comparison | — (internal comparison) |
-| **Evoked** | `roi_evoked`, `electrode_evoked` | ITC, ERSP, single-trial power (trial paradigms) | standard time-frequency (Hilbert/wavelet ITC/ERSP) |
+| **Evoked** | `roi_evoked`, `vertex_evoked`, `electrode_evoked` | ITC, ERSP, single-trial power (trial paradigms) | standard time-frequency (Hilbert/wavelet ITC/ERSP) |
 
 Each analysis is `--metric`-selectable where it computes multiple measures (e.g.
 `--metric wpli`, `--metric pac`); see [Selecting metrics & bands](#selecting-metrics--bands).
