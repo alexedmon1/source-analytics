@@ -91,7 +91,7 @@ $SA resting --analysis roi_psd
 $SA resting --analysis roi_aperiodic
 $SA resting --analysis roi_connectivity        # PRIMARY
 $SA resting --analysis roi_cross_freq          # PAC + AAC + PPC (--metric to pick one)
-$SA resting --analysis roi_directed            # transfer entropy (DTF planned)
+$SA resting --analysis roi_directed            # transfer entropy + DTF (--metric te|dtf)
 $SA resting --analysis roi_graph               # supplements roi_connectivity → run after it
 $SA resting --analysis roi_nbs                 # supplements roi_connectivity → run after it
 
@@ -103,9 +103,16 @@ $SA vertex  --analysis vertex_mvpa
 $SA vertex  --analysis vertex_specparam
 $SA vertex  --analysis vertex_spatial
 $SA vertex  --analysis vertex_connectivity     # PRIMARY (slow; computes connectivity matrices)
+$SA vertex  --analysis electrode_connectivity  # sensor FC-six comparator (source-vs-sensor)
 $SA vertex  --analysis vertex_cross_freq        # local PAC + AAC + PPC (full vertex resolution)
+$SA vertex  --analysis vertex_directed         # vertex DTF (ridge-MVAR; outflow/inflow/netflow)
 $SA vertex  --analysis vertex_graph            # supplements vertex_connectivity → run after it
 $SA vertex  --analysis vertex_nbs              # supplements vertex_connectivity → run after it
+
+# Evoked paradigm (trial-based data only)
+$SA evoked  --analysis roi_evoked              # ITC / ERSP / STP
+$SA evoked  --analysis vertex_evoked           # per-vertex ITC / ERSP / STP (cluster-corrected)
+$SA evoked  --analysis electrode_evoked
 ```
 
 ## Study Configuration
@@ -215,7 +222,7 @@ The per-analysis block is merged into `config.raw[<analysis>]` by
 
 source-analytics reads output files produced by the source_localization pipeline. Each subject directory contains:
 
-**ROI-level analyses** (roi_psd, roi_aperiodic, roi_connectivity, roi_directed, roi_cross_freq) -- default discovery:
+**ROI-level analyses** (roi_psd, roi_aperiodic, roi_connectivity, roi_directed, roi_cross_freq, roi_evoked) -- default discovery:
 
 | File | Format | Contents |
 |------|--------|----------|
@@ -223,14 +230,14 @@ source-analytics reads output files produced by the source_localization pipeline
 | `step6_roi_timeseries_signed.pkl` | Python pickle | Dict[str, ndarray] -- ROI timeseries (signed, for connectivity) |
 | `roi_timeseries_magnitude.set` | EEGLAB .set | Same data + metadata (sfreq) |
 
-**Vertex-level analyses** (vertex_cluster, vertex_connectivity, vertex_specparam, vertex_mvpa, network, vertex_spatial) -- uses `discovery.required_files` in config:
+**Vertex-level analyses** (vertex_cluster, vertex_connectivity, vertex_cross_freq, vertex_directed, vertex_specparam, vertex_mvpa, network, vertex_spatial, vertex_evoked) -- uses `discovery.required_files` in config:
 
 | File | Format | Contents |
 |------|--------|----------|
 | `step5_stc.pkl` | Python pickle | MNE SourceEstimate (n_vertices, n_times) |
 | `step3_source_coords_mm.npy` | NumPy array | Source coordinates (n_vertices, 3) in mm |
 
-**Electrode-level analyses** (electrode, electrode_comparison) -- uses `electrode.subject_roster` in config:
+**Electrode-level analyses** (electrode_psd, electrode_aperiodic, electrode_connectivity, electrode_comparison, electrode_evoked) -- uses `electrode.subject_roster` in config:
 
 | File | Format | Contents |
 |------|--------|----------|
@@ -452,16 +459,27 @@ output_dir/roi_connectivity/
     roi_connectivity_region_pair_forest_*.png
 ```
 
-#### ROI Transfer Entropy (Directed Information-Theoretic Connectivity)
+#### ROI Directed (Transfer Entropy + DTF)
 
-Directed transfer entropy between all ROI pairs, quantifying how much past activity in one ROI reduces uncertainty about future activity in another. Uses **signed** (phase-preserving) ROI timeseries.
+Directed connectivity between all ROI pairs. `--metric` selects the measure:
+**`te`** (transfer entropy, model-free/pairwise) and/or **`dtf`** (directed
+transfer function, multivariate via ridge-MVAR). Uses **signed** (phase-preserving)
+ROI timeseries.
 
-**Python side:**
+**Transfer entropy (`te`):**
 - Bandpass filtering per frequency band, quantile-based discretization (5 bins)
 - TE(X→Y) = H(Y_future, Y_past) + H(Y_past, X_past) − H(Y_past) − H(Y_future, Y_past, X_past)
-- All n×(n-1) directed pairs (46 ROIs → 2,070 directed pairs per band)
-- Net TE: TE(X→Y) − TE(Y→X) for directional asymmetry
-- Exports `transfer_entropy_edges.csv` (subject × directed pair × band)
+- All n×(n-1) directed pairs; net TE: TE(X→Y) − TE(Y→X) for directional asymmetry
+- R side does the group/directional/region-pair stats (below)
+
+**DTF (`dtf`):**
+- One ridge-regularized MVAR fit over all ROIs (order 8, ridge 0.05 by default;
+  config `roi_directed.mvar_order` / `mvar_ridge`), then DTF read out across bands
+- Ridge is required because source ROIs are strongly collinear (mean inter-node
+  |corr| ≈ 0.64) — plain LS-MVAR is non-stationary; the module warns if the fit
+  is unstable. `dtf[i,j]` = directed influence source i → target j
+- Exported as a `dtf` column in the directed edge CSV; group-level DTF stats are
+  not yet wired (a DTF-only run skips the TE R script)
 
 **R side:**
 - **Global analysis:** Mean TE across all directed edges per subject × band; Welch t-test per band, BH FDR across bands
@@ -603,22 +621,22 @@ The vertex_cluster analysis supports TFCE (Smith & Nichols, 2009) as an alternat
 
 #### Vertex Connectivity (Functional Connectivity Density)
 
-All-to-all imaginary coherence between 154 vertices, deriving Functional Connectivity Density (FCD) maps showing how connected each vertex is to the rest of the brain.
+All-to-all connectivity between dorsal source vertices for one or more of the
+FC-six metrics, deriving Functional Connectivity Density (FCD) maps showing how
+connected each vertex is to the rest of the brain.
 
 **Python side:**
-- CSD-based imaginary coherence for all 11,781 unique vertex pairs per band
-- FCD: fraction of connections above threshold per vertex
-- Cluster-based permutation testing on FCD maps
-- Glass brain FCD visualizations
-
-**R side:**
-- FCD summary by group, cluster statistics
-- ANALYSIS_SUMMARY.md
+- One shared STFT pass computes the spectral metrics (coherence, imag_coherence,
+  PLI, wPLI, dwPLI, dPLI); AEC is computed separately — all metrics in `metrics:`
+- FCD: fraction of connections above threshold per vertex (directed-aware, so dPLI
+  thresholds |dPLI − 0.5| — see `FCD_CENTER` in `spectral/vertex_connectivity.py`)
+- Cluster-based permutation testing on FCD maps; glass-brain FCD visualizations
+- Saves the full connectivity matrices (consumed by vertex_graph / vertex_nbs)
 
 **Config:**
 ```yaml
 vertex_connectivity:
-  metric: imag_coherence
+  metrics: [imag_coherence, dwpli, wpli, pli, dpli, aec, coherence]
   fcd_threshold: 0.05
   n_permutations: 1000
 ```
@@ -631,6 +649,34 @@ output_dir/vertex_connectivity/
   tables/vertex_connectivity_stats.csv
   figures/fcd_*.png
 ```
+
+#### Vertex Directed (DTF)
+
+Vertex-level directed connectivity via the directed transfer function. One
+ridge-regularized MVAR fit per subject over the dorsal vertices (ridge mandatory:
+mean inter-vertex |corr| ≈ 0.64 makes plain MVAR explosive), then DTF read out
+across bands and reduced to three per-vertex maps — **outflow** (driver strength),
+**inflow** (receiver strength), **netflow** (out − in). Cluster-permutation stats +
+glass-brain maps, like vertex_connectivity. Warns if the MVAR is non-stationary.
+
+```yaml
+vertex_directed:
+  mvar_order: 8
+  mvar_ridge: 0.05
+  n_permutations: 1000
+```
+Output: `data/vertex_directed.csv`, `vertex_dtf_matrices.pkl`, `source_coords.csv`;
+`tables/vertex_directed_stats.csv`; `figures/dtf_*.png`.
+
+#### Vertex Evoked (ITC / ERSP / STP)
+
+Per-vertex inter-trial coherence, event-related spectral perturbation, and
+single-trial power for trial-based (evoked) paradigms — the vertex companion to
+`roi_evoked`. Morlet TFR per vertex, scalar measures extracted per band/time
+window, group differences via spatial cluster permutation + glass-brain maps.
+Requires an `evoked:` config section (epoch_samples, sfreq, baseline, tf_params,
+measures). Output: `data/vertex_evoked_measures.csv`,
+`tables/vertex_evoked_stats.csv`, `figures/evoked_*.png`.
 
 #### Vertex Specparam (Vertex-Level Spectral Parameterization)
 
@@ -852,6 +898,25 @@ output_dir/electrode_comparison/
     fig4_spatial_advantage_*.png  # heatmap: |region g| - |electrode g|
     fig5_roi_forest_dB.png        # per-ROI disease effects (Low/High Gamma)
 ```
+
+#### Electrode Connectivity (Source-vs-Sensor Comparator)
+
+Sensor-level functional connectivity — the comparator the source-vs-sensor thesis
+is tested against. Runs the FC-six metrics all-pairs on the raw electrode montage
+using the **same** array kernel, metric list, and FCD threshold as
+`vertex_connectivity`, so the head-to-head is apples-to-apples. Reads raw `.set`
+via `electrode.subject_roster`. Per-channel FCD maps; group differences by
+per-channel Welch t + BH-FDR across channels (cluster permutation is vertex-only —
+the montage is too coarse). Emits the montage coordinates for topomap rendering.
+
+```yaml
+electrode_connectivity:
+  epoch_sampling: { n_bootstrap: 0 }   # full timeseries, matches vertex_connectivity
+  metrics: [imag_coherence, dwpli, wpli, pli, dpli, aec, coherence]
+  fcd_threshold: 0.05
+```
+Output: `data/electrode_fcd.csv`, `electrode_connectivity_matrices.pkl`,
+`electrode_layout.csv`; `tables/electrode_connectivity_stats.csv`.
 
 ### Atlas Integration
 
