@@ -34,6 +34,7 @@ from .analyses.vertex_network_analysis import (
 from .analyses.vertex_spatial_analysis import VertexSpatialAnalysis
 from .analyses.roi_directed_analysis import ROIDirectedAnalysis
 from .analyses.roi_evoked_analysis import ROIEvokedAnalysis
+from .analyses.vertex_evoked_analysis import VertexEvokedAnalysis
 from .analyses.electrode_evoked_analysis import ElectrodeEvokedAnalysis
 from .analyses.electrode_aperiodic_analysis import ElectrodeAperiodicAnalysis
 
@@ -63,6 +64,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "vertex_spatial": VertexSpatialAnalysis,
     "roi_directed": ROIDirectedAnalysis,
     "roi_evoked": ROIEvokedAnalysis,
+    "vertex_evoked": VertexEvokedAnalysis,
     "electrode_evoked": ElectrodeEvokedAnalysis,
 }
 
@@ -130,6 +132,7 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
     "electrode_comparison": {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "supplements": "electrode_psd",       "description": "Source vs electrode comparison"},
     "electrode_connectivity": {"category": "resting", "level": "electrode",  "domain": "Connectivity",    "description": "Sensor pairwise connectivity + FCD (source-vs-sensor comparator)"},
     "roi_evoked":           {"category": "evoked",  "level": "roi",        "domain": "Evoked",          "description": "ITC, ERSP, STP for trial-based paradigms"},
+    "vertex_evoked":        {"category": "evoked",  "level": "vertex",     "domain": "Evoked",          "description": "Vertex-level ITC, ERSP, STP (cluster-corrected) for trial-based paradigms"},
     "electrode_evoked":     {"category": "evoked",  "level": "electrode",  "domain": "Evoked",          "description": "Electrode-level ITC, ERSP, STP for trial-based paradigms"},
 }
 

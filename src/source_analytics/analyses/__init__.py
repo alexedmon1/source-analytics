@@ -17,6 +17,7 @@ from .roi_network_analysis import ROINetworkAnalysis
 from .vertex_network_analysis import VertexNetworkAnalysis
 from .vertex_spatial_analysis import VertexSpatialAnalysis
 from .roi_evoked_analysis import ROIEvokedAnalysis
+from .vertex_evoked_analysis import VertexEvokedAnalysis
 from .roi_directed_analysis import ROIDirectedAnalysis
 
 # Backward-compatible aliases
@@ -52,6 +53,7 @@ __all__ = [
     "VertexNetworkAnalysis",
     "VertexSpatialAnalysis",
     "ROIEvokedAnalysis",
+    "VertexEvokedAnalysis",
     "ROIDirectedAnalysis",
     "ROITransferEntropyAnalysis",
     # Backward-compatible aliases

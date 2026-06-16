@@ -162,6 +162,43 @@ class SubjectLoader:
             roi_epochs[roi_name] = ts.reshape(-1, epoch_samples)
         return roi_epochs
 
+    def load_source_epochs(
+        self,
+        epoch_samples: int,
+        magnitude: bool = False,
+    ) -> np.ndarray:
+        """Load vertex source time courses reshaped into epochs.
+
+        The source-localization pipeline concatenates trial epochs into
+        continuous arrays; this recovers epoch structure by reshaping on
+        ``epoch_samples`` (the vertex analogue of :meth:`load_roi_epochs`).
+
+        Parameters
+        ----------
+        epoch_samples : int
+            Number of samples per epoch.
+        magnitude : bool
+            If True, rectified amplitudes; otherwise signed (default).
+
+        Returns
+        -------
+        ndarray, shape (n_vertices, n_epochs, epoch_samples)
+
+        Raises
+        ------
+        ValueError
+            If total samples is not evenly divisible by epoch_samples.
+        """
+        stc = self.load_source_timecourses(magnitude=magnitude)
+        n_total = stc.shape[1]
+        if n_total % epoch_samples != 0:
+            raise ValueError(
+                f"Source time courses: total samples ({n_total}) not divisible "
+                f"by epoch_samples ({epoch_samples}). Cannot recover epochs."
+            )
+        n_vertices = stc.shape[0]
+        return stc.reshape(n_vertices, -1, epoch_samples)
+
     def load_or_extract_roi_timeseries(
         self,
         signed: bool = True,
