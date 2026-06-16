@@ -25,6 +25,7 @@ from ..spectral.vertex_connectivity import (
     compute_vertex_connectivity_matrix_epochs,
     compute_vertex_connectivity_matrix_epochs_multi,
     compute_fcd,
+    FCD_CENTER,
 )
 from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
 from ..stats.cluster_permutation import cluster_permutation_test, hedges_g
@@ -164,7 +165,10 @@ class VertexConnectivityAnalysis(BaseAnalysis):
             band_fcd = {}
             band_conn = {}
             for metric, conn_mat in conn_results.items():
-                fcd = compute_fcd(conn_mat, threshold=self._fcd_threshold)
+                fcd = compute_fcd(
+                    conn_mat, threshold=self._fcd_threshold,
+                    center=FCD_CENTER.get(metric),
+                )
                 band_fcd[metric] = fcd
                 band_conn[metric] = conn_mat
 

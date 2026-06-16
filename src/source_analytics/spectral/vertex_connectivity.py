@@ -562,9 +562,17 @@ def compute_vertex_connectivity_matrix_epochs_multi(
     return {m: np.mean(accum[m], axis=0) for m in metrics}
 
 
+# Metrics whose values are centered (no coupling = a nonzero baseline) rather
+# than zero-based, so FCD must threshold the deviation from that center, not the
+# raw value. dPLI in [0,1] is centered at 0.5 (0.5 = no directional lead); a plain
+# value>threshold rule counts ~every edge and FCD saturates to 1.0.
+FCD_CENTER = {"dpli": 0.5}
+
+
 def compute_fcd(
     conn_matrix: np.ndarray,
     threshold: float = 0.05,
+    center: float | None = None,
 ) -> np.ndarray:
     """Compute Functional Connectivity Density (FCD) per vertex.
 
@@ -577,6 +585,11 @@ def compute_fcd(
         Connectivity matrix.
     threshold : float
         Minimum connectivity value to count as a connection.
+    center : float, optional
+        For centered/directed metrics (e.g. dPLI centered at 0.5), count edges
+        whose deviation ``|value - center|`` exceeds ``threshold`` instead of
+        ``value > threshold``. Default ``None`` keeps the zero-based rule. See
+        :data:`FCD_CENTER`.
 
     Returns
     -------
@@ -584,7 +597,10 @@ def compute_fcd(
         Normalized FCD per vertex (0 to 1).
     """
     n = conn_matrix.shape[0]
-    above_thresh = conn_matrix > threshold
+    if center is None:
+        above_thresh = conn_matrix > threshold
+    else:
+        above_thresh = np.abs(conn_matrix - center) > threshold
     np.fill_diagonal(above_thresh, False)
     degree = above_thresh.sum(axis=1).astype(float)
     return degree / (n - 1)

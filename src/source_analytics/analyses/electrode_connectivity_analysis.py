@@ -39,6 +39,7 @@ from ..spectral.epoch_sampler import sample_epochs
 from ..spectral.vertex_connectivity import (
     compute_vertex_connectivity_matrix_multi,
     compute_fcd,
+    FCD_CENTER,
 )
 from ..stats.cluster_permutation import hedges_g
 from ..viz.brain_roi import fdr_bh
@@ -251,8 +252,12 @@ class ElectrodeConnectivityAnalysis(BaseAnalysis):
             band_conn = {}
             for metric, mat in avg.items():
                 # Identical FCD definition to the vertex module so the
-                # source-vs-sensor comparison is apples-to-apples.
-                band_fcd[metric] = compute_fcd(mat, threshold=self._fcd_threshold)
+                # source-vs-sensor comparison is apples-to-apples (incl. the
+                # directed-metric center, e.g. dPLI on |dPLI-0.5|).
+                band_fcd[metric] = compute_fcd(
+                    mat, threshold=self._fcd_threshold,
+                    center=FCD_CENTER.get(metric),
+                )
                 band_conn[metric] = mat
             subject_fcd[band_name] = band_fcd
             subject_conn[band_name] = band_conn
