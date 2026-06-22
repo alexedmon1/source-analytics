@@ -33,6 +33,7 @@ script_dir <- if (exists("script.dir")) {
 }
 
 tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
+tryCatch(source(file.path(script_dir, "hypothesis.R")), error = function(e) NULL)
 
 # --- Argument parsing ---
 parser <- ArgumentParser(description = "Electrode aperiodic analysis (R)")
@@ -42,6 +43,8 @@ parser$add_argument("--output-dir", required = TRUE)
 parser$add_argument("--fig-dir", default = NULL)
 parser$add_argument("--tbl-dir", default = NULL)
 parser$add_argument("--no-figures", action = "store_true", default = FALSE)
+parser$add_argument("--hypothesis", default = NULL,
+                    help = "Run only the named hypothesis(es) (comma-separated) from the design spec; default = all")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
@@ -462,6 +465,12 @@ if (nrow(posthoc_region_df) > 0) {
   write_csv(posthoc_region_df, file.path(tbl_dir, "electrode_aperiodic_posthoc_region_nested.csv"))
   message("  Saved: tables/electrode_aperiodic_posthoc_region_nested.csv")
 }
+
+# --- Declarative hypotheses (hypothesis layer; additive, no band dimension) ---
+message("\nRunning declarative hypotheses (hypothesis layer)...")
+write_module_hypotheses(ap_df, config, tbl_dir, prefix = "electrode_aperiodic",
+                        dv_cols = dvs, spatial_col = "channel",
+                        band_col = NULL, hypothesis = args$hypothesis)
 
 # --- Summary ---
 message("\nWriting summary...")
