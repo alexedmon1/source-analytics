@@ -20,7 +20,7 @@ name**, and read the result. Nothing auto-fires — there is no gating, no chain
 |---|---|---|
 | spec loader + emmeans adapter + runner + module helper | `R/hypothesis.R` | ✅ built |
 | `Hypothesis` / `DesignSpec` dataclasses, `StudyConfig.design_spec` | `src/source_analytics/config.py` | ✅ built |
-| permutation adapter (vertex / connectivity maps) | `src/source_analytics/hypothesis/` | ⏳ planned |
+| permutation adapter (vertex / connectivity maps) | `src/source_analytics/hypothesis/permutation.py` | ✅ built (vertex_cluster wired) |
 | kept primitives `tost_equivalent()` / `.equivalence_margin()` | `R/stats_utils.R` | ✅ reused |
 
 ## 2. Declaring hypotheses (the spec)
@@ -190,9 +190,11 @@ permutation adapter (a `group × edge` LMM is infeasible and wrong for them).
 - ✅ **emmeans adapter** built + verified (bit-exact vs legacy on real data); wired into
   `roi_psd`, `roi_aperiodic`, `electrode_psd`, `electrode_aperiodic` — every applicable
   emmeans-tabular module.
-- ⏳ **permutation adapter** (`hypothesis/` Python): omnibus-F + weighted contrast + Freedman–
-  Lane covariates + map/cluster contract; wire `vertex_network` first, then the rest of the
-  map family (vertex_*, connectivity, directed, graph).
+- ✅ **permutation adapter** (`hypothesis/permutation.py`): contrast (pairwise = legacy-exact;
+  general weighted), omnibus-F, equivalence (TOST summary), Freedman–Lane covariates, map/cluster
+  contract. Wired into `vertex_cluster`; verified bit-exact on real FORGE vertex data. Remaining
+  map-family modules (vertex_connectivity/specparam/directed, then connectivity/directed/graph at
+  ROI) follow the same one-call `write_module_hypotheses_perm()` pattern.
 - ⏳ **deferred:** `roi_evoked` / `electrode_evoked` (long-format DV; no data in the resting
   study). **specials:** `vertex_mvpa` (decoding), `vertex_spatial` (GLS), `electrode_comparison`
   (agreement — may not take hypotheses).
