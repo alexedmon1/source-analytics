@@ -172,6 +172,13 @@ group_b:-1}`.
 
 An adapter implements every kind in its paradigm. Selected by the module the hypothesis runs in.
 
+**The divide is the inference machinery, not the spatial level.** The two adapters split modules
+by *how* they test, which does NOT coincide with roi/vertex/electrode: `electrode_connectivity`
+runs on the **permutation** adapter (cluster maps), alongside `vertex_connectivity`, while
+`electrode_psd` runs on the **emmeans** adapter, alongside `roi_psd`. A hypothesis declaration is
+the *same* across all of them (that uniformity is what makes the MS2 source-vs-sensor head-to-head
+apples-to-apples); only the result contract and method knobs differ, and they follow the adapter.
+
 ### 6.1 emmeans adapter (R LMM modules: roi_psd, roi_aperiodic, electrode_psd, …)
 
 | kind | implementation |
@@ -199,7 +206,27 @@ edge weight) is recomputed each permutation to build the null.
 Escape hatch: the module's existing perm knobs (`n_permutations`, cluster-forming threshold,
 which metric) stay in the module config; the hypothesis only supplies the contrast/groups.
 
-### 6.3 Covariates under permutation — Freedman–Lane
+### 6.3 Result contracts — tabular vs map (adapter-keyed)
+
+The runner returns an **adapter-appropriate** result; the hypothesis is the same noun, the result
+shape is the adapter's. Forcing a permutation map into the per-cell table shape is the mismatch we
+avoid.
+
+- **emmeans adapter → tabular.** One row per band × spatial cell: `estimate, SE, df, CI, stat,
+  p_value, q_value` (within-run BH-FDR), `effect_size` (+type), `significant`. (Implemented — the
+  `roi_psd_hypotheses.csv` schema.)
+- **permutation adapter → map + clusters.** A per-vertex statistic map plus a surviving-cluster
+  table: `cluster_id, extent (n vertices), mass, peak_stat, cluster_p` (max-statistic / TFCE
+  corrected — NOT per-cell FDR, which is the wrong family at vertex density), and the thresholded
+  map itself. Equivalence/regression maps follow the same map+cluster shape.
+
+Both carry the shared hypothesis metadata (`hypothesis, kind, role, label, test, band`) so results
+align across adapters for the head-to-head, even though one is a table and the other a map.
+
+Method knobs (cluster-forming threshold, TFCE, spatial adjacency, `n_permutations`) are **module/
+adapter config**, never hypothesis fields — they describe the test, not the question.
+
+### 6.4 Covariates under permutation — Freedman–Lane
 
 Adjusting for a `design.covariate` in a permutation test is **not** "add a column." The adapter
 uses the **Freedman–Lane** procedure (Freedman & Lane 1983; Winkler et al. 2014, *NeuroImage*
