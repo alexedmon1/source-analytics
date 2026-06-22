@@ -3,6 +3,7 @@
 **Status:** design proposal (supersedes the gating half of `HYPOTHESIS_CONTRASTS_PLAN.md`).
 **Repos:** source-analytics (spec schema + loaders + per-family adapters + module wiring).
 **Author/date:** drafted 2026-06-22.
+**Usage / reference:** see `HYPOTHESIS.md` (this doc is the *why*; that one is the *how*).
 
 ---
 
