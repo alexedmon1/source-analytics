@@ -47,7 +47,8 @@ class VertexDirectedAnalysis(BaseAnalysis):
     """All-to-all vertex DTF reduced to per-vertex outflow/inflow/netflow maps."""
 
     name = "vertex_directed"
-    SELECTABLE = {"measure": "directed summary", "band": "frequency band"}
+    SELECTABLE = {"measure": "directed summary", "band": "frequency band",
+                  "hypothesis": "declared hypothesis"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -228,6 +229,27 @@ class VertexDirectedAnalysis(BaseAnalysis):
                 self.tbl_dir / "vertex_directed_stats.csv", index=False,
             )
             logger.info("Exported vertex_directed_stats.csv (%d rows)", len(all_stats))
+
+        # --- Declarative hypotheses (hypothesis layer; additive, map+cluster) ---
+        from ..hypothesis import write_module_hypotheses_perm
+
+        if self._source_coords is not None and self._subject_groups:
+            maps_by_cell = {
+                (band_name, measure): {
+                    uid: self._subject_maps[uid][band_name][measure]
+                    for uid in self._subject_groups
+                }
+                for band_name in self._selected_bands()
+                for measure in self._measures
+            }
+            wanted_hyp = self._selection.get("hypothesis")
+            write_module_hypotheses_perm(
+                maps_by_cell, self._subject_groups, self._source_coords, self.config,
+                self.tbl_dir, prefix="vertex_directed",
+                n_perms=self._n_permutations, threshold=self._cluster_threshold,
+                distance_mm=self._adjacency_distance,
+                hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
+            )
 
     def figures(self) -> None:
         if self._source_coords is None:

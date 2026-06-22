@@ -47,6 +47,7 @@ class VertexSpecparamAnalysis(BaseAnalysis):
     """Vertex-level spectral parameterization analysis."""
 
     name = "vertex_specparam"
+    SELECTABLE = {"hypothesis": "declared hypothesis"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -363,6 +364,27 @@ class VertexSpecparamAnalysis(BaseAnalysis):
             with open(data_dir / "specparam_cluster_results.pkl", "wb") as f:
                 pickle.dump(pkl_data, f)
             logger.info("Saved specparam_cluster_results.pkl")
+
+        # --- Declarative hypotheses (hypothesis layer; additive, map+cluster) ---
+        # exponent/offset are broadband per-vertex maps (no band dimension).
+        from ..hypothesis import write_module_hypotheses_perm
+
+        if self._source_coords is not None and self._subject_groups:
+            maps_by_cell = {
+                ("broadband", param): {
+                    uid: self._subject_data[uid][param]
+                    for uid in self._subject_groups
+                }
+                for param in ["exponent", "offset"]
+            }
+            wanted_hyp = self._selection.get("hypothesis")
+            write_module_hypotheses_perm(
+                maps_by_cell, self._subject_groups, self._source_coords, self.config,
+                self.tbl_dir, prefix="vertex_specparam",
+                n_perms=self._n_permutations, threshold=self._cluster_threshold,
+                distance_mm=self._adjacency_distance,
+                hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
+            )
 
     def _load_state_from_disk(self) -> bool:
         """Load saved state from pickle for --steps figures support."""

@@ -39,7 +39,8 @@ class VertexConnectivityAnalysis(BaseAnalysis):
     """All-to-all vertex connectivity with FCD mapping (multi-metric)."""
 
     name = "vertex_connectivity"
-    SELECTABLE = {"metric": "connectivity metric", "band": "frequency band"}
+    SELECTABLE = {"metric": "connectivity metric", "band": "frequency band",
+                  "hypothesis": "declared hypothesis"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -298,6 +299,27 @@ class VertexConnectivityAnalysis(BaseAnalysis):
             logger.info(
                 "Exported vertex_connectivity_stats.csv (%d rows)",
                 len(stats_df),
+            )
+
+        # --- Declarative hypotheses (hypothesis layer; additive, map+cluster) ---
+        from ..hypothesis import write_module_hypotheses_perm
+
+        if self._source_coords is not None and self._subject_groups:
+            maps_by_cell = {
+                (band_name, metric): {
+                    uid: self._subject_data[uid]["fcd"][band_name][metric]
+                    for uid in self._subject_groups
+                }
+                for band_name in self._selected_bands()
+                for metric in self._metrics
+            }
+            wanted_hyp = self._selection.get("hypothesis")
+            write_module_hypotheses_perm(
+                maps_by_cell, self._subject_groups, self._source_coords, self.config,
+                tbl_dir, prefix="vertex_connectivity",
+                n_perms=self._n_permutations, threshold=self._cluster_threshold,
+                distance_mm=self._adjacency_distance,
+                hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
             )
 
     def figures(self) -> None:

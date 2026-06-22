@@ -59,7 +59,8 @@ class ElectrodeConnectivityAnalysis(BaseAnalysis):
     """
 
     name = "electrode_connectivity"
-    SELECTABLE = {"metric": "connectivity metric", "band": "frequency band"}
+    SELECTABLE = {"metric": "connectivity metric", "band": "frequency band",
+                  "hypothesis": "declared hypothesis"}
 
     # FC-six (matches the vertex module's headline metric set). Computed in one
     # shared STFT pass; --metric only restricts which are emitted.
@@ -74,6 +75,13 @@ class ElectrodeConnectivityAnalysis(BaseAnalysis):
         else:
             self._metrics = list(self._FC_SIX)
         self._fcd_threshold = float(ec_cfg.get("fcd_threshold", 0.05))
+        # Cluster-permutation knobs for the hypothesis layer (sensor space). The
+        # montage is head-normalised (not mm), so adjacency_distance defaults to None
+        # → auto-computed from the channel coords (≈1.6× median nearest-neighbour).
+        self._n_permutations = int(ec_cfg.get("n_permutations", 1000))
+        self._cluster_threshold = float(ec_cfg.get("cluster_threshold", 2.0))
+        _adj = ec_cfg.get("adjacency_distance", None)
+        self._adjacency_distance = float(_adj) if _adj is not None else None
 
         self._roster: pd.DataFrame | None = None
         self._sfreq: float | None = None
@@ -377,6 +385,37 @@ class ElectrodeConnectivityAnalysis(BaseAnalysis):
             )
             logger.info(
                 "Exported electrode_connectivity_stats.csv (%d rows)", len(stats_df),
+            )
+
+        # --- Declarative hypotheses (hypothesis layer; additive, sensor map+cluster) ---
+        # Source-vs-sensor head-to-head: per-channel FCD tested with the SAME cluster
+        # permutation adapter as vertex_connectivity. Montage adjacency auto-scaled
+        # from the (head-normalised) channel coords unless configured.
+        from ..hypothesis import write_module_hypotheses_perm
+
+        if self._ch_coords is not None and self._subject_groups:
+            coords = np.asarray(self._ch_coords, dtype=float)
+            adj = self._adjacency_distance
+            if adj is None:
+                from scipy.spatial.distance import cdist
+                dm = cdist(coords, coords)
+                np.fill_diagonal(dm, np.inf)
+                adj = float(1.6 * np.median(dm.min(axis=1)))
+            maps_by_cell = {
+                (band_name, metric): {
+                    uid: self._fcd[uid][band_name][metric]
+                    for uid in self._subject_groups
+                }
+                for band_name in self._selected_bands()
+                for metric in self._metrics
+            }
+            wanted_hyp = self._selection.get("hypothesis")
+            write_module_hypotheses_perm(
+                maps_by_cell, self._subject_groups, coords, self.config,
+                self.tbl_dir, prefix="electrode_connectivity",
+                n_perms=self._n_permutations, threshold=self._cluster_threshold,
+                distance_mm=adj,
+                hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
             )
 
     def figures(self) -> None:
