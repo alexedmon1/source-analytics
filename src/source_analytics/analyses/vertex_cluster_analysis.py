@@ -68,7 +68,7 @@ class VertexClusterAnalysis(BaseAnalysis):
     """
 
     name = "vertex_cluster"
-    SELECTABLE = {"band": "frequency band"}
+    SELECTABLE = {"band": "frequency band", "hypothesis": "declared hypothesis"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -466,6 +466,29 @@ class VertexClusterAnalysis(BaseAnalysis):
                     )
             else:
                 logger.info("No significant clusters at p<0.05")
+
+        # --- Declarative hypotheses (hypothesis layer; additive, map+cluster contract) ---
+        # Run every declared hypothesis over per-subject vertex maps via the permutation
+        # adapter (pairwise contrast == legacy cluster test bit-exact). Manual control:
+        # --hypothesis NAME. Additive — the legacy per-contrast tables above are untouched.
+        from ..hypothesis import write_module_hypotheses_perm
+
+        maps_by_cell = {
+            (band_name, metric): {
+                uid: self._subject_data[uid]["band_power"][band_name][metric]
+                for uid in self._subject_groups
+            }
+            for band_name in self._selected_bands()
+            for metric in ["relative", "absolute"]
+        }
+        wanted_hyp = self._selection.get("hypothesis")
+        write_module_hypotheses_perm(
+            maps_by_cell, self._subject_groups, coords, self.config, tbl_dir,
+            prefix="vertex_cluster",
+            n_perms=self._n_permutations, threshold=self._cluster_threshold,
+            distance_mm=self._adjacency_distance,
+            hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
+        )
 
         # Save full results dict for reuse
         results_pkl = {
