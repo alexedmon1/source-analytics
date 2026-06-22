@@ -45,7 +45,7 @@ class ROIPsdAnalysis(BaseAnalysis):
     """
 
     name = "roi_psd"
-    SELECTABLE = {"band": "frequency band"}
+    SELECTABLE = {"band": "frequency band", "hypothesis": "declared hypothesis"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -193,6 +193,13 @@ class ROIPsdAnalysis(BaseAnalysis):
         ]
         cmd.extend(self._r_no_figures_flags())
         cmd.extend(self._r_roi_categories_flags())
+
+        # Manual hypothesis selection: pass --hypothesis NAME[,NAME] through to R.
+        # Read directly from the active selection (not routed through _select,
+        # since the hypotheses are resolved R-side, not in Python).
+        wanted_hyp = self._selection.get("hypothesis")
+        if wanted_hyp:
+            cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:

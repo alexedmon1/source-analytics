@@ -161,6 +161,115 @@ def _validate_contrast_graph(
             _visit(c.name, [c.name])
 
 
+VALID_KINDS = {"omnibus", "contrast", "regression", "equivalence"}
+
+
+@dataclass
+class Hypothesis:
+    """A declarative hypothesis for the ``hypothesis`` inference layer.
+
+    Mirrors the R-side parser in ``R/hypothesis.R``. A hypothesis carries a
+    ``kind`` and the portable payload that kind needs (``weights`` for contrast/
+    equivalence, ``groups`` for omnibus, ``predictor`` for regression). The legacy
+    ``group_a``/``group_b`` contrast form is accepted as pairwise-weights sugar.
+    Unlike the retired gating system, nothing here auto-fires — these are run one
+    at a time, by name. See DESIGN_SPEC.md.
+    """
+
+    name: str
+    kind: str = "contrast"
+    label: str | None = None
+    role: str = "exploratory"
+    weights: dict[str, float] | None = None
+    groups: list[str] | None = None
+    predictor: str | None = None
+    by: str | None = None
+    test: str | None = None
+    margin: dict[str, Any] | None = None
+
+    @classmethod
+    def from_dict(cls, h: dict) -> Hypothesis:
+        name = h["name"]
+        # Legacy sugar: group_a/group_b in place of weights.
+        if "kind" not in h and "weights" not in h and "group_a" in h and "group_b" in h:
+            kind = "equivalence" if h.get("test") == "equivalence" else "contrast"
+            return cls(
+                name=name, kind=kind, label=h.get("label"),
+                role=h.get("role", "exploratory"),
+                weights={h["group_a"]: 1.0, h["group_b"]: -1.0},
+                test=h.get("test"), margin=h.get("equivalence_margin"),
+            )
+        kind = h.get("kind", "contrast")
+        if kind not in VALID_KINDS:
+            raise ValueError(
+                f"Hypothesis '{name}': invalid kind '{kind}'. "
+                f"Expected one of {sorted(VALID_KINDS)}."
+            )
+        weights = None
+        if h.get("weights") is not None:
+            weights = {str(k): float(v) for k, v in h["weights"].items()}
+        groups = [str(x) for x in h["groups"]] if h.get("groups") else None
+        margin = h.get("margin") or h.get("equivalence_margin")
+        if kind in ("contrast", "equivalence") and not weights:
+            raise ValueError(f"Hypothesis '{name}': kind={kind} requires 'weights'.")
+        if kind == "regression" and not h.get("predictor"):
+            raise ValueError(f"Hypothesis '{name}': kind=regression requires 'predictor'.")
+        if kind == "equivalence" and margin is None:
+            raise ValueError(f"Hypothesis '{name}': kind=equivalence requires 'margin'.")
+        if margin is not None:
+            _validate_margin(name, margin)
+        return cls(
+            name=name, kind=kind, label=h.get("label"),
+            role=h.get("role", "exploratory"), weights=weights, groups=groups,
+            predictor=h.get("predictor"), by=h.get("by"), test=h.get("test"),
+            margin=margin,
+        )
+
+    def referenced_groups(self) -> set[str]:
+        """All group levels this hypothesis names (for subject discovery)."""
+        g: set[str] = set()
+        if self.weights:
+            g |= set(self.weights)
+        if self.groups:
+            g |= set(self.groups)
+        return g
+
+
+@dataclass
+class DesignSpec:
+    """Parsed ``design:`` + ``hypotheses:`` blocks (the hypothesis registry).
+
+    Falls back to lifting a legacy ``contrasts:`` block into hypotheses when no
+    ``hypotheses:`` block is present, so unmigrated studies still expose a spec.
+    Returns ``None`` from :meth:`from_dict` only when neither block exists.
+    """
+
+    factor: str = "group"
+    reference: str | None = None
+    levels: list[str] | None = None
+    covariates: list[str] = field(default_factory=list)
+    hypotheses: list[Hypothesis] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> DesignSpec | None:
+        design = data.get("design") or {}
+        raw_h = data.get("hypotheses")
+        if raw_h is None:
+            legacy = data.get("contrasts")
+            if not legacy and not design:
+                return None
+            raw_h = legacy or []
+        hyps = [Hypothesis.from_dict(h) for h in raw_h]
+        levels = [str(x) for x in design["levels"]] if design.get("levels") else None
+        return cls(
+            factor=design.get("factor", "group"),
+            reference=design.get("reference"),
+            levels=levels,
+            covariates=[str(x) for x in (design.get("covariates") or [])],
+            hypotheses=hyps,
+        )
+
+
 @dataclass
 class StudyConfig:
     """Complete study configuration loaded from YAML.
@@ -212,6 +321,7 @@ class StudyConfig:
     paradigms: dict[str, dict] = field(default_factory=dict, repr=False)
     paradigm_name: str | None = None
     hypothesis_testing: dict[str, Any] = field(default_factory=dict)
+    design_spec: DesignSpec | None = None
     raw: dict = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -289,6 +399,7 @@ class StudyConfig:
         contrasts = [Contrast.from_dict(c) for c in data.get("contrasts", [])]
         hypothesis_testing = data.get("hypothesis_testing", {})
         _validate_contrast_graph(contrasts, hypothesis_testing)
+        design_spec = DesignSpec.from_dict(data)
 
         bands = {
             name: tuple(limits) for name, limits in data.get("bands", {}).items()
@@ -332,6 +443,7 @@ class StudyConfig:
             evoked=data.get("evoked", {}),
             paradigms=paradigms,
             hypothesis_testing=hypothesis_testing,
+            design_spec=design_spec,
             raw=data,
         )
 
@@ -372,6 +484,7 @@ class StudyConfig:
         contrasts = [Contrast.from_dict(c) for c in data.get("contrasts", [])]
         hypothesis_testing = data.get("hypothesis_testing", {})
         _validate_contrast_graph(contrasts, hypothesis_testing)
+        design_spec = DesignSpec.from_dict(data)
 
         bands = {
             name: tuple(limits) for name, limits in data.get("bands", {}).items()
@@ -414,6 +527,7 @@ class StudyConfig:
             evoked=data.get("evoked", {}),
             paradigms=paradigms,
             hypothesis_testing=hypothesis_testing,
+            design_spec=design_spec,
             raw=data,
         )
 
@@ -481,6 +595,7 @@ class StudyConfig:
             evoked=pdata.get("evoked", self.evoked),
             paradigm_name=name,
             hypothesis_testing=self.hypothesis_testing,
+            design_spec=self.design_spec,
             raw={**self.raw, **pdata},
         )
 
@@ -576,8 +691,25 @@ class StudyConfig:
             evoked=evoked if isinstance(evoked, dict) else {},
             paradigm_name=paradigm,
             hypothesis_testing=self.hypothesis_testing,
+            design_spec=self.design_spec,
             raw=raw,
         )
+
+    def referenced_groups(self) -> set[str]:
+        """Every group named by a contrast or hypothesis (for subject discovery).
+
+        Unions the legacy ``contrasts`` (group_a/group_b) with the ``design_spec``
+        hypotheses (weights keys, group sets). A 4-group omnibus thus pulls in all
+        four groups, which a pairwise-only scan would miss.
+        """
+        g: set[str] = set()
+        for c in self.contrasts:
+            g.add(c.group_a)
+            g.add(c.group_b)
+        if self.design_spec:
+            for h in self.design_spec.hypotheses:
+                g |= h.referenced_groups()
+        return g
 
     def get_group_label(self, group_id: str) -> str:
         """Return the display label for a group, falling back to the ID."""

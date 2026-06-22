@@ -231,11 +231,8 @@ class StudyAnalyzer:
         output_dir = self.config.output_dir / canonical_name
         analysis = cls(self.config, output_dir)
 
-        # Filter subjects to only groups referenced in contrasts
-        contrast_groups = set()
-        for c in self.config.contrasts:
-            contrast_groups.add(c.group_a)
-            contrast_groups.add(c.group_b)
+        # Filter subjects to only groups referenced in contrasts/hypotheses
+        contrast_groups = self.config.referenced_groups()
 
         if contrast_groups:
             subjects = self.get_subjects_for_groups(list(contrast_groups))

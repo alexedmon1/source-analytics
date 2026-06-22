@@ -68,6 +68,8 @@ def _parse_selection(args) -> dict[str, frozenset[str]] | None:
         _add("metric", args.metric)
     if getattr(args, "band", None):
         _add("band", args.band)
+    if getattr(args, "hypothesis", None):
+        _add("hypothesis", args.hypothesis)
     for item in getattr(args, "select", None) or []:
         if "=" not in item:
             print(f"ERROR: --select expects DIM=val[,val...] (got '{item}')", file=sys.stderr)
@@ -585,6 +587,13 @@ def main():
         help="Comma-separated band(s) to compute, restricting a module's "
         "configured bands (e.g. --band low_gamma). Case/format-insensitive. "
         "Shorthand for --select band=...",
+    )
+    p_run.add_argument(
+        "--hypothesis",
+        help="Comma-separated declared hypothesis(es) to test (e.g. --hypothesis "
+        "disease_effect). Runs ONE (or a few) by name from the design spec; "
+        "the rest are skipped. Manual control — no auto-gating. "
+        "Shorthand for --select hypothesis=...",
     )
     p_run.add_argument(
         "--select",
