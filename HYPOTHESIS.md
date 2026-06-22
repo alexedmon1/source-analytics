@@ -192,9 +192,12 @@ permutation adapter (a `group × edge` LMM is infeasible and wrong for them).
   emmeans-tabular module.
 - ✅ **permutation adapter** (`hypothesis/permutation.py`): contrast (pairwise = legacy-exact;
   general weighted), omnibus-F, equivalence (TOST summary), Freedman–Lane covariates, map/cluster
-  contract. Wired into `vertex_cluster`; verified bit-exact on real FORGE vertex data. Remaining
-  map-family modules (vertex_connectivity/specparam/directed, then connectivity/directed/graph at
-  ROI) follow the same one-call `write_module_hypotheses_perm()` pattern.
+  contract. **Wired into `vertex_cluster`, `vertex_connectivity` (FCD), `vertex_directed`
+  (outflow/inflow/netflow), `vertex_specparam` (exponent/offset), and `electrode_connectivity`
+  (per-channel FCD — the source-vs-sensor sensor side, montage adjacency auto-scaled).** All
+  verified on real FORGE data via `write_module_hypotheses_perm()`. Remaining map family: the ROI
+  *edge* modules (roi_connectivity/directed/graph) + vertex_nbs need the NBS/edge contract (a
+  different result shape — edge subnetworks, not per-unit maps), not this per-unit-map adapter.
 - ⏳ **deferred:** `roi_evoked` / `electrode_evoked` (long-format DV; no data in the resting
   study). **specials:** `vertex_mvpa` (decoding), `vertex_spatial` (GLS), `electrode_comparison`
   (agreement — may not take hypotheses).
