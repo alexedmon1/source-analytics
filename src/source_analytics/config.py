@@ -32,13 +32,14 @@ VALID_MARGIN_MODES = {"gap_fraction", "sd"}
 
 @dataclass
 class Contrast:
-    """A between-group contrast for statistical testing.
+    """A between-group pairwise contrast (legacy per-contrast analysis paths).
 
-    The ``role``/``test``/``gate_on``/``equivalence_margin`` fields support the
-    hypothesis-testing framework (phenotype → rescue → normalization gating with
-    TOST equivalence). They are optional: a contrast that declares none behaves
-    as a plain two-sided difference test, exactly as before. Phase 0 parses and
-    validates these fields but the stats engine does not yet act on them.
+    The canonical declarative form is now :class:`Hypothesis` (``design:`` /
+    ``hypotheses:``). ``Contrast`` remains the simple group_a-vs-group_b record the
+    legacy module statistics loops consume; when a study declares ``hypotheses:``
+    instead of ``contrasts:``, ``StudyConfig`` *derives* these from the pairwise
+    contrast/equivalence hypotheses (see :func:`_contrasts_from_design_spec`).
+    ``role``/``test`` are display/semantic tags only — there is no gating.
     """
 
     name: str
@@ -48,8 +49,6 @@ class Contrast:
     group: str | None = None
     role: str = "exploratory"
     test: str = "difference"
-    gate_on: list[str] = field(default_factory=list)
-    equivalence_margin: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, c: dict) -> Contrast:
@@ -70,18 +69,6 @@ class Contrast:
                 f"Expected one of {sorted(VALID_CONTRAST_TESTS)}."
             )
 
-        gate_on_raw = c.get("gate_on")
-        if gate_on_raw is None:
-            gate_on = []
-        elif isinstance(gate_on_raw, str):
-            gate_on = [gate_on_raw]
-        else:
-            gate_on = list(gate_on_raw)
-
-        margin = c.get("equivalence_margin")
-        if margin is not None:
-            _validate_margin(name, margin)
-
         return cls(
             name=name,
             group_a=c["group_a"],
@@ -90,8 +77,6 @@ class Contrast:
             group=c.get("group"),
             role=role,
             test=test,
-            gate_on=gate_on,
-            equivalence_margin=margin,
         )
 
 
@@ -116,49 +101,28 @@ def _validate_margin(contrast_name: str, margin: Any) -> None:
         )
 
 
-def _validate_contrast_graph(
-    contrasts: list[Contrast], hypothesis_testing: dict[str, Any]
-) -> None:
-    """Validate the gating DAG and equivalence-margin resolvability.
+def _contrasts_from_design_spec(spec: "DesignSpec") -> list[Contrast]:
+    """Derive legacy pairwise :class:`Contrast` records from a design spec.
 
-    Raises ValueError on: a ``gate_on`` reference to an unknown contrast, a
-    cycle in the gating graph, or an equivalence contrast with no resolvable
-    margin (neither per-contrast nor a study-level default).
+    Lets a study that declares only ``design:``/``hypotheses:`` still feed the
+    legacy per-contrast analysis loops (which iterate ``config.contrasts``). Only
+    *pairwise* contrast/equivalence hypotheses (exactly two opposite-sign weights)
+    map to a two-group Contrast; omnibus/regression/multi-group hypotheses have no
+    Contrast analogue and are skipped (the new hypothesis layer handles them).
     """
-    by_name = {c.name: c for c in contrasts}
-    has_default_margin = bool(hypothesis_testing.get("default_equivalence_margin"))
-
-    for c in contrasts:
-        for parent in c.gate_on:
-            if parent not in by_name:
-                raise ValueError(
-                    f"Contrast '{c.name}': gate_on references unknown contrast "
-                    f"'{parent}'. Known contrasts: {sorted(by_name)}."
-                )
-        if c.test == "equivalence" and c.equivalence_margin is None and not has_default_margin:
-            raise ValueError(
-                f"Contrast '{c.name}': test=equivalence requires an "
-                f"equivalence_margin or a hypothesis_testing."
-                f"default_equivalence_margin study default."
-            )
-
-    # Cycle detection over the gate_on dependency graph (child depends on parents).
-    WHITE, GRAY, BLACK = 0, 1, 2
-    color = {c.name: WHITE for c in contrasts}
-
-    def _visit(node: str, stack: list[str]) -> None:
-        color[node] = GRAY
-        for parent in by_name[node].gate_on:
-            if color[parent] == GRAY:
-                cycle = " -> ".join(stack[stack.index(parent):] + [parent])
-                raise ValueError(f"Cycle in contrast gate_on graph: {cycle}")
-            if color[parent] == WHITE:
-                _visit(parent, stack + [parent])
-        color[node] = BLACK
-
-    for c in contrasts:
-        if color[c.name] == WHITE:
-            _visit(c.name, [c.name])
+    out: list[Contrast] = []
+    for h in spec.hypotheses:
+        if h.kind not in ("contrast", "equivalence") or not h.weights:
+            continue
+        pos = [g for g, w in h.weights.items() if w > 0]
+        neg = [g for g, w in h.weights.items() if w < 0]
+        if len(h.weights) == 2 and len(pos) == 1 and len(neg) == 1:
+            out.append(Contrast(
+                name=h.name, group_a=pos[0], group_b=neg[0],
+                label=h.label, group=h.role, role=h.role,
+                test=h.test or "difference",
+            ))
+    return out
 
 
 VALID_KINDS = {"omnibus", "contrast", "regression", "equivalence"}
@@ -320,7 +284,6 @@ class StudyConfig:
     evoked: dict[str, Any] = field(default_factory=dict)
     paradigms: dict[str, dict] = field(default_factory=dict, repr=False)
     paradigm_name: str | None = None
-    hypothesis_testing: dict[str, Any] = field(default_factory=dict)
     design_spec: DesignSpec | None = None
     raw: dict = field(default_factory=dict, repr=False)
 
@@ -397,9 +360,9 @@ class StudyConfig:
         }
 
         contrasts = [Contrast.from_dict(c) for c in data.get("contrasts", [])]
-        hypothesis_testing = data.get("hypothesis_testing", {})
-        _validate_contrast_graph(contrasts, hypothesis_testing)
         design_spec = DesignSpec.from_dict(data)
+        if not contrasts and design_spec is not None:
+            contrasts = _contrasts_from_design_spec(design_spec)
 
         bands = {
             name: tuple(limits) for name, limits in data.get("bands", {}).items()
@@ -442,7 +405,6 @@ class StudyConfig:
             electrode=data.get("electrode", {}),
             evoked=data.get("evoked", {}),
             paradigms=paradigms,
-            hypothesis_testing=hypothesis_testing,
             design_spec=design_spec,
             raw=data,
         )
@@ -482,9 +444,9 @@ class StudyConfig:
             discovery["root_dir"] = str(config_dir.parent / "derivatives")
 
         contrasts = [Contrast.from_dict(c) for c in data.get("contrasts", [])]
-        hypothesis_testing = data.get("hypothesis_testing", {})
-        _validate_contrast_graph(contrasts, hypothesis_testing)
         design_spec = DesignSpec.from_dict(data)
+        if not contrasts and design_spec is not None:
+            contrasts = _contrasts_from_design_spec(design_spec)
 
         bands = {
             name: tuple(limits) for name, limits in data.get("bands", {}).items()
@@ -526,7 +488,6 @@ class StudyConfig:
             electrode=data.get("electrode", {}),
             evoked=data.get("evoked", {}),
             paradigms=paradigms,
-            hypothesis_testing=hypothesis_testing,
             design_spec=design_spec,
             raw=data,
         )
@@ -594,7 +555,6 @@ class StudyConfig:
             electrode=pdata.get("electrode", self.electrode),
             evoked=pdata.get("evoked", self.evoked),
             paradigm_name=name,
-            hypothesis_testing=self.hypothesis_testing,
             design_spec=self.design_spec,
             raw={**self.raw, **pdata},
         )
@@ -690,7 +650,6 @@ class StudyConfig:
             electrode=electrode if isinstance(electrode, dict) else {},
             evoked=evoked if isinstance(evoked, dict) else {},
             paradigm_name=paradigm,
-            hypothesis_testing=self.hypothesis_testing,
             design_spec=self.design_spec,
             raw=raw,
         )

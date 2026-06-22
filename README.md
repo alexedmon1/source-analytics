@@ -20,7 +20,7 @@ so both the run order and the gallery's grouping follow from it.
 
 ## AI-Assisted Workflow (IRL)
 
-This repo ships an [IRL](https://github.com/drpedapati/irl-template) plan template for running source-analytics inside an Idempotent Research Loop: [`irl-template.md`](irl-template.md) (author `analysis.yaml` → run ROI/vertex/electrode modules → copy summaries to `$RESULTS`). Initialize a study with `irl init -t source-analytics "<project-name>"` after dropping the template into `~/research/_templates/`.
+source-analytics is designed to run well inside an Idempotent Research Loop (author the study YAML → run modules → collect summaries), and the declarative [hypothesis layer](#hypothesis-testing) is a natural fit for a loop that runs one hypothesis at a time and logs each decision. The IRL tooling itself is moving to a separate `irl-templates` repo and will be run independently of this one; the in-repo [`irl-template.md`](irl-template.md) remains for now but should be treated as transitional.
 
 ## Installation
 
@@ -118,9 +118,10 @@ $SA evoked  --analysis electrode_evoked
 ## Study Configuration
 
 One YAML file drives the whole study — and the **same file** is read by
-`source-lightbox` to build the gallery. The study-design keys (groups, contrasts,
-bands) are global; the **per-paradigm `analyses:` block** is where each analysis
-gets its data location and parameters. The minimal shape:
+`source-lightbox` to build the gallery. The study-design keys (groups, the
+`design:`/`hypotheses:` blocks, bands) are global; the **per-paradigm `analyses:`
+block** is where each analysis gets its data location and parameters. The minimal
+shape:
 
 ```yaml
 name: "My Study"
@@ -132,12 +133,21 @@ groups:                              # raw group id → display label
 group_order: [WT_VEH, KO_VEH]        # plot/x-axis order
 group_colors: {WT_VEH: "#3498DB", KO_VEH: "#E74C3C"}
 
-contrasts:                           # each = one group-vs-group test
+# Declarative hypotheses — the `hypothesis` layer (see "Hypothesis testing" below).
+# Tested one at a time, by name (--hypothesis NAME); nothing auto-fires.
+design:
+  factor: group                      # the categorical factor tests are taken over
+  reference: WT_VEH                  # reference level (effect orientation)
+  levels: [WT_VEH, KO_VEH]           # explicit level order (optional)
+hypotheses:
+  - name: group_omnibus              # "do any groups differ?" (ANOVA / permutation-F)
+    kind: omnibus
+    role: phenotype
   - name: disease_effect             # used in table/file names
-    label: "Disease effect (KO vs WT)"   # human label (axes, digests)
-    group: "Disease effect"          # tier heading (groups contrasts in the gallery)
-    group_a: KO_VEH                  # "A − B": positive effect = higher in A
-    group_b: WT_VEH
+    kind: contrast                   # a linear comparison of group means
+    label: "Disease effect (KO vs WT)"
+    weights: { KO_VEH: 1, WT_VEH: -1 }   # KO − WT (sign from the weights)
+    role: phenotype                  # display/grouping tag only — no gating
 
 bands:                               # name → [fmin, fmax] Hz
   Delta: [1, 4]
@@ -198,8 +208,9 @@ paradigms:
 | Key | Consumed by | Purpose |
 |---|---|---|
 | `groups`, `group_order`, `group_colors` | all analyses | group identity, plot order/colour |
-| `contrasts[]` `{name, group_a, group_b}` | statistics | the group-vs-group tests (A − B) |
-| `contrasts[]` `{label, group}` | figures, gallery | readable labels + tier grouping |
+| `design` `{factor, reference, levels, covariates}` | hypothesis layer | the factor + design the hypotheses are tested over |
+| `hypotheses[]` `{name, kind, weights/groups/predictor}` | hypothesis layer | the declarative tests, run by name via `--hypothesis` |
+| `hypotheses[]` `{label, role}` | figures, gallery | readable labels + grouping tag (no gating) |
 | `bands` | all spectral/connectivity | frequency bands analysed |
 | `epoch_sampling` | spectral/connectivity | random-epoch resampling (`n_bootstrap: 0` = full timeseries) |
 | `paths.{analytics, results}` | I/O + gallery | working vs published output trees |
@@ -217,6 +228,53 @@ The per-analysis block is merged into `config.raw[<analysis>]` by
 > (`compute_..._epochs_multi`); `vertex_network` then loads them per metric
 > instead of recomputing. (Note: `aec` is computed outside the shared STFT and is
 > the slow one — drop it from the list if runtime matters more than completeness.)
+
+## Hypothesis testing
+
+The `hypothesis` layer is a shared inference engine (a peer to `R/stats_utils.R`
+and `src/source_analytics/stats/`, **not** a registry analysis module) that turns the
+declarative `design:`/`hypotheses:` blocks into tests. You **declare** hypotheses once
+and **run them one at a time, by name** — nothing auto-fires. There is no gating, no
+chained verdicts, no "run everything and adjudicate"; the scientific judgment (which
+post-hoc follows a significant omnibus, whether a band/region is meaningful) stays with
+you. Full reference: [`HYPOTHESIS.md`](HYPOTHESIS.md); design rationale:
+[`DESIGN_SPEC.md`](DESIGN_SPEC.md).
+
+**Four kinds.** A hypothesis carries a `kind` and the portable payload it needs:
+
+| kind | question | payload | effect size |
+|---|---|---|---|
+| `omnibus` | do these groups differ at all? | `groups` (default: all levels) | partial ω² |
+| `contrast` | a specific linear comparison (post-hoc) | `weights: {level: w}` | Hedges g |
+| `regression` | slope of a continuous predictor | `predictor` (+ `by`) | standardized β |
+| `equivalence` | is a contrast within a margin? (TOST) | `weights` + `margin` | — |
+
+**Two adapters, one declaration.** The *same* hypothesis runs under whichever engine
+matches where a module computes its statistic — the split is by machinery, not spatial
+level:
+
+- **emmeans** (R LMM modules — `roi_psd`, `roi_aperiodic`, `electrode_psd`,
+  `electrode_aperiodic`): a **tabular** result — per-cell estimate/CI/p, within-run
+  BH-FDR, effect size.
+- **permutation** (vertex/sensor map modules — `vertex_cluster`, `vertex_connectivity`,
+  `vertex_directed`, `vertex_specparam`, `electrode_connectivity`): a **map + clusters**
+  result — per-unit statistic map with cluster extent/mass/cluster-p (max-stat / TFCE),
+  with Freedman–Lane handling of covariates.
+
+So `vertex_connectivity` (source FCD) and `electrode_connectivity` (sensor FCD) test the
+*same* hypothesis with the *same* cluster adapter — a clean source-vs-sensor comparison.
+
+**Running.** `--hypothesis NAME[,NAME]` runs one (or a few) by name; with no flag the
+module runs all declared hypotheses. It composes with `--metric` / `--band` / `--select`:
+
+```bash
+uv run --no-sync source-analytics run --study study.yaml \
+    --paradigm resting --analysis roi_psd --hypothesis disease_effect
+```
+
+Output is **additive**: a new `<module>_hypotheses.csv` written alongside the module's
+existing tables. (These results suit being driven by an external analysis loop, but the
+layer has no dependency on one.)
 
 ## Input Data
 
@@ -325,10 +383,12 @@ source-analytics run --study study.yaml --paradigm vertex --analysis vertex_conn
 source-analytics run --study study.yaml --paradigm vertex --analysis vertex_cross_freq --metric ppc --band low_gamma
 # generic form
 source-analytics run ... --select metric=pli --select band=beta,low_gamma
+# one declared hypothesis (see "Hypothesis testing")
+source-analytics run ... --analysis roi_psd --hypothesis disease_effect
 ```
 
 `source-analytics list` tags each analysis with its selectable dimensions
-(`[--select: metric, band]`).
+(`[--select: metric, band, hypothesis]`).
 
 ## Analysis Modules
 
