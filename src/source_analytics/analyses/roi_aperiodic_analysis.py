@@ -41,6 +41,7 @@ class ROIAperiodicAnalysis(BaseAnalysis):
     """
 
     name = "roi_aperiodic"
+    SELECTABLE = {"hypothesis": "declared hypothesis"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -169,6 +170,11 @@ class ROIAperiodicAnalysis(BaseAnalysis):
         ]
         cmd.extend(self._r_no_figures_flags())
         cmd.extend(self._r_roi_categories_flags())
+
+        # Manual hypothesis selection (--hypothesis NAME[,NAME]) passed through to R.
+        wanted_hyp = self._selection.get("hypothesis")
+        if wanted_hyp:
+            cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:

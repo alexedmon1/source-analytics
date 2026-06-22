@@ -26,6 +26,7 @@ script_dir <- if (exists("script.dir")) {
 }
 
 source(file.path(script_dir, "stats_utils.R"))
+source(file.path(script_dir, "hypothesis.R"))
 source(file.path(script_dir, "plot_psd.R"))
 source(file.path(script_dir, "report.R"))
 
@@ -43,6 +44,8 @@ parser$add_argument("--tbl-dir", default = NULL,
                     help = "Directory for tables (default: output-dir/tables)")
 parser$add_argument("--no-figures", action = "store_true", default = FALSE,
                     help = "Skip all figure generation (stats/tables only)")
+parser$add_argument("--hypothesis", default = NULL,
+                    help = "Run only the named hypothesis(es) (comma-separated) from the design spec; default = all")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
@@ -182,6 +185,12 @@ if (nrow(posthoc_region_nested_df) > 0) {
   write_csv(posthoc_region_nested_df, file.path(tbl_dir, "electrode_posthoc_region_nested.csv"))
   message("  Saved: tables/electrode_posthoc_region_nested.csv")
 }
+
+# --- Declarative hypotheses (hypothesis layer; additive; channel renamed to roi) ---
+message("\nRunning declarative hypotheses (hypothesis layer)...")
+write_module_hypotheses(band_df, config, tbl_dir, prefix = "electrode_psd",
+                        dv_cols = power_types, spatial_col = "roi",
+                        band_col = "band", hypothesis = args$hypothesis)
 
 # --- Figures ---
 message("\nGenerating figures...")

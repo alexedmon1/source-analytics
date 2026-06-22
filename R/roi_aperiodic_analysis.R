@@ -37,6 +37,7 @@ script_dir <- if (exists("script.dir")) {
 
 # Source helpers
 tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
+tryCatch(source(file.path(script_dir, "hypothesis.R")), error = function(e) NULL)
 tryCatch(source(file.path(script_dir, "plot_psd.R")), error = function(e) NULL)
 
 if (!exists("theme_pub")) {
@@ -70,6 +71,8 @@ parser$add_argument("--no-figures", action = "store_true", default = FALSE,
                     help = "Skip all figure generation (stats/tables only)")
 parser$add_argument("--roi-categories", default = NULL,
                     help = "Path to roi_categories.yaml (atlas ROI groupings)")
+parser$add_argument("--hypothesis", default = NULL,
+                    help = "Run only the named hypothesis(es) (comma-separated) from the design spec; default = all")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
@@ -1027,6 +1030,12 @@ if (!figures_only) {
     sig_global <- global_posthoc_df %>% filter(significant == TRUE)
     message("  ", nrow(global_posthoc_df), " global contrasts, ", nrow(sig_global), " significant")
   }
+
+  # --- Declarative hypotheses (hypothesis layer; additive, no band dimension) ---
+  message("\nRunning declarative hypotheses (hypothesis layer)...")
+  write_module_hypotheses(ap_df, config, tbl_dir, prefix = "roi_aperiodic",
+                          dv_cols = dvs, spatial_col = "roi",
+                          band_col = NULL, hypothesis = args$hypothesis)
 } else {
   message("Figures-only mode: loading existing tables...")
   omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_aperiodic_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())

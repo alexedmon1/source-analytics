@@ -50,7 +50,7 @@ class ElectrodeAnalysis(BaseAnalysis):
     """
 
     name = "electrode_psd"
-    SELECTABLE = {"band": "frequency band"}
+    SELECTABLE = {"band": "frequency band", "hypothesis": "declared hypothesis"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -307,6 +307,11 @@ class ElectrodeAnalysis(BaseAnalysis):
             "--tbl-dir", str(self.tbl_dir),
         ]
         cmd.extend(self._r_no_figures_flags())
+
+        # Manual hypothesis selection (--hypothesis NAME[,NAME]) passed through to R.
+        wanted_hyp = self._selection.get("hypothesis")
+        if wanted_hyp:
+            cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:

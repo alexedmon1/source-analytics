@@ -14,7 +14,7 @@
 
 suppressMessages({
   library(dplyr); library(lme4); library(lmerTest)
-  library(emmeans); library(effectsize)
+  library(emmeans); library(effectsize); library(readr)
 })
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
@@ -272,4 +272,60 @@ run_hypothesis <- function(data, hyp, spec,
 
   front <- c("hypothesis", "kind", "role", "band", "spatial")
   df[, c(front, setdiff(names(df), front)), drop = FALSE]
+}
+
+# ---- Module convenience wrapper -------------------------------------------
+
+#' Run every declared hypothesis for a module and write <prefix>_hypotheses.csv.
+#'
+#' The one-call wiring an *_analysis.R module uses (the Tier-1 emmeans sweep, see
+#' DESIGN_SPEC.md). Loops hypotheses x dv_cols, runs each via run_hypothesis()
+#' (fit_scope "shared"), tags the DV, binds, and writes the additive table.
+#' Honors a --hypothesis name filter. Band-less modules pass band_col = NULL.
+#'
+#' @param df long data.frame (subject, <factor>, <spatial_col>, dv columns, opt band).
+#' @param config read_yaml'd study config (design:/hypotheses: or legacy contrasts:).
+#' @param tbl_dir output tables directory.
+#' @param prefix output basename (e.g. "roi_psd" -> roi_psd_hypotheses.csv).
+#' @param dv_cols character vector of dependent-variable column names to test.
+#' @param spatial_col spatial unit column (default "roi").
+#' @param band_col band column, or NULL for band-less modules (e.g. aperiodic).
+#' @param hypothesis optional comma-separated name filter (the --hypothesis arg).
+#' @param fit_scope "shared" (default) or "per_contrast".
+#' @return (invisibly) the combined hypotheses data.frame.
+write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
+                                    spatial_col = "roi", band_col = "band",
+                                    hypothesis = NULL, fit_scope = "shared") {
+  spec <- parse_design_spec(config)
+  if (length(spec$hypotheses) == 0) {
+    message("  No hypotheses/contrasts declared — skipping ", prefix, " hypotheses.")
+    return(invisible(NULL))
+  }
+  hyp_names <- names(spec$hypotheses)
+  if (!is.null(hypothesis)) {
+    want <- trimws(strsplit(hypothesis, ",")[[1]])
+    hyp_names <- intersect(hyp_names, want)
+    if (length(hyp_names) == 0)
+      message("  No declared hypothesis matches --hypothesis '", hypothesis, "'")
+  }
+  has_band <- !is.null(band_col) && band_col %in% names(df)
+  bands <- if (has_band) names(config$bands) else NULL
+  out <- list()
+  for (hn in hyp_names) for (dv in dv_cols) {
+    res <- tryCatch(
+      run_hypothesis(df, hn, spec, dv_col = dv, spatial_col = spatial_col,
+                     band_col = if (has_band) band_col else NULL,
+                     bands = bands, fit_scope = fit_scope),
+      error = function(e) { message("  ", hn, "/", dv, ": ", conditionMessage(e)); NULL })
+    if (!is.null(res) && nrow(res) > 0) { res$dv <- dv; out[[paste(hn, dv)]] <- res }
+  }
+  hyp_df <- bind_rows(out)
+  if (nrow(hyp_df) > 0) {
+    path <- file.path(tbl_dir, paste0(prefix, "_hypotheses.csv"))
+    write_csv(hyp_df, path)
+    n_sig <- sum(hyp_df$significant, na.rm = TRUE)
+    message("  Saved: ", basename(path), " (", nrow(hyp_df), " rows, ",
+            length(hyp_names), " hypotheses x ", length(dv_cols), " DV; ", n_sig, " sig cells)")
+  }
+  invisible(hyp_df)
 }

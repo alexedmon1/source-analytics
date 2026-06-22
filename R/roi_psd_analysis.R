@@ -245,44 +245,10 @@ if (!figures_only) {
   }
 
   # --- Declarative hypotheses (hypothesis layer; additive, see DESIGN_SPEC.md) ---
-  # ONE table per-ROI for every declared hypothesis, run via the emmeans adapter.
-  # fit_scope="shared": all design groups in one fit (omnibus-ready, common error
-  # term). Manual control: --hypothesis NAME runs just that one. No auto-gating.
   message("\nRunning declarative hypotheses (hypothesis layer)...")
-  spec <- parse_design_spec(config)
-  if (length(spec$hypotheses) > 0) {
-    hyp_names <- names(spec$hypotheses)
-    if (!is.null(args$hypothesis)) {
-      want <- trimws(strsplit(args$hypothesis, ",")[[1]])
-      hyp_names <- intersect(hyp_names, want)
-      if (length(hyp_names) == 0)
-        message("  No declared hypothesis matches --hypothesis '", args$hypothesis, "'")
-    }
-    hyp_list <- list()
-    for (hn in hyp_names) {
-      for (ptype in power_types) {
-        res <- tryCatch(
-          run_hypothesis(band_df, hn, spec, dv_col = ptype, spatial_col = "roi",
-                         band_col = "band", bands = names(config$bands),
-                         fit_scope = "shared"),
-          error = function(e) { message("  ", hn, "/", ptype, ": ", conditionMessage(e)); NULL })
-        if (!is.null(res) && nrow(res) > 0) {
-          res$power_type <- ptype
-          hyp_list[[paste(hn, ptype)]] <- res
-        }
-      }
-    }
-    hyp_df <- bind_rows(hyp_list)
-    if (nrow(hyp_df) > 0) {
-      write_csv(hyp_df, file.path(tbl_dir, "roi_psd_hypotheses.csv"))
-      n_sig <- sum(hyp_df$significant, na.rm = TRUE)
-      message("  Saved: tables/roi_psd_hypotheses.csv (", nrow(hyp_df), " rows, ",
-              length(hyp_names), " hypotheses x ", length(power_types), " power types; ",
-              n_sig, " significant cells)")
-    }
-  } else {
-    message("  No hypotheses/contrasts declared — skipping.")
-  }
+  write_module_hypotheses(band_df, config, tbl_dir, prefix = "roi_psd",
+                          dv_cols = power_types, spatial_col = "roi",
+                          band_col = "band", hypothesis = args$hypothesis)
 } else {
   message("Figures-only mode: loading existing tables...")
   omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_psd_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
