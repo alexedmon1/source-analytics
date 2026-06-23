@@ -21,6 +21,7 @@ name**, and read the result. Nothing auto-fires — there is no gating, no chain
 | spec loader + emmeans adapter + runner + module helper | `R/hypothesis.R` | ✅ built |
 | `Hypothesis` / `DesignSpec` dataclasses, `StudyConfig.design_spec` | `src/source_analytics/config.py` | ✅ built |
 | permutation adapter (vertex / connectivity maps) | `src/source_analytics/hypothesis/permutation.py` | ✅ built (vertex_cluster wired) |
+| edge / NBS adapter (connectivity matrices → subnetworks) | `src/source_analytics/hypothesis/edge.py` | ✅ built (roi_nbs / vertex_nbs wired) |
 | kept primitives `tost_equivalent()` / `.equivalence_margin()` | `R/stats_utils.R` | ✅ reused |
 
 ## 2. Declaring hypotheses (the spec)
@@ -122,11 +123,16 @@ statistic is computed — the divide is the inference machinery, **not** the spa
 | adapter | modules | result contract |
 |---|---|---|
 | **emmeans** (R LMM) ✅ | roi_psd, roi_aperiodic, electrode_psd, electrode_aperiodic, … | **tabular** — per-cell estimate/CI/p/FDR/effect (the schema above) |
-| **permutation** (Python) ⏳ | all vertex_*, electrode_connectivity, roi_connectivity/directed/cross_freq/graph | **map + clusters** — per-unit statistic map + cluster extent/mass/cluster-p (max-stat/TFCE corrected, *not* per-cell FDR) |
+| **permutation** (Python) ✅ | all per-unit-map vertex_*, electrode_connectivity, vertex_connectivity/directed/specparam | **map + clusters** — per-unit statistic map + cluster extent/mass/cluster-p (max-stat/TFCE corrected, *not* per-cell FDR) |
+| **edge / NBS** (Python) ✅ | roi_nbs, vertex_nbs (+ the combined roi_network/vertex_network aliases) | **subnetwork table** — per-edge statistic matrix → connected supra-threshold components with edge-count, mass, peak, component-p (NBS max-component corrected) |
 
-`electrode_connectivity` runs on the **permutation** adapter (it is a map), alongside
-`vertex_connectivity` — not with `electrode_psd`. Method knobs (cluster threshold, TFCE,
-adjacency, `n_permutations`) live in **module config**, never in the hypothesis.
+`electrode_connectivity` runs on the **permutation** adapter (it is a per-channel map),
+alongside `vertex_connectivity` — not with `electrode_psd`. The **edge/NBS** adapter is the
+third contract: it clusters supra-threshold *edges* into subnetworks rather than supra-threshold
+*units* into spatial clusters, so it consumes connectivity *matrices* (the NBS family). A
+pairwise contrast routes through the legacy `nbs_permutation_test` verbatim (bit-exact);
+omnibus uses a per-edge F-matrix. Method knobs (cluster/NBS threshold, TFCE, adjacency,
+`n_permutations`) live in **module config**, never in the hypothesis.
 
 ## 6. Equivalence (TOST)
 
@@ -181,9 +187,10 @@ Four steps — see `roi_psd_analysis.R` / `electrode_aperiodic_analysis.R` for l
 4. **Python:** add `"hypothesis": "declared hypothesis"` to the module's `SELECTABLE`, and pass
    `--hypothesis` through to the Rscript command from `self._selection.get("hypothesis")`.
 
-This fits modules with a modest spatial cardinality (≤ ~32 ROIs / ~30 channels). Edge/node
-**maps** (connectivity, directed, graph) do **not** use this path — they belong to the
-permutation adapter (a `group × edge` LMM is infeasible and wrong for them).
+This fits modules with a modest spatial cardinality (≤ ~32 ROIs / ~30 channels). Per-unit
+**maps** (vertex/electrode connectivity, directed, specparam) belong to the permutation adapter,
+and connectivity-**matrix** subnetworks (roi_nbs / vertex_nbs) belong to the edge/NBS adapter — a
+`group × edge` LMM is infeasible and wrong for either (~496 edges → ~2500 params).
 
 ## 9. Status
 
@@ -195,9 +202,13 @@ permutation adapter (a `group × edge` LMM is infeasible and wrong for them).
   contract. **Wired into `vertex_cluster`, `vertex_connectivity` (FCD), `vertex_directed`
   (outflow/inflow/netflow), `vertex_specparam` (exponent/offset), and `electrode_connectivity`
   (per-channel FCD — the source-vs-sensor sensor side, montage adjacency auto-scaled).** All
-  verified on real FORGE data via `write_module_hypotheses_perm()`. Remaining map family: the ROI
-  *edge* modules (roi_connectivity/directed/graph) + vertex_nbs need the NBS/edge contract (a
-  different result shape — edge subnetworks, not per-unit maps), not this per-unit-map adapter.
+  verified on real FORGE data via `write_module_hypotheses_perm()`.
+- ✅ **edge / NBS adapter** (`hypothesis/edge.py`): contrast (pairwise = legacy-exact via
+  `nbs_permutation_test`; general weighted), omnibus per-edge F, equivalence (per-edge TOST
+  summary), Freedman–Lane covariates, subnetwork (component-table) contract. **Wired into `roi_nbs`,
+  `vertex_nbs`, and the combined `roi_network`/`vertex_network` aliases** via
+  `write_module_hypotheses_edge()` (additive `<module>_hypotheses.csv`). Verified bit-exact vs the
+  legacy NBS on real FORGE data (Low Gamma / imag_coherence / KO_VEH vs WT_VEH).
 - ⏳ **deferred:** `roi_evoked` / `electrode_evoked` (long-format DV; no data in the resting
   study). **specials:** `vertex_mvpa` (decoding), `vertex_spatial` (GLS), `electrode_comparison`
   (agreement — may not take hypotheses).
