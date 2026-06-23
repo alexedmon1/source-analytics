@@ -374,15 +374,14 @@ run_posthoc_region_nested <- function(ap_df, contrasts, electrode_categories, om
 dvs <- c("exponent", "offset")
 
 all_omnibus <- list()
-all_posthoc <- list()
 all_omnibus_region <- list()
 all_posthoc_region <- list()
 
 for (dv_name in dvs) {
   message("\n=== DV: ", dv_name, " ===")
 
-  # Channel-level omnibus
-  message("Running channel-level omnibus LMM (group * channel)...")
+  # Channel-level omnibus [DIAGNOSTIC, not a hypothesis]
+  message("Running channel-level omnibus LMM (group * channel) [diagnostic]...")
   omnibus <- run_omnibus_channel(ap_df, config$contrasts, dv_name)
   all_omnibus[[dv_name]] <- omnibus
 
@@ -398,19 +397,12 @@ for (dv_name in dvs) {
     }
   }
 
-  # Channel-level post-hoc
-  message("Running channel-level post-hoc emmeans...")
-  posthoc <- run_posthoc_channel(ap_df, config$contrasts, dv_name, omnibus)
-  all_posthoc[[dv_name]] <- posthoc
+  # Channel-level per-contrast post-hoc now comes from the hypothesis layer
+  # (run_posthoc_channel retired). See the write_module_hypotheses call below.
 
-  if (nrow(posthoc) > 0) {
-    sig_count <- sum(posthoc$significant, na.rm = TRUE)
-    message("  ", nrow(posthoc), " channel contrasts, ", sig_count, " significant")
-  } else {
-    message("  No post-hoc tests (no significant omnibus effects)")
-  }
-
-  # Region-nested (if electrode_categories defined)
+  # Region-nested (if electrode_categories defined). KEPT on the legacy nested
+  # model dv ~ group*region + (1|subject/channel); the hypothesis layer fits
+  # (1|subject) only and cannot express this nesting.
   if (length(electrode_categories) > 0) {
     message("Running region-nested omnibus LMM (group * region, channels nested)...")
     omnibus_reg <- run_omnibus_region_nested(ap_df, config$contrasts, electrode_categories, dv_name)
@@ -442,20 +434,32 @@ for (dv_name in dvs) {
   }
 }
 
+# --- Declarative hypotheses (hypothesis layer) — channel-level per-contrast ---
+# Sole per-contrast engine for the channel level. electrode_aperiodic_posthoc_
+# channel.csv is rebuilt from the contrast-kind rows (legacy schema via aliases;
+# channel restored from spatial) so figures/report consume it unchanged.
+message("\nRunning declarative hypotheses (hypothesis layer) — channel level...")
+hyp_chan <- write_module_hypotheses(ap_df, config, tbl_dir, prefix = "electrode_aperiodic",
+                                    dv_cols = dvs, spatial_col = "channel",
+                                    band_col = NULL, hypothesis = args$hypothesis)
+
 # Combine and export
 omnibus_df <- bind_rows(all_omnibus)
-posthoc_df <- bind_rows(all_posthoc)
+posthoc_df <- if (!is.null(hyp_chan) && nrow(hyp_chan) > 0)
+  hyp_chan[hyp_chan$kind == "contrast", , drop = FALSE] else data.frame()
+if (nrow(posthoc_df) > 0) posthoc_df$channel <- posthoc_df$spatial
 omnibus_region_df <- bind_rows(all_omnibus_region)
 posthoc_region_df <- bind_rows(all_posthoc_region)
 
 message("\nExporting tables...")
 if (nrow(omnibus_df) > 0) {
   write_csv(omnibus_df, file.path(tbl_dir, "electrode_aperiodic_omnibus.csv"))
-  message("  Saved: tables/electrode_aperiodic_omnibus.csv")
+  message("  Saved: tables/electrode_aperiodic_omnibus.csv (diagnostic)")
 }
 if (nrow(posthoc_df) > 0) {
   write_csv(posthoc_df, file.path(tbl_dir, "electrode_aperiodic_posthoc_channel.csv"))
-  message("  Saved: tables/electrode_aperiodic_posthoc_channel.csv")
+  message("  Saved: tables/electrode_aperiodic_posthoc_channel.csv (", nrow(posthoc_df),
+          " rows, hypothesis-derived)")
 }
 if (nrow(omnibus_region_df) > 0) {
   write_csv(omnibus_region_df, file.path(tbl_dir, "electrode_aperiodic_omnibus_region_nested.csv"))
@@ -465,12 +469,6 @@ if (nrow(posthoc_region_df) > 0) {
   write_csv(posthoc_region_df, file.path(tbl_dir, "electrode_aperiodic_posthoc_region_nested.csv"))
   message("  Saved: tables/electrode_aperiodic_posthoc_region_nested.csv")
 }
-
-# --- Declarative hypotheses (hypothesis layer; additive, no band dimension) ---
-message("\nRunning declarative hypotheses (hypothesis layer)...")
-write_module_hypotheses(ap_df, config, tbl_dir, prefix = "electrode_aperiodic",
-                        dv_cols = dvs, spatial_col = "channel",
-                        band_col = NULL, hypothesis = args$hypothesis)
 
 # --- Summary ---
 message("\nWriting summary...")

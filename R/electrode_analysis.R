@@ -85,7 +85,6 @@ message("Channels: ", length(unique(band_df$roi)))
 power_types <- c("relative", "absolute")
 
 all_omnibus <- list()
-all_posthoc <- list()
 all_omnibus_region_nested <- list()
 all_posthoc_region_nested <- list()
 
@@ -95,13 +94,13 @@ electrode_categories <- config$electrode_categories
 for (ptype in power_types) {
   message("\n=== Power type: ", ptype, " ===")
 
-  # Omnibus LMM: dv ~ group * channel + (1|subject)
-  message("Running electrode-level omnibus LMM (group * channel)...")
+  # Omnibus LMM: dv ~ group * channel + (1|subject) [DIAGNOSTIC, not a hypothesis]
+  message("Running electrode-level omnibus LMM (group * channel) [diagnostic]...")
   omnibus <- run_omnibus_lmm(band_df, config$contrasts, config$bands, power_type = ptype)
   all_omnibus[[ptype]] <- omnibus
 
   if (nrow(omnibus) > 0) {
-    message("\n  === Electrode Omnibus (", ptype, ") ===")
+    message("\n  === Electrode Omnibus (", ptype, ") [diagnostic] ===")
     for (i in seq_len(nrow(omnibus))) {
       row <- omnibus[i, ]
       grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
@@ -113,20 +112,13 @@ for (ptype in power_types) {
     }
   }
 
-  # Post-hoc: emmeans per channel
-  message("Running channel-level post-hoc emmeans...")
-  posthoc <- run_posthoc_emmeans(band_df, config$contrasts, config$bands, omnibus,
-                                  power_type = ptype)
-  all_posthoc[[ptype]] <- posthoc
-
-  if (nrow(posthoc) > 0) {
-    sig_count <- sum(posthoc$significant, na.rm = TRUE)
-    message("  ", nrow(posthoc), " channel contrasts, ", sig_count, " significant")
-  } else {
-    message("  No post-hoc tests (no significant omnibus effects)")
-  }
+  # Channel-level per-contrast post-hoc now comes from the hypothesis layer
+  # (run_posthoc_emmeans retired). See the write_module_hypotheses call below.
 
   # --- Region-level nested (electrodes as replicates within regions) ---
+  # KEPT on the legacy nested model: dv ~ group*region + (1|subject/channel).
+  # The hypothesis layer fits (1|subject) only and cannot express this nesting,
+  # so this scalp-validation secondary analysis stays as-is.
   if (length(electrode_categories) > 0) {
     message("Running region-level nested omnibus LMM (group * region, electrodes as replicates)...")
     omnibus_reg_nested <- run_omnibus_lmm_region_nested(band_df, config$contrasts, config$bands,
@@ -161,9 +153,19 @@ for (ptype in power_types) {
   }
 }
 
+# --- Declarative hypotheses (hypothesis layer) — channel-level per-contrast ---
+# Sole per-contrast engine for the channel level (spatial 'roi' = electrode).
+# electrode_posthoc.csv is rebuilt from the contrast-kind rows (legacy schema via
+# .add_legacy_aliases) so figures/report consume it unchanged.
+message("\nRunning declarative hypotheses (hypothesis layer) — channel level...")
+hyp_chan <- write_module_hypotheses(band_df, config, tbl_dir, prefix = "electrode_psd",
+                                    dv_cols = power_types, spatial_col = "roi",
+                                    band_col = "band", hypothesis = args$hypothesis)
+
 # --- Combine results ---
 omnibus_df <- bind_rows(all_omnibus)
-posthoc_df <- bind_rows(all_posthoc)
+posthoc_df <- if (!is.null(hyp_chan) && nrow(hyp_chan) > 0)
+  hyp_chan[hyp_chan$kind == "contrast", , drop = FALSE] else data.frame()
 omnibus_region_nested_df <- bind_rows(all_omnibus_region_nested)
 posthoc_region_nested_df <- bind_rows(all_posthoc_region_nested)
 
@@ -171,11 +173,12 @@ posthoc_region_nested_df <- bind_rows(all_posthoc_region_nested)
 message("\nExporting tables...")
 if (nrow(omnibus_df) > 0) {
   write_csv(omnibus_df, file.path(tbl_dir, "electrode_omnibus.csv"))
-  message("  Saved: tables/electrode_omnibus.csv")
+  message("  Saved: tables/electrode_omnibus.csv (diagnostic)")
 }
 if (nrow(posthoc_df) > 0) {
   write_csv(posthoc_df, file.path(tbl_dir, "electrode_posthoc.csv"))
-  message("  Saved: tables/electrode_posthoc.csv")
+  message("  Saved: tables/electrode_posthoc.csv (", nrow(posthoc_df),
+          " rows, hypothesis-derived)")
 }
 if (nrow(omnibus_region_nested_df) > 0) {
   write_csv(omnibus_region_nested_df, file.path(tbl_dir, "electrode_omnibus_region_nested.csv"))
@@ -185,12 +188,6 @@ if (nrow(posthoc_region_nested_df) > 0) {
   write_csv(posthoc_region_nested_df, file.path(tbl_dir, "electrode_posthoc_region_nested.csv"))
   message("  Saved: tables/electrode_posthoc_region_nested.csv")
 }
-
-# --- Declarative hypotheses (hypothesis layer; additive; channel renamed to roi) ---
-message("\nRunning declarative hypotheses (hypothesis layer)...")
-write_module_hypotheses(band_df, config, tbl_dir, prefix = "electrode_psd",
-                        dv_cols = power_types, spatial_col = "roi",
-                        band_col = "band", hypothesis = args$hypothesis)
 
 # --- Figures ---
 message("\nGenerating figures...")
