@@ -274,6 +274,30 @@ run_hypothesis <- function(data, hyp, spec,
   df[, c(front, setdiff(names(df), front)), drop = FALSE]
 }
 
+# ---- Legacy-schema compat shim --------------------------------------------
+
+#' Add legacy-posthoc column aliases to a hypotheses data.frame.
+#'
+#' Lets the existing figure/table consumers (figure_registry, summary_figures,
+#' render_posthoc_mosaics) read `<module>_hypotheses.csv` in place of the retired
+#' `<module>_posthoc_*.csv` with NO code change — the native hypothesis columns
+#' remain the source of truth; these are duplicates under the old names. Dropped
+#' once the figure layer is migrated to the native schema.
+#'
+#' Aliases: contrast<-label/name, roi<-spatial, power_type<-dv,
+#' hedges_g<-effect_size (only where effect_size_type=="hedges_g", so omnibus
+#' omega^2 / regression beta are NOT mislabelled), p_fdr<-q_value.
+.add_legacy_aliases <- function(df) {
+  if (!"contrast" %in% names(df))
+    df$contrast <- ifelse(is.na(df$label) | df$label == "", df$hypothesis, df$label)
+  if ("spatial" %in% names(df) && !"roi" %in% names(df)) df$roi <- df$spatial
+  if ("dv" %in% names(df) && !"power_type" %in% names(df)) df$power_type <- df$dv
+  if ("effect_size" %in% names(df) && !"hedges_g" %in% names(df))
+    df$hedges_g <- ifelse(df$effect_size_type == "hedges_g", df$effect_size, NA_real_)
+  if ("q_value" %in% names(df) && !"p_fdr" %in% names(df)) df$p_fdr <- df$q_value
+  df
+}
+
 # ---- Module convenience wrapper -------------------------------------------
 
 #' Run every declared hypothesis for a module and write <prefix>_hypotheses.csv.
@@ -321,6 +345,7 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
   }
   hyp_df <- bind_rows(out)
   if (nrow(hyp_df) > 0) {
+    hyp_df <- .add_legacy_aliases(hyp_df)
     path <- file.path(tbl_dir, paste0(prefix, "_hypotheses.csv"))
     write_csv(hyp_df, path)
     n_sig <- sum(hyp_df$significant, na.rm = TRUE)
