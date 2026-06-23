@@ -424,6 +424,7 @@ class ROINBSAnalysis(_ROINetworkBase):
 
     def statistics(self) -> None:
         self._run_nbs()
+        self._run_nbs_hypotheses()
 
     def figures(self) -> None:
         pass
@@ -448,6 +449,7 @@ class ROINetworkAnalysis(_ROINetworkBase):
     def statistics(self) -> None:
         self._graph_statistics()
         self._run_nbs()
+        self._run_nbs_hypotheses()
 
     def figures(self) -> None:
         self._graph_figures()

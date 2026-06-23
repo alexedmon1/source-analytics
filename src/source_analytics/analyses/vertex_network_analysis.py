@@ -336,6 +336,7 @@ class VertexNBSAnalysis(_VertexNetworkBase):
 
     def statistics(self) -> None:
         self._run_nbs()
+        self._run_nbs_hypotheses()
 
     def figures(self) -> None:
         self._nbs_figures()
@@ -360,6 +361,7 @@ class VertexNetworkAnalysis(_VertexNetworkBase):
     def statistics(self) -> None:
         self._graph_statistics()
         self._run_nbs()
+        self._run_nbs_hypotheses()
 
     def figures(self) -> None:
         self._nbs_figures()

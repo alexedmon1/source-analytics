@@ -37,7 +37,8 @@ _DIRECTED_METRICS = frozenset({"dpli"})
 class NetworkAnalysisBase(BaseAnalysis):
     """Common config + NBS execution for graph/NBS/combined network analyses."""
 
-    SELECTABLE = {"metric": "connectivity metric", "band": "frequency band"}
+    SELECTABLE = {"metric": "connectivity metric", "band": "frequency band",
+                  "hypothesis": "declared hypothesis"}
 
     # Subclasses override these.
     _default_nbs_threshold: float = 2.5
@@ -139,3 +140,38 @@ class NetworkAnalysisBase(BaseAnalysis):
             out = self.tbl_dir / self._nbs_results_filename
             pd.DataFrame(rows).to_csv(out, index=False)
             logger.info("Exported %s (%d rows)", self._nbs_results_filename, len(rows))
+
+    # ------------------------------------------- declarative hypotheses --- #
+    def _run_nbs_hypotheses(self) -> None:
+        """Run declared design:/hypotheses: over the connectivity matrices.
+
+        Additive: writes ``<name>_hypotheses.csv`` (the edge/NBS subnetwork
+        contract) alongside the legacy ``*_nbs_results.csv`` left by
+        :meth:`_run_nbs`. A pairwise contrast reproduces that legacy NBS
+        bit-exact; omnibus/general-weighted contrasts add the >2-group tests
+        the legacy per-pair path cannot express. No-op when nothing is declared.
+        """
+        from ..hypothesis import write_module_hypotheses_edge
+
+        if not self._conn_matrices or not self._subject_groups:
+            return
+        matrices_by_cell: dict[tuple[str, str], dict] = {}
+        for band_name in self._selected_bands():
+            for metric in self._connectivity_metrics:
+                cell = {
+                    uid: self._conn_matrices[uid][band_name][metric]
+                    for uid in self._subject_groups
+                    if metric in self._conn_matrices.get(uid, {}).get(band_name, {})
+                }
+                if cell:
+                    matrices_by_cell[(band_name, metric)] = cell
+        if not matrices_by_cell:
+            return
+
+        wanted = self._selection.get("hypothesis")
+        write_module_hypotheses_edge(
+            matrices_by_cell, self._subject_groups, self.config, self.tbl_dir,
+            prefix=self.name, nbs_threshold=self._nbs_threshold,
+            n_perms=self._nbs_permutations,
+            hypothesis=",".join(sorted(wanted)) if wanted else None, seed=42,
+        )
