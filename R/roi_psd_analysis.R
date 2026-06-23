@@ -111,20 +111,22 @@ if (!figures_only) {
   power_types <- c("relative", "absolute")
 
   all_omnibus <- list()
-  all_posthoc <- list()
   all_omnibus_region <- list()
   all_posthoc_region <- list()
 
   for (ptype in power_types) {
     message("\n=== Power type: ", ptype, " ===")
 
-    # --- ROI-level omnibus ---
-    message("\nRunning ROI-level omnibus LMM (group * roi)...")
+    # --- ROI-level omnibus (DIAGNOSTIC, not a hypothesis) ---
+    # The group*roi omnibus + interaction F are retained as a model-fit
+    # diagnostic for the report. Scientific per-contrast inference is handled
+    # by the declarative hypothesis layer below (run_posthoc_emmeans retired).
+    message("\nRunning ROI-level omnibus LMM (group * roi) [diagnostic]...")
     omnibus <- run_omnibus_lmm(band_df, config$contrasts, config$bands, power_type = ptype)
     all_omnibus[[ptype]] <- omnibus
 
     if (nrow(omnibus) > 0) {
-      message("\n  === ROI-Level Omnibus (", ptype, ") ===")
+      message("\n  === ROI-Level Omnibus (", ptype, ") [diagnostic] ===")
       for (i in seq_len(nrow(omnibus))) {
         row <- omnibus[i, ]
         grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
@@ -136,18 +138,8 @@ if (!figures_only) {
       }
     }
 
-    # --- ROI-level post-hoc ---
-    message("Running ROI-level post-hoc emmeans...")
-    posthoc <- run_posthoc_emmeans(band_df, config$contrasts, config$bands, omnibus,
-                                    power_type = ptype)
-    all_posthoc[[ptype]] <- posthoc
-
-    if (nrow(posthoc) > 0) {
-      sig_count <- sum(posthoc$significant, na.rm = TRUE)
-      message("  ", nrow(posthoc), " ROI contrasts, ", sig_count, " significant")
-    } else {
-      message("  No post-hoc tests (no significant omnibus effects)")
-    }
+    # ROI-level per-contrast post-hoc now comes from the hypothesis layer
+    # (see the write_module_hypotheses call after the loop). No legacy call here.
 
     # --- Region-level (if roi_categories defined) ---
     if (length(config$roi_categories) > 0) {
@@ -185,20 +177,33 @@ if (!figures_only) {
     }
   }
 
+  # --- Declarative hypotheses (hypothesis layer) — ROI-level per-contrast ---
+  # This is now the SOLE per-contrast inference engine for the ROI level. It
+  # writes roi_psd_hypotheses.csv (native) and returns the tidy rows; the
+  # legacy roi_psd_posthoc_roi.csv is rebuilt from those rows (legacy column
+  # aliases via .add_legacy_aliases) so figures/report consume it unchanged.
+  message("\nRunning declarative hypotheses (hypothesis layer) — ROI level...")
+  hyp_roi <- write_module_hypotheses(band_df, config, tbl_dir, prefix = "roi_psd",
+                                     dv_cols = power_types, spatial_col = "roi",
+                                     band_col = "band", hypothesis = args$hypothesis)
+
   # --- Combine results across power types ---
   omnibus_df <- bind_rows(all_omnibus)
-  posthoc_df <- bind_rows(all_posthoc)
+  # ROI post-hoc = the contrast-kind hypothesis rows (legacy schema via aliases).
+  posthoc_df <- if (!is.null(hyp_roi) && nrow(hyp_roi) > 0)
+    hyp_roi[hyp_roi$kind == "contrast", , drop = FALSE] else data.frame()
   omnibus_region_df <- bind_rows(all_omnibus_region)
   posthoc_region_df <- bind_rows(all_posthoc_region)
   # --- Export tables ---
   message("\nExporting tables...")
   if (nrow(omnibus_df) > 0) {
     write_csv(omnibus_df, file.path(tbl_dir, "roi_psd_omnibus.csv"))
-    message("  Saved: tables/roi_psd_omnibus.csv")
+    message("  Saved: tables/roi_psd_omnibus.csv (diagnostic)")
   }
   if (nrow(posthoc_df) > 0) {
     write_csv(posthoc_df, file.path(tbl_dir, "roi_psd_posthoc_roi.csv"))
-    message("  Saved: tables/roi_psd_posthoc_roi.csv")
+    message("  Saved: tables/roi_psd_posthoc_roi.csv (", nrow(posthoc_df),
+            " rows, hypothesis-derived)")
   }
   if (nrow(omnibus_region_df) > 0) {
     write_csv(omnibus_region_df, file.path(tbl_dir, "roi_psd_omnibus_region.csv"))
@@ -244,11 +249,6 @@ if (!figures_only) {
     message("  ", nrow(global_posthoc_df), " global contrasts, ", nrow(sig_global), " significant")
   }
 
-  # --- Declarative hypotheses (hypothesis layer; additive, see DESIGN_SPEC.md) ---
-  message("\nRunning declarative hypotheses (hypothesis layer)...")
-  write_module_hypotheses(band_df, config, tbl_dir, prefix = "roi_psd",
-                          dv_cols = power_types, spatial_col = "roi",
-                          band_col = "band", hypothesis = args$hypothesis)
 } else {
   message("Figures-only mode: loading existing tables...")
   omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_psd_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())

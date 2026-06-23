@@ -284,14 +284,16 @@ run_hypothesis <- function(data, hyp, spec,
 #' remain the source of truth; these are duplicates under the old names. Dropped
 #' once the figure layer is migrated to the native schema.
 #'
-#' Aliases: contrast<-label/name, roi<-spatial, power_type<-dv,
+#' Aliases: contrast<-hypothesis name (legacy keyed figures/filenames on the
+#' contrast NAME), roi<-spatial, power_type<-dv, t_ratio<-stat (t rows only),
 #' hedges_g<-effect_size (only where effect_size_type=="hedges_g", so omnibus
 #' omega^2 / regression beta are NOT mislabelled), p_fdr<-q_value.
 .add_legacy_aliases <- function(df) {
-  if (!"contrast" %in% names(df))
-    df$contrast <- ifelse(is.na(df$label) | df$label == "", df$hypothesis, df$label)
+  if (!"contrast" %in% names(df)) df$contrast <- df$hypothesis
   if ("spatial" %in% names(df) && !"roi" %in% names(df)) df$roi <- df$spatial
   if ("dv" %in% names(df) && !"power_type" %in% names(df)) df$power_type <- df$dv
+  if ("stat" %in% names(df) && !"t_ratio" %in% names(df))
+    df$t_ratio <- ifelse(df$stat_type == "t", df$stat, NA_real_)
   if ("effect_size" %in% names(df) && !"hedges_g" %in% names(df))
     df$hedges_g <- ifelse(df$effect_size_type == "hedges_g", df$effect_size, NA_real_)
   if ("q_value" %in% names(df) && !"p_fdr" %in% names(df)) df$p_fdr <- df$q_value
