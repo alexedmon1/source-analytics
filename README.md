@@ -18,10 +18,6 @@ so both the run order and the gallery's grouping follow from it.
 
 **Python** handles orchestration, signal processing, and data I/O. **R** handles statistics (linear mixed models via lme4) and visualization (ggplot2). Vertex-level modules use Python for statistics (cluster permutation) and visualization (glass brain plots), with R for report generation.
 
-## AI-Assisted Workflow (IRL)
-
-source-analytics is designed to run well inside an Idempotent Research Loop (author the study YAML → run modules → collect summaries), and the declarative [hypothesis layer](#hypothesis-testing) is a natural fit for a loop that runs one hypothesis at a time and logs each decision. The IRL tooling itself is moving to a separate `irl-templates` repo and will be run independently of this one; the in-repo [`irl-template.md`](irl-template.md) remains for now but should be treated as transitional.
-
 ## Installation
 
 ### Python

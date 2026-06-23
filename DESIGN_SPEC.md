@@ -249,11 +249,11 @@ run_hypothesis(hyp, module_ctx) ->
   `--metric` / `--band` / `--select DIM=val` axes.
 - **No `--hypothesis`:** the module *lists* available hypotheses and runs none. There is no
   "run all + adjudicate" path — deleted on purpose.
-- **IRL loop:** an analysis loop (from `irl-template.md`) drives `run_hypothesis` across
-  modules — run the omnibus, read it, decide whether the post-hoc contrasts follow, run the
-  ones you choose, log the reasoning. The runner is the action layer; the loop is the process;
-  the registry is the record (a mini pre-registration). The judgment stays with the human/loop,
-  not in a gate.
+- **Analysis loop (external):** a research loop drives `run_hypothesis` across modules — run the
+  omnibus, read it, decide whether the post-hoc contrasts follow, run the ones you choose, log the
+  reasoning. The runner is the action layer; the loop is the process; the registry is the record (a
+  mini pre-registration). The judgment stays with the human/loop, not in a gate. This loop tooling
+  lives in a separate, local workflow and is intentionally not part of this repo.
 
 ## 8. Equivalence margins (manual primitive)
 
@@ -293,7 +293,7 @@ exchangeability on a synthetic covariate).
    (emmeans: ω² from the F/df; permutation: ω² from the null F-distribution).
 2. **§10.2 Multiple-comparison scope.** **FDR within a single `run_hypothesis` call's cells**
    (e.g. bands × ROIs), with the family reported in the output. Cross-hypothesis correction is
-   the analyst's call, logged by the IRL loop — never silent, never automatic.
+   the analyst's call, logged by the external analysis loop — never silent, never automatic.
 3. **§10.3 Adapter/module order.** emmeans adapter + `roi_psd` first; **`vertex_network` (graph
    metrics) second** for the permutation adapter.
 
@@ -305,4 +305,5 @@ exchangeability on a synthetic covariate).
 2. **Permutation adapter** (omnibus-F + weighted contrast + Freedman–Lane covariates); wire into
    **`vertex_network`** (graph metrics) first.
 3. Migrate `study_treatment.yaml`; delete the retired gating code + `test_gating.R`.
-4. Roll `--hypothesis` across the remaining ROI/electrode/vertex callers; scaffold the IRL loop.
+4. Roll `--hypothesis` across the remaining ROI/electrode/vertex callers. (The analysis loop that
+   drives it is an external, local workflow — out of scope for this repo.)
