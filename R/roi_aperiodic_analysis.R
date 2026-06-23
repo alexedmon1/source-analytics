@@ -916,15 +916,13 @@ dvs <- c("exponent", "offset")
 
 if (!figures_only) {
   all_omnibus <- list()
-  all_posthoc <- list()
   all_omnibus_region <- list()
-  all_posthoc_region <- list()
 
   for (dv_name in dvs) {
     message("\n=== DV: ", dv_name, " ===")
 
-    # ROI-level omnibus
-    message("Running ROI-level omnibus LMM (group * roi)...")
+    # ROI-level omnibus (DIAGNOSTIC, not a hypothesis)
+    message("Running ROI-level omnibus LMM (group * roi) [diagnostic]...")
     omnibus <- run_omnibus_lmm_aperiodic(ap_df, config$contrasts, dv_name)
     all_omnibus[[dv_name]] <- omnibus
 
@@ -940,21 +938,12 @@ if (!figures_only) {
       }
     }
 
-    # ROI-level post-hoc
-    message("Running ROI-level post-hoc emmeans...")
-    posthoc <- run_posthoc_emmeans_aperiodic(ap_df, config$contrasts, dv_name, omnibus)
-    all_posthoc[[dv_name]] <- posthoc
+    # ROI-level per-contrast post-hoc now comes from the hypothesis layer
+    # (run_posthoc_emmeans_aperiodic retired). See after the loop.
 
-    if (nrow(posthoc) > 0) {
-      sig_count <- sum(posthoc$significant, na.rm = TRUE)
-      message("  ", nrow(posthoc), " ROI contrasts, ", sig_count, " significant")
-    } else {
-      message("  No post-hoc tests (no significant omnibus effects)")
-    }
-
-    # Region-level (if roi_categories defined)
+    # Region-level omnibus (DIAGNOSTIC, not a hypothesis)
     if (length(config$roi_categories) > 0) {
-      message("Running region-level omnibus LMM (group * region)...")
+      message("Running region-level omnibus LMM (group * region) [diagnostic]...")
       omnibus_reg <- run_omnibus_lmm_region_aperiodic(ap_df, config$contrasts,
                                                        config$roi_categories, dv_name)
       all_omnibus_region[[dv_name]] <- omnibus_reg
@@ -971,71 +960,76 @@ if (!figures_only) {
         }
       }
 
-      message("Running region-level post-hoc emmeans...")
-      posthoc_reg <- run_posthoc_emmeans_region_aperiodic(
-        ap_df, config$contrasts, config$roi_categories, omnibus_reg, dv_name)
-      all_posthoc_region[[dv_name]] <- posthoc_reg
-
-      if (nrow(posthoc_reg) > 0) {
-        sig_count <- sum(posthoc_reg$significant, na.rm = TRUE)
-        message("  ", nrow(posthoc_reg), " region contrasts, ", sig_count, " significant")
-      } else {
-        message("  No region post-hoc tests (no significant omnibus effects)")
-      }
+      # Region-level per-contrast post-hoc now from the hypothesis layer.
     }
   }
 
+  # The hypothesis layer is now the SOLE per-contrast inference engine at all
+  # three spatial granularities (roi / region / global; band-less). The legacy
+  # posthoc CSVs are rebuilt from the contrast-kind rows (legacy schema via
+  # .add_legacy_aliases) so figures/report consume them unchanged.
+  message("\nRunning declarative hypotheses (hypothesis layer) — ROI level...")
+  hyp_roi <- write_module_hypotheses(ap_df, config, tbl_dir, prefix = "roi_aperiodic",
+                                     dv_cols = dvs, spatial_col = "roi",
+                                     band_col = NULL, hypothesis = args$hypothesis)
+
+  hyp_region <- NULL
+  if (length(config$roi_categories) > 0) {
+    message("Running declarative hypotheses (hypothesis layer) — region level...")
+    region_df <- aggregate_to_regions_aperiodic(ap_df, config$roi_categories)
+    hyp_region <- write_module_hypotheses(region_df, config, tbl_dir,
+                                          prefix = "roi_aperiodic_region",
+                                          dv_cols = dvs, spatial_col = "region",
+                                          band_col = NULL, hypothesis = args$hypothesis)
+  }
+
+  message("Running declarative hypotheses (hypothesis layer) — global (marginal)...")
+  hyp_global <- write_module_hypotheses(ap_df, config, tbl_dir,
+                                        prefix = "roi_aperiodic_global",
+                                        dv_cols = dvs, spatial_col = "roi",
+                                        band_col = NULL, hypothesis = args$hypothesis,
+                                        marginal = TRUE)
+
+  .contrast_rows <- function(h) if (!is.null(h) && nrow(h) > 0)
+    h[h$kind == "contrast", , drop = FALSE] else data.frame()
+
   # Combine results across DVs
   omnibus_df <- bind_rows(all_omnibus)
-  posthoc_df <- bind_rows(all_posthoc)
   omnibus_region_df <- bind_rows(all_omnibus_region)
-  posthoc_region_df <- bind_rows(all_posthoc_region)
+  posthoc_df <- .contrast_rows(hyp_roi)
+  posthoc_region_df <- .contrast_rows(hyp_region)
+  if (nrow(posthoc_region_df) > 0) posthoc_region_df$region <- posthoc_region_df$spatial
+  global_posthoc_df <- .contrast_rows(hyp_global)
 
   # --- Export tables ---
   message("\nExporting tables...")
   if (nrow(omnibus_df) > 0) {
     write_csv(omnibus_df, file.path(tbl_dir, "roi_aperiodic_omnibus.csv"))
-    message("  Saved: tables/roi_aperiodic_omnibus.csv")
+    message("  Saved: tables/roi_aperiodic_omnibus.csv (diagnostic)")
   }
   if (nrow(posthoc_df) > 0) {
     write_csv(posthoc_df, file.path(tbl_dir, "roi_aperiodic_posthoc_roi.csv"))
-    message("  Saved: tables/roi_aperiodic_posthoc_roi.csv")
+    message("  Saved: tables/roi_aperiodic_posthoc_roi.csv (", nrow(posthoc_df),
+            " rows, hypothesis-derived)")
   }
   if (nrow(omnibus_region_df) > 0) {
     write_csv(omnibus_region_df, file.path(tbl_dir, "roi_aperiodic_omnibus_region.csv"))
-    message("  Saved: tables/roi_aperiodic_omnibus_region.csv")
+    message("  Saved: tables/roi_aperiodic_omnibus_region.csv (diagnostic)")
   }
   if (nrow(posthoc_region_df) > 0) {
     write_csv(posthoc_region_df, file.path(tbl_dir, "roi_aperiodic_posthoc_region.csv"))
-    message("  Saved: tables/roi_aperiodic_posthoc_region.csv")
+    message("  Saved: tables/roi_aperiodic_posthoc_region.csv (", nrow(posthoc_region_df),
+            " rows, hypothesis-derived)")
   }
-
-  # --- Global posthoc (marginal group comparisons averaged over ROIs) ---
-  message("\nComputing global posthoc (marginal group comparisons)...")
-  global_posthoc_list <- list()
-  for (dv_name in dvs) {
-    gp_data <- ap_df %>%
-      filter(group %in% unlist(lapply(config$contrasts, function(c) c(c$group_a, c$group_b)))) %>%
-      mutate(dv = .data[[dv_name]])
-
-    gp <- run_posthoc_global(gp_data, config$contrasts, spatial_col = "roi",
-                              dv_col = "dv", dv_label = dv_name)
-    if (nrow(gp) > 0) global_posthoc_list[[dv_name]] <- gp
-  }
-  global_posthoc_df <- bind_rows(global_posthoc_list)
 
   if (nrow(global_posthoc_df) > 0) {
+    global_posthoc_df$sig_label <- sig_stars(global_posthoc_df$q_value)
     write_csv(global_posthoc_df, file.path(tbl_dir, "roi_aperiodic_posthoc_global.csv"))
-    message("  Saved: tables/roi_aperiodic_posthoc_global.csv")
+    message("  Saved: tables/roi_aperiodic_posthoc_global.csv (", nrow(global_posthoc_df),
+            " rows, hypothesis-derived marginal)")
     sig_global <- global_posthoc_df %>% filter(significant == TRUE)
     message("  ", nrow(global_posthoc_df), " global contrasts, ", nrow(sig_global), " significant")
   }
-
-  # --- Declarative hypotheses (hypothesis layer; additive, no band dimension) ---
-  message("\nRunning declarative hypotheses (hypothesis layer)...")
-  write_module_hypotheses(ap_df, config, tbl_dir, prefix = "roi_aperiodic",
-                          dv_cols = dvs, spatial_col = "roi",
-                          band_col = NULL, hypothesis = args$hypothesis)
 } else {
   message("Figures-only mode: loading existing tables...")
   omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_aperiodic_omnibus.csv"), show_col_types = FALSE), error = function(e) data.frame())
