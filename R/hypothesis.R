@@ -139,19 +139,28 @@ weight_vector <- function(hyp, levels) {
 }
 
 #' Weighted linear contrast over group means, per spatial cell. Hedges g.
-.adapt_contrast <- function(fo, hyp) {
+#' marginal=TRUE collapses the spatial dimension: the contrast is taken on the
+#' group means MARGINALIZED over .sp (one row), reproducing the legacy "global"
+#' marginal-over-ROI contrast (group*spatial fit, emmeans ~ group).
+.adapt_contrast <- function(fo, hyp, marginal = FALSE) {
   glev <- levels(fo$data$.grp)
   wv <- weight_vector(hyp, glev)
-  emm <- if (fo$has_sp) emmeans(fo$fit, ~ .grp | .sp) else emmeans(fo$fit, ~ .grp)
+  per_sp <- fo$has_sp && !marginal
+  emm <- if (per_sp) emmeans(fo$fit, ~ .grp | .sp) else emmeans(fo$fit, ~ .grp)
   con <- contrast(emm, method = setNames(list(wv), hyp$name))
   cd <- as.data.frame(summary(con, infer = c(TRUE, TRUE)))
   resid_sd <- sigma(fo$fit)
+  # Pairwise endpoints (positive- vs negative-weight group) for legacy figures
+  # that draw between-group brackets. NA when the contrast is not a clean pair.
+  pos <- glev[wv > 0]; neg <- glev[wv < 0]
   data.frame(
-    spatial = if (fo$has_sp) as.character(cd$.sp) else NA_character_,
+    spatial = if (per_sp) as.character(cd$.sp) else NA_character_,
     estimate = cd$estimate, SE = cd$SE, df = cd$df, df_num = 1,
     stat = cd$t.ratio, stat_type = "t", p_value = cd$p.value,
     estimate_lcl = cd$lower.CL, estimate_ucl = cd$upper.CL,
     effect_size = cd$estimate / resid_sd, effect_size_type = "hedges_g",
+    group_a = if (length(pos) == 1) pos else NA_character_,
+    group_b = if (length(neg) == 1) neg else NA_character_,
     stringsAsFactors = FALSE
   )
 }
@@ -189,8 +198,8 @@ weight_vector <- function(hyp, levels) {
 
 #' Equivalence (TOST) on a weighted contrast. Reuses stats_utils primitives.
 #' `ref_estimates`: named vector spatial->phenotype estimate (gap_fraction only).
-.adapt_equivalence <- function(fo, hyp, ref_estimates = NULL) {
-  base <- .adapt_contrast(fo, hyp)
+.adapt_equivalence <- function(fo, hyp, ref_estimates = NULL, marginal = FALSE) {
+  base <- .adapt_contrast(fo, hyp, marginal = marginal)
   resid_sd <- sigma(fo$fit)
   base$margin_used <- NA_real_; base$equivalent <- NA
   for (i in seq_len(nrow(base))) {
@@ -220,7 +229,7 @@ run_hypothesis <- function(data, hyp, spec,
                            dv_col = "dv", spatial_col = "roi",
                            band_col = "band", bands = NULL,
                            fit_scope = "shared", fdr_method = "BH",
-                           ref_estimates = NULL) {
+                           ref_estimates = NULL, marginal = FALSE) {
   if (is.character(hyp)) {
     hyp <- spec$hypotheses[[hyp]]
     if (is.null(hyp)) stop("unknown hypothesis")
@@ -246,8 +255,8 @@ run_hypothesis <- function(data, hyp, spec,
         fo <- .hyp_fit(bdata, spec, dv_col, spatial_col, groups)
         switch(hyp$kind,
                omnibus     = .adapt_omnibus(fo),
-               contrast    = .adapt_contrast(fo, hyp),
-               equivalence = .adapt_equivalence(fo, hyp, ref_estimates))
+               contrast    = .adapt_contrast(fo, hyp, marginal = marginal),
+               equivalence = .adapt_equivalence(fo, hyp, ref_estimates, marginal = marginal))
       }
     }, error = function(e) {
       message("  hypothesis '", hyp$name, "'",
@@ -321,7 +330,8 @@ run_hypothesis <- function(data, hyp, spec,
 #' @return (invisibly) the combined hypotheses data.frame.
 write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
                                     spatial_col = "roi", band_col = "band",
-                                    hypothesis = NULL, fit_scope = "shared") {
+                                    hypothesis = NULL, fit_scope = "shared",
+                                    marginal = FALSE) {
   spec <- parse_design_spec(config)
   if (length(spec$hypotheses) == 0) {
     message("  No hypotheses/contrasts declared — skipping ", prefix, " hypotheses.")
@@ -341,7 +351,7 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
     res <- tryCatch(
       run_hypothesis(df, hn, spec, dv_col = dv, spatial_col = spatial_col,
                      band_col = if (has_band) band_col else NULL,
-                     bands = bands, fit_scope = fit_scope),
+                     bands = bands, fit_scope = fit_scope, marginal = marginal),
       error = function(e) { message("  ", hn, "/", dv, ": ", conditionMessage(e)); NULL })
     if (!is.null(res) && nrow(res) > 0) { res$dv <- dv; out[[paste(hn, dv)]] <- res }
   }

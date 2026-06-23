@@ -141,15 +141,15 @@ if (!figures_only) {
     # ROI-level per-contrast post-hoc now comes from the hypothesis layer
     # (see the write_module_hypotheses call after the loop). No legacy call here.
 
-    # --- Region-level (if roi_categories defined) ---
+    # --- Region-level omnibus (DIAGNOSTIC, not a hypothesis) ---
     if (length(config$roi_categories) > 0) {
-      message("Running region-level omnibus LMM (group * region)...")
+      message("Running region-level omnibus LMM (group * region) [diagnostic]...")
       omnibus_reg <- run_omnibus_lmm_region(band_df, config$contrasts, config$bands,
                                              config$roi_categories, power_type = ptype)
       all_omnibus_region[[ptype]] <- omnibus_reg
 
       if (nrow(omnibus_reg) > 0) {
-        message("\n  === Region-Level Omnibus (", ptype, ") ===")
+        message("\n  === Region-Level Omnibus (", ptype, ") [diagnostic] ===")
         for (i in seq_len(nrow(omnibus_reg))) {
           row <- omnibus_reg[i, ]
           grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
@@ -160,20 +160,8 @@ if (!figures_only) {
                           row$interaction_F, row$interaction_q, int_sig))
         }
       }
-
-      message("Running region-level post-hoc emmeans...")
-      posthoc_reg <- run_posthoc_emmeans_region(band_df, config$contrasts, config$bands,
-                                                 config$roi_categories, omnibus_reg,
-                                                 power_type = ptype)
-      all_posthoc_region[[ptype]] <- posthoc_reg
-
-      if (nrow(posthoc_reg) > 0) {
-        sig_count <- sum(posthoc_reg$significant, na.rm = TRUE)
-        message("  ", nrow(posthoc_reg), " region contrasts, ", sig_count, " significant")
-      } else {
-        message("  No region post-hoc tests (no significant omnibus effects)")
-      }
-
+      # Region-level per-contrast post-hoc now comes from the hypothesis layer
+      # (run_posthoc_emmeans_region retired). See after the loop.
     }
   }
 
@@ -182,18 +170,45 @@ if (!figures_only) {
   # writes roi_psd_hypotheses.csv (native) and returns the tidy rows; the
   # legacy roi_psd_posthoc_roi.csv is rebuilt from those rows (legacy column
   # aliases via .add_legacy_aliases) so figures/report consume it unchanged.
+  # The hypothesis layer is now the SOLE per-contrast inference engine at all
+  # three spatial granularities (roi / region / global). Each is a separate fit;
+  # the legacy posthoc CSVs are rebuilt from the contrast-kind rows (legacy
+  # schema via .add_legacy_aliases) so figures/report consume them unchanged.
   message("\nRunning declarative hypotheses (hypothesis layer) — ROI level...")
   hyp_roi <- write_module_hypotheses(band_df, config, tbl_dir, prefix = "roi_psd",
                                      dv_cols = power_types, spatial_col = "roi",
                                      band_col = "band", hypothesis = args$hypothesis)
 
+  # Region level: aggregate ROIs to region means, then group*region fit.
+  hyp_region <- NULL
+  if (length(config$roi_categories) > 0) {
+    message("Running declarative hypotheses (hypothesis layer) — region level...")
+    region_df <- aggregate_to_regions(band_df, config$roi_categories)
+    hyp_region <- write_module_hypotheses(region_df, config, tbl_dir,
+                                          prefix = "roi_psd_region",
+                                          dv_cols = power_types, spatial_col = "region",
+                                          band_col = "band", hypothesis = args$hypothesis)
+  }
+
+  # Global level: marginal group contrast over ROIs (group*roi fit, emmeans ~ group).
+  message("Running declarative hypotheses (hypothesis layer) — global (marginal)...")
+  hyp_global <- write_module_hypotheses(band_df, config, tbl_dir,
+                                        prefix = "roi_psd_global",
+                                        dv_cols = power_types, spatial_col = "roi",
+                                        band_col = "band", hypothesis = args$hypothesis,
+                                        marginal = TRUE)
+
+  .contrast_rows <- function(h) if (!is.null(h) && nrow(h) > 0)
+    h[h$kind == "contrast", , drop = FALSE] else data.frame()
+
   # --- Combine results across power types ---
   omnibus_df <- bind_rows(all_omnibus)
-  # ROI post-hoc = the contrast-kind hypothesis rows (legacy schema via aliases).
-  posthoc_df <- if (!is.null(hyp_roi) && nrow(hyp_roi) > 0)
-    hyp_roi[hyp_roi$kind == "contrast", , drop = FALSE] else data.frame()
   omnibus_region_df <- bind_rows(all_omnibus_region)
-  posthoc_region_df <- bind_rows(all_posthoc_region)
+  posthoc_df <- .contrast_rows(hyp_roi)
+  posthoc_region_df <- .contrast_rows(hyp_region)
+  if (nrow(posthoc_region_df) > 0) posthoc_region_df$region <- posthoc_region_df$spatial
+  global_posthoc_df <- .contrast_rows(hyp_global)
+
   # --- Export tables ---
   message("\nExporting tables...")
   if (nrow(omnibus_df) > 0) {
@@ -207,44 +222,19 @@ if (!figures_only) {
   }
   if (nrow(omnibus_region_df) > 0) {
     write_csv(omnibus_region_df, file.path(tbl_dir, "roi_psd_omnibus_region.csv"))
-    message("  Saved: tables/roi_psd_omnibus_region.csv")
+    message("  Saved: tables/roi_psd_omnibus_region.csv (diagnostic)")
   }
   if (nrow(posthoc_region_df) > 0) {
     write_csv(posthoc_region_df, file.path(tbl_dir, "roi_psd_posthoc_region.csv"))
-    message("  Saved: tables/roi_psd_posthoc_region.csv")
+    message("  Saved: tables/roi_psd_posthoc_region.csv (", nrow(posthoc_region_df),
+            " rows, hypothesis-derived)")
   }
-
-  # --- Global posthoc (marginal group comparisons averaged over ROIs) ---
-  message("\nComputing global posthoc (marginal group comparisons)...")
-  global_posthoc_list <- list()
-  for (ptype in power_types) {
-    for (band_name in names(config$bands)) {
-      gp_data <- band_df %>%
-        filter(band == band_name,
-               group %in% unlist(lapply(config$contrasts, function(c) c(c$group_a, c$group_b)))) %>%
-        mutate(dv = .data[[ptype]])
-
-      if (nrow(gp_data) == 0) next
-
-      gp <- run_posthoc_global(gp_data, config$contrasts, spatial_col = "roi",
-                                dv_col = "dv", dv_label = ptype,
-                                band_label = band_name)
-      if (nrow(gp) > 0) global_posthoc_list[[paste(ptype, band_name)]] <- gp
-    }
-  }
-  global_posthoc_df <- bind_rows(global_posthoc_list)
 
   if (nrow(global_posthoc_df) > 0) {
-    # No cross-band correction: per-band p-values reported directly
-    global_posthoc_df <- global_posthoc_df %>%
-      mutate(
-        q_value = p_value,
-        significant = q_value < 0.05,
-        sig_label = sig_stars(q_value)
-      )
-
+    global_posthoc_df$sig_label <- sig_stars(global_posthoc_df$q_value)
     write_csv(global_posthoc_df, file.path(tbl_dir, "roi_psd_posthoc_global.csv"))
-    message("  Saved: tables/roi_psd_posthoc_global.csv")
+    message("  Saved: tables/roi_psd_posthoc_global.csv (", nrow(global_posthoc_df),
+            " rows, hypothesis-derived marginal)")
     sig_global <- global_posthoc_df %>% filter(significant == TRUE)
     message("  ", nrow(global_posthoc_df), " global contrasts, ", nrow(sig_global), " significant")
   }
