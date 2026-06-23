@@ -52,7 +52,8 @@ class VertexCrossFreqAnalysis(BaseAnalysis):
     """Vertex-level cross-frequency coupling (local PAC, AAC, n:m PPC)."""
 
     name = "vertex_cross_freq"
-    SELECTABLE = {"metric": "coupling measure", "band": "frequency band"}
+    SELECTABLE = {"metric": "coupling measure", "band": "frequency band",
+                  "hypothesis": "declared hypothesis"}
 
     _CROSS_FREQ_METRICS = ["pac", "aac", "ppc"]
 
@@ -228,6 +229,27 @@ class VertexCrossFreqAnalysis(BaseAnalysis):
             pd.DataFrame(all_stats).to_csv(
                 self.tbl_dir / "vertex_cross_freq_stats.csv", index=False)
             logger.info("Exported vertex_cross_freq_stats.csv (%d rows)", len(all_stats))
+
+        # --- Declarative hypotheses (hypothesis layer; additive, map+cluster) ---
+        from ..hypothesis import write_module_hypotheses_perm
+
+        if self._subject_groups:
+            # cells keyed by (freq_pair, metric); the per-vertex coupling map is
+            # the unit-of-test, same contract as vertex_connectivity FCD.
+            maps_by_cell: dict[tuple[str, str], dict] = {}
+            for key in keys:
+                metric, freq_pair = key.split("|", 1)
+                cell = {uid: m[key] for uid, m in self._subject_maps.items() if key in m}
+                if cell:
+                    maps_by_cell[(freq_pair, metric)] = cell
+            wanted_hyp = self._selection.get("hypothesis")
+            write_module_hypotheses_perm(
+                maps_by_cell, self._subject_groups, coords, self.config,
+                self.tbl_dir, prefix="vertex_cross_freq",
+                n_perms=self._n_permutations, threshold=self._cluster_threshold,
+                distance_mm=self._adjacency_distance,
+                hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
+            )
 
     def figures(self) -> None:
         if self._source_coords is None:
