@@ -192,7 +192,7 @@ class VertexSpatialAnalysis(BaseAnalysis):
         if not all_bands:
             return
 
-        contrasts = self.config.contrasts
+        contrasts = self._pairwise_contrasts()
         for contrast in contrasts:
             ga, gb = contrast.group_a, contrast.group_b
             contrast_name = f"{ga}_vs_{gb}"

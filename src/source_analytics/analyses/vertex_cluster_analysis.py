@@ -262,7 +262,7 @@ class VertexClusterAnalysis(BaseAnalysis):
         all_voxelwise = []
         all_cluster = []
 
-        for contrast in self.config.contrasts:
+        for contrast in self._pairwise_contrasts():
             group_a_uids = [
                 uid for uid, g in self._subject_groups.items()
                 if g == contrast.group_a
@@ -525,8 +525,8 @@ class VertexClusterAnalysis(BaseAnalysis):
         self._feature_cluster_results = saved.get("feature_cluster_results", {})
         self._source_coords = saved.get("source_coords")
         # Restore contrast labels from config (pickle doesn't store them directly)
-        if self.config.contrasts:
-            c = self.config.contrasts[0]
+        if self._pairwise_contrasts():
+            c = self._pairwise_contrasts()[0]
             self._contrast_labels = (
                 self.config.get_group_label(c.group_a),
                 self.config.get_group_label(c.group_b),

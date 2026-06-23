@@ -272,7 +272,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                     r, p = np.nan, np.nan
 
                 # Effect sizes per group contrast
-                for contrast in self.config.contrasts:
+                for contrast in self._pairwise_contrasts():
                     ga_data = bdata[bdata["group"] == contrast.group_a]
                     gb_data = bdata[bdata["group"] == contrast.group_b]
 
@@ -313,7 +313,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                 for power_type in ["relative", "absolute"]:
                     src_col = f"source_{power_type}"
 
-                    for contrast in self.config.contrasts:
+                    for contrast in self._pairwise_contrasts():
                         # Global electrode effect (for reference)
                         comp_band = self._comparison_df[self._comparison_df["band"] == band]
                         elec_col = f"elec_{power_type}"
@@ -371,7 +371,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                 else:
                     r, p = np.nan, np.nan
 
-                for contrast in self.config.contrasts:
+                for contrast in self._pairwise_contrasts():
                     ga_data = ap_comp[ap_comp["group"] == contrast.group_a]
                     gb_data = ap_comp[ap_comp["group"] == contrast.group_b]
 

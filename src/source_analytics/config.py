@@ -198,6 +198,23 @@ class Hypothesis:
             g |= set(self.groups)
         return g
 
+    def pairwise_endpoints(self) -> tuple[str, str] | None:
+        """``(group_a, group_b)`` for a simple pairwise contrast, else ``None``.
+
+        ``group_a`` is the positive-weight level, ``group_b`` the negative-weight
+        one — the two-sample form the per-vertex/edge map loops use to drive
+        ``cluster_permutation_test`` / NBS directly from the declared hypotheses,
+        replacing the legacy ``config.contrasts`` bridge. Returns ``None`` for
+        omnibus/regression and for non-pairwise (>2-level) weighted contrasts.
+        """
+        if self.kind not in ("contrast", "equivalence") or not self.weights:
+            return None
+        pos = [g for g, w in self.weights.items() if w > 0]
+        neg = [g for g, w in self.weights.items() if w < 0]
+        if len(pos) == 1 and len(neg) == 1:
+            return pos[0], neg[0]
+        return None
+
 
 @dataclass
 class DesignSpec:

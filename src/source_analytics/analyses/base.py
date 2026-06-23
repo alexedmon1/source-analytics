@@ -183,6 +183,22 @@ class BaseAnalysis(ABC):
             self._bands_cache = cache
         return cache
 
+    def _pairwise_contrasts(self) -> list:
+        """Pairwise contrast records derived from the declared hypotheses.
+
+        The per-vertex / per-edge map modules iterate these to drive their
+        two-sample cluster / NBS tests directly from ``design:``/``hypotheses:``,
+        instead of the legacy ``config.contrasts`` bridge. Each record exposes
+        ``.name`` / ``.group_a`` / ``.group_b`` / ``.label`` / ``.role`` — a drop-in
+        for the old ``config.contrasts`` iteration. Returns the same pairwise
+        contrast/equivalence set the bridge produced (omnibus/regression/multi-
+        group hypotheses have no two-sample analogue and are handled only by the
+        hypothesis layer's cluster table).
+        """
+        from ..config import _contrasts_from_design_spec
+        spec = self.config.design_spec
+        return _contrasts_from_design_spec(spec) if spec is not None else []
+
     @abstractmethod
     def setup(self) -> None:
         """Initialize analysis-specific data structures."""

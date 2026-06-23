@@ -183,7 +183,7 @@ class _ROINetworkBase(NetworkAnalysisBase):
         from ..stats.cluster_permutation import hedges_g
 
         all_stats = []
-        for contrast in self.config.contrasts:
+        for contrast in self._pairwise_contrasts():
             group_a_uids = [u for u, g in self._subject_groups.items() if g == contrast.group_a]
             group_b_uids = [u for u, g in self._subject_groups.items() if g == contrast.group_b]
             if not group_a_uids or not group_b_uids:
@@ -267,7 +267,7 @@ class _ROINetworkBase(NetworkAnalysisBase):
 
         df = pd.read_csv(csv_path)
         global_metrics = ["global_efficiency", "modularity", "small_worldness"]
-        contrasts = self.config.raw.get("contrasts", [])
+        contrasts = self._pairwise_contrasts()
         sig_results = []
 
         for metric in self._connectivity_metrics:
@@ -276,7 +276,7 @@ class _ROINetworkBase(NetworkAnalysisBase):
                 continue
             for gm_name in global_metrics:
                 for contrast in contrasts:
-                    ga, gb = contrast["group_a"], contrast["group_b"]
+                    ga, gb = contrast.group_a, contrast.group_b
                     for band in sub["band"].unique():
                         vals_a = sub[(sub["group"] == ga) & (sub["band"] == band)][gm_name].dropna()
                         vals_b = sub[(sub["group"] == gb) & (sub["band"] == band)][gm_name].dropna()
@@ -285,7 +285,7 @@ class _ROINetworkBase(NetworkAnalysisBase):
                         _, p_val = sp_stats.ttest_ind(vals_a, vals_b, equal_var=False)
                         sig_results.append({
                             "metric": metric, "gm_name": gm_name,
-                            "contrast": contrast["name"], "band": band, "p_value": p_val,
+                            "contrast": contrast.name, "band": band, "p_value": p_val,
                         })
 
         sig_df = pd.DataFrame(sig_results)

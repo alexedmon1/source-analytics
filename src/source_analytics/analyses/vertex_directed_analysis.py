@@ -176,7 +176,7 @@ class VertexDirectedAnalysis(BaseAnalysis):
         coords = self._source_coords
         all_stats = []
 
-        for contrast in self.config.contrasts:
+        for contrast in self._pairwise_contrasts():
             uids_a = [u for u, g in self._subject_groups.items() if g == contrast.group_a]
             uids_b = [u for u, g in self._subject_groups.items() if g == contrast.group_b]
             if not uids_a or not uids_b:

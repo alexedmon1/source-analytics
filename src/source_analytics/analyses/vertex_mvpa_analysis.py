@@ -154,7 +154,7 @@ class VertexMVPAAnalysis(BaseAnalysis):
         tbl_dir = self.tbl_dir
         all_results = []
 
-        for contrast in self.config.contrasts:
+        for contrast in self._pairwise_contrasts():
             group_a_uids = [
                 uid for uid in self._subject_order
                 if self._subject_groups[uid] == contrast.group_a

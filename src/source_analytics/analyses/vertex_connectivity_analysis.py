@@ -223,7 +223,9 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         tbl_dir = self.tbl_dir
         all_stats = []
 
-        for contrast in self.config.contrasts:
+        # Per-vertex t-maps drive the glass-brain figures; iterate the declared
+        # pairwise contrast hypotheses directly (no config.contrasts bridge).
+        for contrast in self._pairwise_contrasts():
             group_a_uids = [
                 uid for uid, g in self._subject_groups.items()
                 if g == contrast.group_a

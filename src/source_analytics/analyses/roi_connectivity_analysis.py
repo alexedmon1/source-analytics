@@ -197,7 +197,7 @@ class ConnectivityAnalysis(BaseAnalysis):
         # Plot the selected metrics that are actually present in the CSV.
         metrics = [m for m in self._metrics if m in edges_df.columns]
         bands = list(self._selected_bands().keys())
-        contrasts = self.config.contrasts
+        contrasts = self._pairwise_contrasts()
 
         if not contrasts:
             logger.warning("No contrasts defined — skipping connectivity figures")

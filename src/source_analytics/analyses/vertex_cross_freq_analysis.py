@@ -185,7 +185,7 @@ class VertexCrossFreqAnalysis(BaseAnalysis):
 
         # keys are "{metric}|{freq_pair}" — test each across each contrast
         keys = sorted({k for m in self._subject_maps.values() for k in m})
-        for contrast in self.config.contrasts:
+        for contrast in self._pairwise_contrasts():
             uids_a = [u for u, g in self._subject_groups.items() if g == contrast.group_a]
             uids_b = [u for u, g in self._subject_groups.items() if g == contrast.group_b]
             if not uids_a or not uids_b:

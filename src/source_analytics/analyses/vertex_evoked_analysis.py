@@ -187,7 +187,7 @@ class VertexEvokedAnalysis(BaseAnalysis):
         measure_names = sorted({m["measure_name"] for m in self._measure_rows})
         all_stats = []
 
-        for contrast in self.config.contrasts:
+        for contrast in self._pairwise_contrasts():
             uids_a = [u for u, g in self._subject_groups.items() if g == contrast.group_a]
             uids_b = [u for u, g in self._subject_groups.items() if g == contrast.group_b]
             if not uids_a or not uids_b:

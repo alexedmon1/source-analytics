@@ -102,7 +102,7 @@ class NetworkAnalysisBase(BaseAnalysis):
         gallery's NBS renderer) can facet by connectivity metric.
         """
         self._nbs_results = {}
-        for contrast in self.config.contrasts:
+        for contrast in self._pairwise_contrasts():
             group_a = [u for u, g in self._subject_groups.items() if g == contrast.group_a]
             group_b = [u for u, g in self._subject_groups.items() if g == contrast.group_b]
             if not group_a or not group_b:
