@@ -327,11 +327,15 @@ run_hypothesis <- function(data, hyp, spec,
 #' @param band_col band column, or NULL for band-less modules (e.g. aperiodic).
 #' @param hypothesis optional comma-separated name filter (the --hypothesis arg).
 #' @param fit_scope "shared" (default) or "per_contrast".
+#' @param bands optional band-level override. When NULL (default) the band axis
+#'   is taken from names(config$bands) — correct for power/aperiodic modules. PAC
+#'   and other modules whose band axis is NOT the study bands (e.g. freq_pair)
+#'   pass the explicit level vector here.
 #' @return (invisibly) the combined hypotheses data.frame.
 write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
                                     spatial_col = "roi", band_col = "band",
                                     hypothesis = NULL, fit_scope = "shared",
-                                    marginal = FALSE) {
+                                    marginal = FALSE, bands = NULL) {
   spec <- parse_design_spec(config)
   if (length(spec$hypotheses) == 0) {
     message("  No hypotheses/contrasts declared — skipping ", prefix, " hypotheses.")
@@ -345,13 +349,13 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
       message("  No declared hypothesis matches --hypothesis '", hypothesis, "'")
   }
   has_band <- !is.null(band_col) && band_col %in% names(df)
-  bands <- if (has_band) names(config$bands) else NULL
+  band_levels <- if (has_band) (bands %||% names(config$bands)) else NULL
   out <- list()
   for (hn in hyp_names) for (dv in dv_cols) {
     res <- tryCatch(
       run_hypothesis(df, hn, spec, dv_col = dv, spatial_col = spatial_col,
                      band_col = if (has_band) band_col else NULL,
-                     bands = bands, fit_scope = fit_scope, marginal = marginal),
+                     bands = band_levels, fit_scope = fit_scope, marginal = marginal),
       error = function(e) { message("  ", hn, "/", dv, ": ", conditionMessage(e)); NULL })
     if (!is.null(res) && nrow(res) > 0) { res$dv <- dv; out[[paste(hn, dv)]] <- res }
   }

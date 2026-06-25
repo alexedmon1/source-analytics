@@ -69,7 +69,8 @@ class ROICrossFreqAnalysis(BaseAnalysis):
     """
 
     name = "roi_cross_freq"
-    SELECTABLE = {"metric": "coupling measure", "band": "frequency band"}
+    SELECTABLE = {"metric": "coupling measure", "band": "frequency band",
+                  "hypothesis": "declared hypothesis"}
 
     # Coupling measures this module can produce.
     _CROSS_FREQ_METRICS = ["pac", "aac", "ppc"]
@@ -280,6 +281,12 @@ class ROICrossFreqAnalysis(BaseAnalysis):
         ]
         cmd.extend(self._r_no_figures_flags())
         cmd.extend(self._r_roi_categories_flags())
+
+        # Manual hypothesis selection: pass --hypothesis NAME[,NAME] through to R
+        # (resolved R-side against design:/hypotheses:, like roi_psd).
+        wanted_hyp = self._selection.get("hypothesis")
+        if wanted_hyp:
+            cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:

@@ -34,6 +34,44 @@ script_dir <- if (exists("script.dir")) {
 }
 
 tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
+source(file.path(script_dir, "hypothesis.R"))
+
+# --- Hypothesis-layer adapters --------------------------------------------
+# PAC's "band" axis is freq_pair (e.g. Delta-Alpha), not the study bands. The
+# hypothesis layer emits one tidy row per (band=freq_pair, spatial) cell; these
+# helpers reshape its contrast/omnibus rows into the freq_pair-keyed frames the
+# PAC figures and report consume.
+
+#' Contrast-kind rows -> legacy freq_pair-keyed posthoc shape.
+.pac_contrast_rows <- function(h) {
+  if (is.null(h) || nrow(h) == 0) return(data.frame())
+  cr <- h[h$kind == "contrast", , drop = FALSE]
+  if (nrow(cr) == 0) return(data.frame())
+  cr$freq_pair <- cr$band
+  cr
+}
+
+#' Omnibus-kind rows (group F, partial omega^2) -> freq_pair-keyed shape.
+.pac_omnibus_rows <- function(h) {
+  if (is.null(h) || nrow(h) == 0) return(data.frame())
+  om <- h[h$kind == "omnibus", , drop = FALSE]
+  if (nrow(om) == 0) return(data.frame())
+  om$freq_pair <- om$band
+  om
+}
+
+#' Rebuild the legacy `contrasts` list (name/group_a/group_b) from the hypothesis
+#' contrast rows, so figures and the diagnostic omnibus LMM keep iterating
+#' contrasts now that config$contrasts is no longer populated.
+.contrasts_from_hyp <- function(h) {
+  cr <- .pac_contrast_rows(h)
+  if (nrow(cr) == 0 || !all(c("group_a", "group_b") %in% names(cr))) return(list())
+  uc <- unique(cr[, c("contrast", "group_a", "group_b")])
+  uc <- uc[!is.na(uc$group_a) & !is.na(uc$group_b), , drop = FALSE]
+  if (nrow(uc) == 0) return(list())
+  lapply(seq_len(nrow(uc)), function(i)
+    list(name = uc$contrast[i], group_a = uc$group_a[i], group_b = uc$group_b[i]))
+}
 
 # Define sig_stars locally if not sourced
 if (!exists("sig_stars")) {
@@ -649,19 +687,22 @@ write_pac_summary <- function(global_df, global_ttest_df,
   add(stats_lines)
   add("")
 
-  # --- Global t-test results ---
-  add("## Global PAC T-Tests")
+  # --- Global PAC contrasts (hypothesis layer, marginal over ROIs) ---
+  add("## Global PAC Contrasts")
+  add("")
+  add("*Marginal group contrast over ROIs (group×roi LMM, emmeans ~ group). ",
+      "Estimate = group difference in z-scored MI; Hedges' g = estimate / residual SD.*")
   add("")
   if (nrow(global_ttest_df) > 0) {
-    add("| Contrast | Freq Pair | n_a | n_b | mean_a | mean_b | t | df | p | q | g | Sig |")
-    add("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    add("| Contrast | Freq Pair | Estimate | t | df | p | q | g | Sig |")
+    add("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for (i in seq_len(nrow(global_ttest_df))) {
       row <- global_ttest_df[i, ]
       sig_str <- if (isTRUE(row$significant)) "**Yes**" else "No"
-      add(sprintf("| %s | %s | %d | %d | %.3f | %.3f | %.2f | %.1f | %.4f | %.4f | %.2f | %s |",
-                  row$contrast, row$freq_pair, row$n_a, row$n_b,
-                  row$mean_a, row$mean_b,
-                  ifelse(is.na(row$t_stat), 0, row$t_stat),
+      add(sprintf("| %s | %s | %.3f | %.2f | %.1f | %.4f | %.4f | %.2f | %s |",
+                  row$contrast, row$freq_pair,
+                  ifelse(is.na(row$estimate), 0, row$estimate),
+                  ifelse(is.na(row$t_ratio), 0, row$t_ratio),
                   ifelse(is.na(row$df), 0, row$df),
                   ifelse(is.na(row$p_value), 1, row$p_value),
                   ifelse(is.na(row$q_value), 1, row$q_value),
@@ -670,7 +711,7 @@ write_pac_summary <- function(global_df, global_ttest_df,
     }
     add("")
   } else {
-    add("*No global t-test results computed.*")
+    add("*No global contrast results computed.*")
     add("")
   }
 
@@ -740,9 +781,9 @@ write_pac_summary <- function(global_df, global_ttest_df,
       any_sig <- TRUE
       for (i in seq_len(nrow(sig_global))) {
         row <- sig_global[i, ]
-        add(sprintf("- **%s** [%s, global]: t=%.2f, q=%.4f, g=%.2f (mean_a=%.3f, mean_b=%.3f)",
+        add(sprintf("- **%s** [%s, global]: t=%.2f, q=%.4f, g=%.2f (estimate=%.3f)",
                     row$freq_pair, row$contrast,
-                    row$t_stat, row$q_value, row$hedges_g, row$mean_a, row$mean_b))
+                    row$t_ratio, row$q_value, row$hedges_g, row$estimate))
       }
     }
   }
@@ -806,6 +847,8 @@ parser$add_argument("--no-figures", action = "store_true", default = FALSE,
                     help = "Skip all figure generation (stats/tables only)")
 parser$add_argument("--roi-categories", default = NULL,
                     help = "Path to roi_categories.yaml (atlas ROI groupings)")
+parser$add_argument("--hypothesis", default = NULL,
+                    help = "Comma-separated declared hypothesis name(s) to run (default: all)")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
@@ -854,39 +897,63 @@ message("  Global PAC computed: ", nrow(global_df), " subject x freq_pair rows")
 
 if (!figures_only) {
   # ===========================================================================
-  # 1b. Global PAC t-tests
+  # Declarative hypothesis layer (sole per-contrast inference path).
+  #
+  # PAC's band axis is freq_pair, so we pass the explicit freq_pair levels as the
+  # `bands` override. The hypothesis layer is the sole inference engine; the
+  # legacy run_omnibus_lmm_region is kept ONLY as a diagnostic (it provides the
+  # group x region interaction-F the hypothesis layer does not express).
   # ===========================================================================
-  message("\n=== Global PAC Analysis ===")
+  freq_pairs <- unique(as.character(pac$freq_pair))
 
-  global_ttest_df <- run_global_ttests(global_df, config$contrasts)
+  # --- Global level: marginal group contrast over ROIs (group*roi fit) ---
+  message("\n=== Global PAC (hypothesis layer, marginal over ROIs) ===")
+  hyp_global <- write_module_hypotheses(
+    pac, config, tbl_dir, prefix = "roi_pac_global",
+    dv_cols = "z_score", spatial_col = "roi", band_col = "freq_pair",
+    bands = freq_pairs, hypothesis = args$hypothesis, marginal = TRUE)
+
+  global_ttest_df <- .pac_contrast_rows(hyp_global)
   if (nrow(global_ttest_df) > 0) {
-    message("\n  === Global T-Test Results ===")
     for (i in seq_len(nrow(global_ttest_df))) {
       row <- global_ttest_df[i, ]
       sig_str <- if (isTRUE(row$significant)) " ***" else ""
       message(sprintf("  %s | %s: t=%.2f, q=%.4f%s",
                       row$contrast, row$freq_pair,
-                      ifelse(is.na(row$t_stat), 0, row$t_stat),
+                      ifelse(is.na(row$t_ratio), 0, row$t_ratio),
                       ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
     }
   }
 
+  # Rebuild the legacy `contrasts` list from the hypothesis rows so the
+  # comodulogram figure and the diagnostic omnibus can keep iterating contrasts.
+  pac_contrasts <- .contrasts_from_hyp(hyp_global)
+
   # ===========================================================================
-  # 2. Region-level analysis (if roi_categories defined)
+  # Region-level analysis (if roi_categories defined)
   # ===========================================================================
   omnibus_region_df <- data.frame()
   posthoc_region_df <- data.frame()
 
   if (length(config$roi_categories) > 0 && has_lme4) {
-    message("\n=== Region-Level PAC Analysis ===")
+    message("\n=== Region-Level PAC (hypothesis layer) ===")
 
     region_df <- aggregate_to_regions(pac, config$roi_categories)
     n_regions <- length(unique(region_df$region))
     message("  Aggregated to ", n_regions, " regions")
 
-    omnibus_region_df <- run_omnibus_lmm_region(region_df, config$contrasts)
+    hyp_region <- write_module_hypotheses(
+      region_df, config, tbl_dir, prefix = "roi_pac_region",
+      dv_cols = "z_score", spatial_col = "region", band_col = "freq_pair",
+      bands = freq_pairs, hypothesis = args$hypothesis)
 
+    posthoc_region_df <- .pac_contrast_rows(hyp_region)
+    if (nrow(posthoc_region_df) > 0) posthoc_region_df$region <- posthoc_region_df$spatial
+
+    # Diagnostic omnibus LMM (group x region interaction-F) — NOT a hypothesis.
+    omnibus_region_df <- run_omnibus_lmm_region(region_df, pac_contrasts)
     if (nrow(omnibus_region_df) > 0) {
+      message("\n  === Region Omnibus (diagnostic) ===")
       for (i in seq_len(nrow(omnibus_region_df))) {
         row <- omnibus_region_df[i, ]
         grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
@@ -898,13 +965,9 @@ if (!figures_only) {
       }
     }
 
-    posthoc_region_df <- run_posthoc_emmeans_region(region_df, config$contrasts, omnibus_region_df)
-
     if (nrow(posthoc_region_df) > 0) {
       sig_count <- sum(posthoc_region_df$significant, na.rm = TRUE)
       message("  ", nrow(posthoc_region_df), " region contrasts, ", sig_count, " significant")
-    } else {
-      message("  No post-hoc tests (no significant omnibus effects)")
     }
   } else if (length(config$roi_categories) == 0) {
     message("\n  No roi_categories in config -- skipping region-level analysis")
@@ -913,21 +976,25 @@ if (!figures_only) {
   }
 
   # ===========================================================================
-  # Export tables
+  # Export legacy-named tables (rebuilt from the hypothesis rows; the native
+  # roi_pac_global_hypotheses.csv / roi_pac_region_hypotheses.csv are written by
+  # write_module_hypotheses). Figures/report consume these unchanged.
   # ===========================================================================
   message("\nExporting tables...")
 
   if (nrow(global_ttest_df) > 0) {
     write_csv(global_ttest_df, file.path(tbl_dir, "roi_pac_global.csv"))
-    message("  Saved: tables/roi_pac_global.csv")
+    message("  Saved: tables/roi_pac_global.csv (", nrow(global_ttest_df),
+            " rows, hypothesis-derived marginal)")
   }
   if (nrow(omnibus_region_df) > 0) {
     write_csv(omnibus_region_df, file.path(tbl_dir, "roi_pac_omnibus_region.csv"))
-    message("  Saved: tables/roi_pac_omnibus_region.csv")
+    message("  Saved: tables/roi_pac_omnibus_region.csv (diagnostic)")
   }
   if (nrow(posthoc_region_df) > 0) {
     write_csv(posthoc_region_df, file.path(tbl_dir, "roi_pac_posthoc_region.csv"))
-    message("  Saved: tables/roi_pac_posthoc_region.csv")
+    message("  Saved: tables/roi_pac_posthoc_region.csv (", nrow(posthoc_region_df),
+            " rows, hypothesis-derived)")
   }
 
 } else {
@@ -960,6 +1027,10 @@ if (!figures_only) {
     message("  Not found: roi_pac_posthoc_region.csv")
     data.frame()
   }
+
+  # Rebuild the contrasts list from the loaded global table (carries the
+  # contrast/group_a/group_b columns) for the comodulogram figure.
+  pac_contrasts <- .contrasts_from_hyp(global_ttest_df)
 }
 
 # ===========================================================================
@@ -971,8 +1042,9 @@ message("\nGenerating figures...")
 plot_global_pac_bar(global_df, group_colors, group_labels, group_order, fig_dir,
                      sig_df = if (nrow(global_ttest_df) > 0) global_ttest_df else NULL)
 
-# Comodulogram heatmaps
-plot_comodulogram(pac, config$contrasts, group_colors, group_labels, group_order, fig_dir)
+# Comodulogram heatmaps (contrasts derived from the hypothesis rows, since
+# config$contrasts is no longer populated post design-spec migration)
+plot_comodulogram(pac, pac_contrasts, group_colors, group_labels, group_order, fig_dir)
 
 # Region significance heatmaps (if post-hoc was performed)
 if (nrow(posthoc_region_df) > 0) {
