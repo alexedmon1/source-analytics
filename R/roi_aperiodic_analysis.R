@@ -101,6 +101,11 @@ group_colors <- unlist(config$group_colors)
 group_labels <- unlist(config$groups)
 group_order <- config$group_order
 
+# Legacy pairwise contrast list for the kept run_omnibus_lmm* DIAGNOSTIC (derived
+# from the design spec; config$contrasts is no longer populated post-migration).
+diag_contrasts <- tryCatch(contrasts_from_spec(parse_design_spec(config)),
+                           error = function(e) config$contrasts)
+
 message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 
@@ -923,7 +928,7 @@ if (!figures_only) {
 
     # ROI-level omnibus (DIAGNOSTIC, not a hypothesis)
     message("Running ROI-level omnibus LMM (group * roi) [diagnostic]...")
-    omnibus <- run_omnibus_lmm_aperiodic(ap_df, config$contrasts, dv_name)
+    omnibus <- run_omnibus_lmm_aperiodic(ap_df, diag_contrasts, dv_name)
     all_omnibus[[dv_name]] <- omnibus
 
     if (nrow(omnibus) > 0) {
@@ -944,7 +949,7 @@ if (!figures_only) {
     # Region-level omnibus (DIAGNOSTIC, not a hypothesis)
     if (length(config$roi_categories) > 0) {
       message("Running region-level omnibus LMM (group * region) [diagnostic]...")
-      omnibus_reg <- run_omnibus_lmm_region_aperiodic(ap_df, config$contrasts,
+      omnibus_reg <- run_omnibus_lmm_region_aperiodic(ap_df, diag_contrasts,
                                                        config$roi_categories, dv_name)
       all_omnibus_region[[dv_name]] <- omnibus_reg
 

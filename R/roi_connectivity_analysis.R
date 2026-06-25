@@ -908,102 +908,18 @@ global_df <- compute_global_connectivity(edges)
 message("  Global connectivity computed: ", nrow(global_df), " subject x band rows")
 
 if (!figures_only) {
-  global_ttest_df <- run_global_ttests(global_df, config$contrasts, config$bands)
-  if (nrow(global_ttest_df) > 0) {
-    message("\n  === Global T-Test Results ===")
-    for (i in seq_len(nrow(global_ttest_df))) {
-      row <- global_ttest_df[i, ]
-      sig_str <- if (isTRUE(row$significant)) " ***" else ""
-      message(sprintf("  %s | %s | %s: t=%.2f, q=%.4f%s",
-                      row$contrast, row$metric, row$band,
-                      ifelse(is.na(row$t_stat), 0, row$t_stat),
-                      ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
-    }
-  }
-
-  # ===========================================================================
-  # 2. Region-pair analysis (if roi_categories defined)
-  # ===========================================================================
+  # --- Legacy per-edge group inference RETIRED (2026-06-25) ---
+  # run_global_ttests / run_omnibus_lmm_region_pair / run_posthoc_emmeans_region_pair
+  # iterated config$contrasts, which is no longer populated after the design-spec
+  # migration, so they produced zero output. ROI-edge group inference now lives in
+  # roi_nbs (NBS subnetworks) and roi_graph (nodal graph metrics); the connectivity
+  # matrices / global bar below are DESCRIPTIVE (group means) and need no per-edge
+  # stats. Empty frames keep the figure + report machinery (nrow()>0 guards) intact.
+  # The run_* definitions are left in place (unused) for reference.
+  global_ttest_df        <- data.frame()
   omnibus_region_pair_df <- data.frame()
   posthoc_region_pair_df <- data.frame()
-
-  if (length(config$roi_categories) > 0 && has_lme4) {
-    message("\n=== Region-Pair Connectivity Analysis ===")
-
-    region_pair_df <- aggregate_edges_to_region_pairs(edges, config$roi_categories)
-    n_region_pairs <- length(unique(region_pair_df$region_pair))
-    message("  Aggregated to ", n_region_pairs, " region pairs")
-
-    all_omnibus <- list()
-    all_posthoc <- list()
-
-    region_metrics <- c("coherence", "imag_coherence")
-    if ("pli" %in% names(region_pair_df) && !all(is.na(region_pair_df$pli))) {
-      region_metrics <- c(region_metrics, "pli")
-    }
-    if ("dwpli" %in% names(region_pair_df) && !all(is.na(region_pair_df$dwpli))) {
-      region_metrics <- c(region_metrics, "dwpli")
-    }
-    if ("aec" %in% names(region_pair_df) && !all(is.na(region_pair_df$aec))) {
-      region_metrics <- c(region_metrics, "aec")
-    }
-
-    for (metric in region_metrics) {
-      message("\n  --- Metric: ", metric, " ---")
-
-      omnibus <- run_omnibus_lmm_region_pair(region_pair_df, config$contrasts,
-                                              config$bands, metric = metric)
-      all_omnibus[[metric]] <- omnibus
-
-      if (nrow(omnibus) > 0) {
-        for (i in seq_len(nrow(omnibus))) {
-          row <- omnibus[i, ]
-          grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
-          int_sig <- if (isTRUE(row$interaction_significant)) " ***" else ""
-          message(sprintf("  %s | %s: group F=%.2f q=%.4f%s | interaction F=%.2f q=%.4f%s",
-                          row$contrast, row$band,
-                          row$group_F, row$group_q, grp_sig,
-                          row$interaction_F, row$interaction_q, int_sig))
-        }
-      }
-
-      posthoc <- run_posthoc_emmeans_region_pair(region_pair_df, config$contrasts,
-                                                 config$bands, omnibus, metric = metric)
-      all_posthoc[[metric]] <- posthoc
-
-      if (nrow(posthoc) > 0) {
-        sig_count <- sum(posthoc$significant, na.rm = TRUE)
-        message("  ", nrow(posthoc), " region-pair contrasts, ", sig_count, " significant")
-      } else {
-        message("  No post-hoc tests (no significant omnibus effects)")
-      }
-    }
-
-    omnibus_region_pair_df <- bind_rows(all_omnibus)
-    posthoc_region_pair_df <- bind_rows(all_posthoc)
-  } else if (length(config$roi_categories) == 0) {
-    message("\n  No roi_categories in config -- skipping region-pair analysis")
-  } else {
-    message("\n  lme4/lmerTest not available -- skipping region-pair LMM analysis")
-  }
-
-  # ===========================================================================
-  # Export tables
-  # ===========================================================================
-  message("\nExporting tables...")
-
-  if (nrow(global_ttest_df) > 0) {
-    write_csv(global_ttest_df, file.path(tbl_dir, "roi_connectivity_global.csv"))
-    message("  Saved: tables/roi_connectivity_global.csv")
-  }
-  if (nrow(omnibus_region_pair_df) > 0) {
-    write_csv(omnibus_region_pair_df, file.path(tbl_dir, "roi_connectivity_omnibus_region_pair.csv"))
-    message("  Saved: tables/roi_connectivity_omnibus_region_pair.csv")
-  }
-  if (nrow(posthoc_region_pair_df) > 0) {
-    write_csv(posthoc_region_pair_df, file.path(tbl_dir, "roi_connectivity_posthoc_region_pair.csv"))
-    message("  Saved: tables/roi_connectivity_posthoc_region_pair.csv")
-  }
+  message("  Legacy per-edge t-tests/LMM retired — group inference is in roi_nbs + roi_graph.")
 } else {
   # --figures-only: load existing tables from disk
   message("\n=== Figures-only mode: loading existing tables from ", tbl_dir, " ===")

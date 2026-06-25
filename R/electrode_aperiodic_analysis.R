@@ -71,6 +71,11 @@ group_labels <- unlist(config$groups)
 group_order <- config$group_order
 electrode_categories <- config$electrode_categories
 
+# Legacy pairwise contrast list for the kept omnibus/nested DIAGNOSTIC (derived
+# from the design spec; config$contrasts is no longer populated post-migration).
+diag_contrasts <- tryCatch(contrasts_from_spec(parse_design_spec(config)),
+                           error = function(e) config$contrasts)
+
 message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 if (length(electrode_categories) > 0) {
@@ -382,7 +387,7 @@ for (dv_name in dvs) {
 
   # Channel-level omnibus [DIAGNOSTIC, not a hypothesis]
   message("Running channel-level omnibus LMM (group * channel) [diagnostic]...")
-  omnibus <- run_omnibus_channel(ap_df, config$contrasts, dv_name)
+  omnibus <- run_omnibus_channel(ap_df, diag_contrasts, dv_name)
   all_omnibus[[dv_name]] <- omnibus
 
   if (nrow(omnibus) > 0) {
@@ -405,7 +410,7 @@ for (dv_name in dvs) {
   # (1|subject) only and cannot express this nesting.
   if (length(electrode_categories) > 0) {
     message("Running region-nested omnibus LMM (group * region, channels nested)...")
-    omnibus_reg <- run_omnibus_region_nested(ap_df, config$contrasts, electrode_categories, dv_name)
+    omnibus_reg <- run_omnibus_region_nested(ap_df, diag_contrasts, electrode_categories, dv_name)
     all_omnibus_region[[dv_name]] <- omnibus_reg
 
     if (nrow(omnibus_reg) > 0) {
@@ -421,7 +426,7 @@ for (dv_name in dvs) {
     }
 
     message("Running region-nested post-hoc emmeans...")
-    posthoc_reg <- run_posthoc_region_nested(ap_df, config$contrasts, electrode_categories,
+    posthoc_reg <- run_posthoc_region_nested(ap_df, diag_contrasts, electrode_categories,
                                               omnibus_reg, dv_name)
     all_posthoc_region[[dv_name]] <- posthoc_reg
 

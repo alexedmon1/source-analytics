@@ -76,6 +76,11 @@ group_colors <- unlist(config$group_colors)
 group_labels <- unlist(config$groups)
 group_order <- config$group_order
 
+# Legacy pairwise contrast list for the kept omnibus/nested DIAGNOSTIC (derived
+# from the design spec; config$contrasts is no longer populated post-migration).
+diag_contrasts <- tryCatch(contrasts_from_spec(parse_design_spec(config)),
+                           error = function(e) config$contrasts)
+
 message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 message("Bands: ", paste(names(config$bands), collapse = ", "))
@@ -96,7 +101,7 @@ for (ptype in power_types) {
 
   # Omnibus LMM: dv ~ group * channel + (1|subject) [DIAGNOSTIC, not a hypothesis]
   message("Running electrode-level omnibus LMM (group * channel) [diagnostic]...")
-  omnibus <- run_omnibus_lmm(band_df, config$contrasts, config$bands, power_type = ptype)
+  omnibus <- run_omnibus_lmm(band_df, diag_contrasts, config$bands, power_type = ptype)
   all_omnibus[[ptype]] <- omnibus
 
   if (nrow(omnibus) > 0) {
@@ -121,7 +126,7 @@ for (ptype in power_types) {
   # so this scalp-validation secondary analysis stays as-is.
   if (length(electrode_categories) > 0) {
     message("Running region-level nested omnibus LMM (group * region, electrodes as replicates)...")
-    omnibus_reg_nested <- run_omnibus_lmm_region_nested(band_df, config$contrasts, config$bands,
+    omnibus_reg_nested <- run_omnibus_lmm_region_nested(band_df, diag_contrasts, config$bands,
                                                          electrode_categories, power_type = ptype)
     all_omnibus_region_nested[[ptype]] <- omnibus_reg_nested
 
@@ -139,7 +144,7 @@ for (ptype in power_types) {
     }
 
     message("Running region-level nested post-hoc emmeans...")
-    posthoc_reg_nested <- run_posthoc_emmeans_region_nested(band_df, config$contrasts, config$bands,
+    posthoc_reg_nested <- run_posthoc_emmeans_region_nested(band_df, diag_contrasts, config$bands,
                                                              electrode_categories, omnibus_reg_nested,
                                                              power_type = ptype)
     all_posthoc_region_nested[[ptype]] <- posthoc_reg_nested

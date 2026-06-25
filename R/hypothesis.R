@@ -86,6 +86,31 @@ parse_design_spec <- function(config) {
   )
 }
 
+#' Derive the legacy pairwise contrast list from a parsed design spec.
+#'
+#' The R mirror of config.py's `_contrasts_from_design_spec` /
+#' `Hypothesis.pairwise_endpoints`. Returns a list of `{name, group_a, group_b,
+#' label, role}` records — one per clean two-group (pairwise) contrast/equivalence
+#' hypothesis (group_a = positive-weight level, group_b = negative-weight level).
+#' Omnibus/regression and non-pairwise (>2-level weighted) hypotheses are skipped.
+#'
+#' Lets a module feed the KEPT `run_omnibus_lmm*` DIAGNOSTIC (and any other
+#' contrast-iterating legacy code) now that `config$contrasts` is no longer
+#' populated post design-spec migration — without re-introducing the bridge.
+contrasts_from_spec <- function(spec) {
+  out <- list()
+  for (hyp in spec$hypotheses) {
+    if (!hyp$kind %in% c("contrast", "equivalence")) next
+    w <- hyp$weights
+    if (is.null(w)) next
+    pos <- names(w)[w > 0]; neg <- names(w)[w < 0]
+    if (length(pos) == 1 && length(neg) == 1)
+      out[[length(out) + 1]] <- list(name = hyp$name, group_a = pos, group_b = neg,
+                                     label = hyp$label, role = hyp$role)
+  }
+  out
+}
+
 # ---- Multiple-comparison control -------------------------------------------
 
 .FDR_SCOPES  <- c("hypothesis", "band", "spatial", "none")

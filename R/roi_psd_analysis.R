@@ -95,6 +95,12 @@ group_colors <- unlist(config$group_colors)
 group_labels <- unlist(config$groups)
 group_order <- config$group_order
 
+# Legacy pairwise contrast list for the kept run_omnibus_lmm* DIAGNOSTIC. Derived
+# from the design spec because config$contrasts is no longer populated post
+# design-spec migration; falls back to config$contrasts if hypothesis.R is absent.
+diag_contrasts <- tryCatch(contrasts_from_spec(parse_design_spec(config)),
+                           error = function(e) config$contrasts)
+
 # Load roi_categories from atlas file if provided
 if (!is.null(args$roi_categories) && file.exists(args$roi_categories)) {
   config$roi_categories <- read_yaml(args$roi_categories)
@@ -122,7 +128,7 @@ if (!figures_only) {
     # diagnostic for the report. Scientific per-contrast inference is handled
     # by the declarative hypothesis layer below (run_posthoc_emmeans retired).
     message("\nRunning ROI-level omnibus LMM (group * roi) [diagnostic]...")
-    omnibus <- run_omnibus_lmm(band_df, config$contrasts, config$bands, power_type = ptype)
+    omnibus <- run_omnibus_lmm(band_df, diag_contrasts, config$bands, power_type = ptype)
     all_omnibus[[ptype]] <- omnibus
 
     if (nrow(omnibus) > 0) {
@@ -144,7 +150,7 @@ if (!figures_only) {
     # --- Region-level omnibus (DIAGNOSTIC, not a hypothesis) ---
     if (length(config$roi_categories) > 0) {
       message("Running region-level omnibus LMM (group * region) [diagnostic]...")
-      omnibus_reg <- run_omnibus_lmm_region(band_df, config$contrasts, config$bands,
+      omnibus_reg <- run_omnibus_lmm_region(band_df, diag_contrasts, config$bands,
                                              config$roi_categories, power_type = ptype)
       all_omnibus_region[[ptype]] <- omnibus_reg
 

@@ -141,4 +141,15 @@ ok(r_builtin$scope == "hypothesis" && r_builtin$method == "BH",
 ok(inherits(try(.resolve_fdr(list(fdr = list(scope = "bogus")), list()), silent = TRUE),
             "try-error"), "invalid scope is rejected")
 
+# ---- 11. contrasts_from_spec: legacy pairwise list from the design spec ----
+# Fixture has 4 hyps: ko_vs_wt (contrast, pairwise), grp_omni (omnibus -> skip),
+# dose_resp (regression -> skip), norm (equivalence, pairwise). Pairwise = 2.
+cl <- contrasts_from_spec(spec)
+nm <- vapply(cl, function(c) c$name, character(1))
+ok(length(cl) == 2 && all(c("ko_vs_wt", "norm") %in% nm),
+   "contrasts_from_spec keeps pairwise contrast+equivalence, drops omnibus/regression")
+ko <- cl[[which(nm == "ko_vs_wt")]]
+ok(ko$group_a == "KO_VEH" && ko$group_b == "WT_VEH",
+   "contrasts_from_spec maps +weight->group_a, -weight->group_b")
+
 cat("\nAll hypothesis-layer checks passed.\n")
