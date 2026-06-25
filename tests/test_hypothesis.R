@@ -102,4 +102,43 @@ ok(is.logical(new_eq$equivalent), "equivalence verdict is logical")
 # ---- 8. within-run FDR present ----
 ok(all(c("q_value", "significant", "fdr_family") %in% names(new_con)), "within-run FDR columns present")
 
+# ---- 9. FDR family scope: aggressiveness is driven by family SIZE ----
+# Band b1 carries a real signal (p=0.008) among weak cells; band b2 is all-weak.
+# The signal survives a per-band family (n=5) but is diluted to non-significance
+# when pooled into the hypothesis-wide family (n=10) — the toggle recovers power
+# without changing the test (PAC's pre-specified-freq_pair argument, in miniature).
+fdf <- data.frame(
+  band    = rep(c("b1", "b2"), each = 5),
+  spatial = rep(c("r1", "r2", "r3", "r4", "r5"), 2),
+  p_value = c(0.008, 0.04, 0.2, 0.4, 0.6,
+              0.50,  0.60, 0.7, 0.8, 0.9),
+  stringsAsFactors = FALSE)
+
+q_hyp  <- .apply_fdr(fdf, "BH", "hypothesis")
+q_band <- .apply_fdr(fdf, "BH", "band")
+q_none <- .apply_fdr(fdf, "BH", "none")
+sig_cell <- fdf$band == "b1" & fdf$spatial == "r1"   # the p=0.008 signal
+ok(q_band$significant[sig_cell] && !q_hyp$significant[sig_cell],
+   sprintf("signal cell significant per-band (q=%.3f) but not hypothesis-wide (q=%.3f)",
+           q_band$q_value[sig_cell], q_hyp$q_value[sig_cell]))
+ok(sum(q_band$significant) > sum(q_hyp$significant),
+   sprintf("per-band scope recovers significance (band=%d sig vs hypothesis=%d sig)",
+           sum(q_band$significant), sum(q_hyp$significant)))
+ok(all(abs(q_none$q_value - fdf$p_value) < 1e-9), "scope=none leaves q == p (no correction)")
+ok(grepl("scope=band", q_band$fdr_family[1]) && grepl("scope=hypothesis", q_hyp$fdr_family[1]),
+   "fdr_family label records the scope + method used")
+
+# ---- 10. .resolve_fdr precedence: per-hyp > design > built-in default ----
+sp_fdr <- list(fdr = list(method = "BH", scope = "hypothesis"))
+r_over <- .resolve_fdr(list(fdr = list(scope = "band")), sp_fdr)
+ok(r_over$scope == "band" && r_over$method == "BH",
+   "per-hyp scope overrides design default; method inherited field-by-field")
+r_def <- .resolve_fdr(list(), sp_fdr)
+ok(r_def$scope == "hypothesis", "design default applies when the hypothesis is silent")
+r_builtin <- .resolve_fdr(list(), list())
+ok(r_builtin$scope == "hypothesis" && r_builtin$method == "BH",
+   "built-in default is {scope=hypothesis, method=BH} (pre-toggle behaviour)")
+ok(inherits(try(.resolve_fdr(list(fdr = list(scope = "bogus")), list()), silent = TRUE),
+            "try-error"), "invalid scope is rejected")
+
 cat("\nAll hypothesis-layer checks passed.\n")

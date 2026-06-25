@@ -150,6 +150,11 @@ class Hypothesis:
     by: str | None = None
     test: str | None = None
     margin: dict[str, Any] | None = None
+    # Per-hypothesis multiple-comparison override: {scope, method}. None inherits
+    # the design-level default ({scope=hypothesis, method=BH}). Applied by the
+    # R emmeans adapter (R/hypothesis.R); the permutation/map adapter uses
+    # cluster-extent correction, so this field is a no-op there.
+    fdr: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, h: dict) -> Hypothesis:
@@ -162,6 +167,7 @@ class Hypothesis:
                 role=h.get("role", "exploratory"),
                 weights={h["group_a"]: 1.0, h["group_b"]: -1.0},
                 test=h.get("test"), margin=h.get("equivalence_margin"),
+                fdr=h.get("fdr"),
             )
         kind = h.get("kind", "contrast")
         if kind not in VALID_KINDS:
@@ -186,7 +192,7 @@ class Hypothesis:
             name=name, kind=kind, label=h.get("label"),
             role=h.get("role", "exploratory"), weights=weights, groups=groups,
             predictor=h.get("predictor"), by=h.get("by"), test=h.get("test"),
-            margin=margin,
+            margin=margin, fdr=h.get("fdr"),
         )
 
     def referenced_groups(self) -> set[str]:
@@ -229,6 +235,9 @@ class DesignSpec:
     reference: str | None = None
     levels: list[str] | None = None
     covariates: list[str] = field(default_factory=list)
+    # Study-level multiple-comparison default ({scope, method}); per-hypothesis
+    # fdr: overrides it field-by-field. Empty -> {scope=hypothesis, method=BH}.
+    fdr: dict[str, Any] = field(default_factory=dict)
     hypotheses: list[Hypothesis] = field(default_factory=list)
 
     @classmethod
@@ -247,6 +256,7 @@ class DesignSpec:
             reference=design.get("reference"),
             levels=levels,
             covariates=[str(x) for x in (design.get("covariates") or [])],
+            fdr=design.get("fdr") or {},
             hypotheses=hyps,
         )
 

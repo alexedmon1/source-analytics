@@ -28,7 +28,7 @@ VALID_KINDS <- c("omnibus", "contrast", "regression", "equivalence")
   kind <- if (identical(c$test, "equivalence")) "equivalence" else "contrast"
   w <- list(); w[[c$group_a]] <- 1; w[[c$group_b]] <- -1
   list(name = c$name, label = c$label, role = c$role, kind = kind,
-       weights = w, test = c$test, margin = c$equivalence_margin)
+       weights = w, test = c$test, margin = c$equivalence_margin, fdr = c$fdr)
 }
 
 #' Normalize one raw hypothesis mapping (from YAML) into a parsed def.
@@ -58,7 +58,10 @@ parse_hypothesis <- function(h) {
     predictor = h$predictor,
     by        = h$by,
     test      = h$test %||% (if (kind == "equivalence") "equivalence" else "difference"),
-    margin    = h$margin %||% h$equivalence_margin
+    margin    = h$margin %||% h$equivalence_margin,
+    # Per-hypothesis FDR override (list with $scope and/or $method), or NULL to
+    # inherit the design-level default. See .resolve_fdr / .apply_fdr.
+    fdr       = h$fdr
   )
 }
 
@@ -76,8 +79,68 @@ parse_design_spec <- function(config) {
     reference  = design$reference,
     levels     = if (!is.null(design$levels)) as.character(unlist(design$levels)) else NULL,
     covariates = if (!is.null(design$covariates)) as.character(unlist(design$covariates)) else character(0),
+    # Study-level FDR default (list with $scope and/or $method); per-hypothesis
+    # fdr: overrides it field-by-field. Absent -> {scope=hypothesis, method=BH}.
+    fdr        = design$fdr %||% list(),
     hypotheses = hyps
   )
+}
+
+# ---- Multiple-comparison control -------------------------------------------
+
+.FDR_SCOPES  <- c("hypothesis", "band", "spatial", "none")
+
+#' Resolve the effective {method, scope} for one hypothesis.
+#'
+#' Precedence: per-hypothesis `fdr:` > design-level `fdr:` > built-in default
+#' ({scope=hypothesis, method=BH} — i.e. correct across the whole band x spatial
+#' grid, matching the pre-toggle behaviour). `default_method` lets a caller pass
+#' a fallback (the run_hypothesis fdr_method arg) below the spec defaults.
+.resolve_fdr <- function(hyp, spec, default_method = "BH") {
+  sp <- spec$fdr %||% list()
+  hp <- hyp$fdr %||% list()
+  method <- hp$method %||% sp$method %||% default_method
+  scope  <- hp$scope  %||% sp$scope  %||% "hypothesis"
+  if (!method %in% p.adjust.methods)
+    stop(sprintf("fdr method '%s' not one of %s", method,
+                 paste(p.adjust.methods, collapse = "/")))
+  if (!scope %in% .FDR_SCOPES)
+    stop(sprintf("fdr scope '%s' not one of %s", scope,
+                 paste(.FDR_SCOPES, collapse = "/")))
+  list(method = method, scope = scope)
+}
+
+#' Apply multiple-comparison correction within scope-defined families.
+#'
+#' `scope` partitions the (band x spatial) result rows into the families across
+#' which p-values are corrected: "hypothesis" = one family (all rows, the
+#' conservative default); "band" = a family per band/freq_pair; "spatial" = a
+#' family per spatial cell; "none" = no correction (each row its own family,
+#' q = p). Aggressiveness is driven by FAMILY SIZE, not just the method.
+#' Sets q_value/significant/fdr_family on `df` (rows with NA p are left out).
+.apply_fdr <- function(df, method, scope) {
+  ok <- !is.na(df$p_value)
+  fam <- rep("all", nrow(df))
+  if (scope == "band" && "band" %in% names(df)) {
+    fam <- as.character(df$band)
+  } else if (scope == "spatial" && "spatial" %in% names(df)) {
+    fam <- as.character(df$spatial)
+  } else if (scope == "none") {
+    fam <- as.character(seq_len(nrow(df)))   # every row alone -> q == p
+  }
+  fam[is.na(fam)] <- "all"
+
+  df$q_value <- NA_real_
+  for (f in unique(fam[ok])) {
+    idx <- which(ok & fam == f)
+    df$q_value[idx] <- p.adjust(df$p_value[idx], method = method)
+  }
+  df$significant <- !is.na(df$q_value) & df$q_value < 0.05
+  cnt <- as.integer(table(fam[ok])[fam]); cnt[is.na(cnt)] <- 0L
+  lbl <- if (scope == "none") sprintf("scope=none method=%s", method)
+         else sprintf("scope=%s method=%s family=%s n=%d", scope, method, fam, cnt)
+  df$fdr_family <- lbl
+  df
 }
 
 # ---- Helpers ---------------------------------------------------------------
@@ -273,11 +336,10 @@ run_hypothesis <- function(data, hyp, spec,
   if (nrow(df) == 0) return(df)
   df$hypothesis <- hyp$name; df$kind <- hyp$kind
   df$role <- hyp$role; df$label <- hyp$label; df$test <- hyp$test
-  ok <- !is.na(df$p_value)
-  df$q_value <- NA_real_
-  df$q_value[ok] <- p.adjust(df$p_value[ok], method = fdr_method)
-  df$significant <- !is.na(df$q_value) & df$q_value < 0.05
-  df$fdr_family <- sprintf("%s: %d cells, %s", hyp$name, sum(ok), fdr_method)
+  # Multiple-comparison correction within scope-defined families (declarative
+  # fdr: spec; default = whole band x spatial grid, method BH).
+  fdr <- .resolve_fdr(hyp, spec, default_method = fdr_method)
+  df <- .apply_fdr(df, fdr$method, fdr$scope)
 
   front <- c("hypothesis", "kind", "role", "band", "spatial")
   df[, c(front, setdiff(names(df), front)), drop = FALSE]

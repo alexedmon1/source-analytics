@@ -294,6 +294,22 @@ exchangeability on a synthetic covariate).
 2. **§10.2 Multiple-comparison scope.** **FDR within a single `run_hypothesis` call's cells**
    (e.g. bands × ROIs), with the family reported in the output. Cross-hypothesis correction is
    the analyst's call, logged by the external analysis loop — never silent, never automatic.
+   **Family scope is declarative** (the emmeans adapter): a `fdr:` block — study-level under
+   `design:` and/or per-hypothesis (the per-hypothesis one overrides field-by-field) — sets
+   `scope` (`hypothesis` = the whole band×spatial grid, the default and most conservative;
+   `band` = a family per band/freq_pair; `spatial`; `none` = no correction) and `method`
+   (`BH` default | `BY` | `holm` | `bonferroni` | `none`). Aggressiveness is driven by family
+   SIZE, not just method — `scope: band` is the principled lever when bands/freq-pairs are
+   pre-specified independent hypotheses (e.g. PAC). Declaring it in the spec keeps the family
+   definition pre-registered. The permutation/map adapter uses cluster-extent correction, so
+   `fdr:` is a no-op there. Example:
+   ```yaml
+   design:
+     fdr: { scope: hypothesis, method: BH }   # study default (= pre-toggle behaviour)
+   hypotheses:
+     - name: disease_effect
+       fdr: { scope: band }                   # per-freq_pair override
+   ```
 3. **§10.3 Adapter/module order.** emmeans adapter + `roi_psd` first; **`vertex_network` (graph
    metrics) second** for the permutation adapter.
 
