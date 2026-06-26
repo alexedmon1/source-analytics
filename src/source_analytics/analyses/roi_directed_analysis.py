@@ -57,7 +57,8 @@ class ROIDirectedAnalysis(BaseAnalysis):
     """
 
     name = "roi_directed"
-    SELECTABLE = {"metric": "directed measure", "band": "frequency band"}
+    SELECTABLE = {"metric": "directed measure", "band": "frequency band",
+                  "hypothesis": "declared hypothesis"}
 
     # Directed measures this module can produce (shared signed-ROI front-end).
     # `te` additionally emits the derived `net_te`.
@@ -230,6 +231,12 @@ class ROIDirectedAnalysis(BaseAnalysis):
         ]
         cmd.extend(self._r_no_figures_flags())
         cmd.extend(self._r_roi_categories_flags())
+
+        # Manual hypothesis selection: pass --hypothesis NAME[,NAME] through to R
+        # (mirrors roi_cross_freq; the R script honours it across all three tiers).
+        wanted_hyp = self._selection.get("hypothesis")
+        if wanted_hyp:
+            cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:

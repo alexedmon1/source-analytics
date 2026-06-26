@@ -152,4 +152,75 @@ ko <- cl[[which(nm == "ko_vs_wt")]]
 ok(ko$group_a == "KO_VEH" && ko$group_b == "WT_VEH",
    "contrasts_from_spec maps +weight->group_a, -weight->group_b")
 
+# ---- 12. directed-edge adapter (asymmetric, mass-univariate) ----
+# Synthetic directed edges among 3 ROIs (6 ordered pairs) x 2 groups x 1 band.
+# Edge A->B carries a real KO>WT signal; its reverse B->A is null — the adapter
+# must treat them as distinct edges (directed). One obs per subject per edge.
+set.seed(7)
+de_groups <- c("WT_VEH", "KO_VEH", "KO_HD_ICV", "KO_HD_IV")
+de_eff <- c(WT_VEH = 0.0, KO_VEH = 0.0, KO_HD_ICV = 0.0, KO_HD_IV = 0.0)
+edge_rows <- list(); sid <- 0
+ord_pairs <- list(c("A","B"), c("B","A"), c("A","C"), c("C","A"), c("B","C"), c("C","B"))
+for (g in de_groups) for (s in 1:12) {
+  sid <- sid + 1; subj <- sprintf("e%03d", sid)
+  for (pr in ord_pairs) {
+    src <- pr[1]; tgt <- pr[2]
+    # Signal lives ONLY on A->B for KO_VEH (mean shift +1.0); everything else null.
+    sig <- if (src == "A" && tgt == "B" && g == "KO_VEH") 1.0 else 0.0
+    edge_rows[[length(edge_rows) + 1]] <- data.frame(
+      subject = subj, group = g, source_roi = src, target_roi = tgt,
+      band = "B1", te = 0.5 + sig + rnorm(1, 0, 0.4), stringsAsFactors = FALSE)
+  }
+}
+edf <- do.call(rbind, edge_rows)
+de_spec <- list(factor = "group", reference = "WT_VEH", levels = de_groups,
+                covariates = character(0),
+                hypotheses = list(
+                  ko_vs_wt = parse_hypothesis(list(name = "ko_vs_wt", kind = "contrast",
+                                                   weights = list(KO_VEH = 1, WT_VEH = -1))),
+                  grp_omni = parse_hypothesis(list(name = "grp_omni", kind = "omnibus"))))
+
+de <- run_directed_edges(edf, c("ko_vs_wt", "grp_omni"), de_spec,
+                         dv_col = "te", band_col = "band")
+ok(all(c("spatial", "source", "target") %in% names(de)),
+   "directed-edge result carries spatial/source/target")
+ok(nrow(de[de$kind == "contrast", ]) == length(ord_pairs),
+   sprintf("one contrast row per ordered edge (%d edges)", length(ord_pairs)))
+
+# Gold check: contrast estimate on A->B == a hand-fit lm(te~group) emmeans contrast
+ab <- edf[edf$source_roi == "A" & edf$target_roi == "B", ]
+ab$grp <- factor(ab$group, levels = de_groups)
+gold_fit <- lm(te ~ grp, data = ab)
+gold_emm <- emmeans::emmeans(gold_fit, ~ grp)
+gold_w <- weight_vector(de_spec$hypotheses$ko_vs_wt, de_groups)
+gold_con <- as.data.frame(summary(emmeans::contrast(gold_emm,
+              method = setNames(list(gold_w), "ko_vs_wt"))))
+de_ab <- de[de$kind == "contrast" & de$source == "A" & de$target == "B", ]
+ok(near(de_ab$estimate, gold_con$estimate, 1e-6),
+   sprintf("A->B contrast estimate matches hand-fit lm emmeans (%.4f)", de_ab$estimate))
+ok(near(de_ab$stat, gold_con$t.ratio, 1e-6), "A->B contrast t-ratio matches hand-fit")
+
+# Directed asymmetry: signal edge A->B significant, reverse B->A not
+de_ba <- de[de$kind == "contrast" & de$source == "B" & de$target == "A", ]
+ok(de_ab$significant && !de_ba$significant,
+   sprintf("directed asymmetry: A->B sig (q=%.4f) but reverse B->A not (q=%.4f)",
+           de_ab$q_value, de_ba$q_value))
+ok(de_ab$effect_size_type == "hedges_g" && de_ab$estimate > 0.5,
+   "signal edge reports hedges_g with a positive KO>WT effect")
+
+# Omnibus rows: finite F, partial omega^2 in [0,1), 3 numerator df (4 groups)
+de_om <- de[de$kind == "omnibus", ]
+ok(nrow(de_om) == length(ord_pairs) && all(is.finite(de_om$stat)),
+   "omnibus yields a finite F per edge")
+ok(all(de_om$effect_size >= 0 & de_om$effect_size < 1) && all(de_om$df_num == 3),
+   "omnibus partial omega2 in [0,1) with 3 numerator df (4 groups)")
+
+# FDR per hypothesis across the edge family (declarative scope)
+ok(all(c("q_value", "significant", "fdr_family") %in% names(de)),
+   "directed-edge FDR columns present")
+
+# Equal-mean edge (no group effect) should not be flagged by ko_vs_wt
+de_ac <- de[de$kind == "contrast" & de$source == "A" & de$target == "C", ]
+ok(!de_ac$significant, "null edge A->C not flagged significant")
+
 cat("\nAll hypothesis-layer checks passed.\n")

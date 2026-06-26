@@ -226,6 +226,18 @@ weight_vector <- function(hyp, levels) {
              stringsAsFactors = FALSE)
 }
 
+# emmeans falls back to ASYMPTOTIC (z) inference when n_obs exceeds the
+# lmerTest/pbkrtest limit (default 3000): summary() then carries z.ratio /
+# asymp.LCL / asymp.UCL and df=Inf instead of t.ratio / lower.CL / upper.CL.
+# These accessors read whichever form is present, so high-cardinality spatial
+# fits (e.g. 100 region-pairs x 60 subjects = 6000 obs) don't crash the adapter
+# on a missing column. A z-test is the df=Inf limit of a t-test, so stat_type
+# stays "t" and the t_ratio legacy alias keeps populating.
+.emm_stat <- function(cd) if ("t.ratio" %in% names(cd)) cd$t.ratio else cd$z.ratio
+.emm_df   <- function(cd) if ("df" %in% names(cd)) cd$df else rep(Inf, nrow(cd))
+.emm_lcl  <- function(cd) if ("lower.CL" %in% names(cd)) cd$lower.CL else cd$asymp.LCL
+.emm_ucl  <- function(cd) if ("upper.CL" %in% names(cd)) cd$upper.CL else cd$asymp.UCL
+
 #' Weighted linear contrast over group means, per spatial cell. Hedges g.
 #' marginal=TRUE collapses the spatial dimension: the contrast is taken on the
 #' group means MARGINALIZED over .sp (one row), reproducing the legacy "global"
@@ -243,9 +255,9 @@ weight_vector <- function(hyp, levels) {
   pos <- glev[wv > 0]; neg <- glev[wv < 0]
   data.frame(
     spatial = if (per_sp) as.character(cd$.sp) else NA_character_,
-    estimate = cd$estimate, SE = cd$SE, df = cd$df, df_num = 1,
-    stat = cd$t.ratio, stat_type = "t", p_value = cd$p.value,
-    estimate_lcl = cd$lower.CL, estimate_ucl = cd$upper.CL,
+    estimate = cd$estimate, SE = cd$SE, df = .emm_df(cd), df_num = 1,
+    stat = .emm_stat(cd), stat_type = "t", p_value = cd$p.value,
+    estimate_lcl = .emm_lcl(cd), estimate_ucl = .emm_ucl(cd),
     effect_size = cd$estimate / resid_sd, effect_size_type = "hedges_g",
     group_a = if (length(pos) == 1) pos else NA_character_,
     group_b = if (length(neg) == 1) neg else NA_character_,
@@ -272,13 +284,14 @@ weight_vector <- function(hyp, levels) {
   et <- if (by_grp) emtrends(fit, ~ .grp, var = ".x") else emtrends(fit, ~ 1, var = ".x")
   cd <- as.data.frame(summary(et, infer = c(TRUE, TRUE)))
   slope <- cd[[".x.trend"]]
+  cd_df <- .emm_df(cd)
   tstat <- slope / cd$SE
   data.frame(
     spatial = if (by_grp) as.character(cd$.grp) else NA_character_,
-    estimate = slope, SE = cd$SE, df = cd$df, df_num = 1,
+    estimate = slope, SE = cd$SE, df = cd_df, df_num = 1,
     stat = tstat, stat_type = "t",
-    p_value = 2 * pt(-abs(tstat), cd$df),
-    estimate_lcl = cd$lower.CL, estimate_ucl = cd$upper.CL,
+    p_value = 2 * pt(-abs(tstat), cd_df),
+    estimate_lcl = .emm_lcl(cd), estimate_ucl = .emm_ucl(cd),
     effect_size = slope * sdx / sdy, effect_size_type = "std_beta",
     stringsAsFactors = FALSE
   )
@@ -454,6 +467,211 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
     n_sig <- sum(hyp_df$significant, na.rm = TRUE)
     message("  Saved: ", basename(path), " (", nrow(hyp_df), " rows, ",
             length(hyp_names), " hypotheses x ", length(dv_cols), " DV; ", n_sig, " sig cells)")
+  }
+  invisible(hyp_df)
+}
+
+# ---- Directed-edge adapter (asymmetric, mass-univariate) -------------------
+# The emmeans adapter (run_hypothesis) puts the spatial axis INTO the model
+# (group * spatial), which is infeasible for directed connectivity: a fully
+# directed ROI graph has up to N*(N-1) ordered source->target edges (~10^3 for an
+# atlas), far too many factor levels for one joint fit. The directed-edge adapter
+# instead makes the edge the ITERATE, not a model factor: ONE small model per
+# (band x edge) on all design levels (fit_scope "shared"), reused across every
+# hypothesis, then correction across the edge family. Directed: source->target and
+# target->source are distinct edges, tested independently.
+
+#' Apply a kind adapter to ONE per-cell one-way model fit `lm(.dv ~ .grp)`.
+#'
+#' Mirrors the emmeans kind-adapters (.adapt_omnibus/.adapt_contrast/
+#' .adapt_equivalence) but for a model where the spatial cell is the iterate
+#' rather than a `.sp` factor, so the contrast is always over the (marginal) cell
+#' means. The contrast is computed ANALYTICALLY from the cell means + pooled
+#' residual SD, which for a balanced/unbalanced one-way `lm` is identical to
+#' emmeans (cell means are mutually independent, cov = sigma^2 * diag(1/n_g)) but
+#' ~100x cheaper — the adapter is called ~10^4 times (edges x bands), so emmeans'
+#' reference-grid overhead is prohibitive. `tests/test_hypothesis.R` pins this
+#' against a hand-fit emmeans contrast. `fit` is an `lm` (one obs per subject per
+#' cell -> a (1|subject) term would be singular); `d` is that cell's data with
+#' `.dv`/`.grp`; `glev` the group levels in fit order.
+.adapt_cell <- function(fit, hyp, glev, d) {
+  resid_sd <- sigma(fit)
+  if (hyp$kind == "omnibus") {
+    aov <- anova(fit)
+    rn <- if (".grp" %in% rownames(aov)) ".grp" else rownames(aov)[1]
+    fF <- aov[rn, "F value"]; p <- aov[rn, "Pr(>F)"]
+    df1 <- aov[rn, "Df"]; df2 <- aov["Residuals", "Df"]
+    o2 <- tryCatch(as.numeric(effectsize::F_to_omega2(fF, df1, df2)[1]),
+                   error = function(e) NA_real_)
+    return(data.frame(estimate = NA_real_, SE = NA_real_, df = df2, df_num = df1,
+                      stat = fF, stat_type = "F", p_value = p,
+                      estimate_lcl = NA_real_, estimate_ucl = NA_real_,
+                      effect_size = o2, effect_size_type = "omega2_partial",
+                      group_a = NA_character_, group_b = NA_character_,
+                      stringsAsFactors = FALSE))
+  }
+  wv <- weight_vector(hyp, glev)
+  gm <- tapply(d$.dv, d$.grp, mean)[glev]
+  gn <- tapply(d$.dv, d$.grp, length)[glev]
+  df_res <- df.residual(fit)
+  est <- sum(wv * gm)
+  se  <- resid_sd * sqrt(sum(wv^2 / gn))
+  tval <- est / se
+  pval <- 2 * pt(-abs(tval), df_res)
+  tcrit <- qt(0.975, df_res)
+  pos <- glev[wv > 0]; neg <- glev[wv < 0]
+  res <- data.frame(
+    estimate = est, SE = se, df = df_res, df_num = 1,
+    stat = tval, stat_type = "t", p_value = pval,
+    estimate_lcl = est - tcrit * se, estimate_ucl = est + tcrit * se,
+    effect_size = est / resid_sd, effect_size_type = "hedges_g",
+    group_a = if (length(pos) == 1) pos else NA_character_,
+    group_b = if (length(neg) == 1) neg else NA_character_,
+    stringsAsFactors = FALSE)
+  if (hyp$kind == "equivalence") {
+    m <- .equivalence_margin(hyp$margin, NA_real_, resid_sd)
+    res$margin_used <- m
+    res$equivalent <- tost_equivalent(res$estimate, res$SE, res$df, m)
+    res$stat_type <- "tost"
+  }
+  res
+}
+
+#' Run hypotheses across asymmetric DIRECTED edges (mass-univariate).
+#'
+#' @param data long df: subject, <factor>, <source_col>, <target_col>, <dv_col>,
+#'   optional <band_col>.
+#' @param hyps character vector of hypothesis names, or list of parsed hyp defs.
+#'   `regression` kind is skipped (no per-edge predictor contract). Fitting ONCE
+#'   per edge and applying all hypotheses requires every hypothesis to share the
+#'   same fit -> fit_scope "shared" only.
+#' @param spec parsed design spec.
+#' @param dv_col dependent-variable column (e.g. "te").
+#' @param source_col,target_col directed-edge endpoint columns.
+#' @param band_col band column, or NULL.
+#' @param bands optional band-level override.
+#' @param min_per_group skip an edge unless every fitted group has >= this many
+#'   finite observations (default 3).
+#' @return tidy df: one row per band x edge x hypothesis, edge id in `spatial`
+#'   (+ `source`/`target`), FDR (declarative scope, per hypothesis across its
+#'   band x edge family) in q_value/significant. Same schema as run_hypothesis().
+run_directed_edges <- function(data, hyps, spec,
+                               dv_col = "te",
+                               source_col = "source_roi", target_col = "target_roi",
+                               band_col = "band", bands = NULL,
+                               fit_scope = "shared", fdr_method = "BH",
+                               min_per_group = 3) {
+  if (!identical(fit_scope, "shared"))
+    stop("run_directed_edges supports fit_scope='shared' only")
+  if (is.character(hyps)) hyps <- lapply(hyps, function(h) spec$hypotheses[[h]])
+  hyps <- Filter(Negate(is.null), hyps)
+  hyps <- Filter(function(h) !identical(h$kind, "regression"), hyps)
+  if (length(hyps) == 0) return(data.frame())
+  if (is.null(spec$levels))
+    spec$levels <- sort(unique(as.character(data[[spec$factor]])))
+
+  fac <- spec$factor
+  has_band <- !is.null(band_col) && band_col %in% names(data)
+  band_vals <- if (has_band) (bands %||% unique(as.character(data[[band_col]]))) else NA
+  data$.edge <- paste(data[[source_col]], "->", data[[target_col]])
+
+  rows <- list()
+  for (bn in band_vals) {
+    bdata <- if (has_band) data[as.character(data[[band_col]]) == bn, , drop = FALSE] else data
+    if (nrow(bdata) == 0) next
+    for (eg in unique(bdata$.edge)) {
+      ed <- bdata[bdata$.edge == eg, , drop = FALSE]
+      groups <- intersect(spec$levels, unique(as.character(ed[[fac]])))
+      if (length(groups) < 2) next
+      d <- ed[as.character(ed[[fac]]) %in% groups, , drop = FALSE]
+      d$.dv <- d[[dv_col]]
+      d <- d[is.finite(d$.dv), , drop = FALSE]
+      gtab <- table(as.character(d[[fac]]))
+      groups <- intersect(groups, names(gtab)[gtab >= min_per_group])
+      if (length(groups) < 2) next
+      d <- d[as.character(d[[fac]]) %in% groups, , drop = FALSE]
+      d$.grp <- factor(d[[fac]], levels = groups)
+      if (!is.null(spec$reference) && spec$reference %in% groups)
+        d$.grp <- relevel(d$.grp, ref = spec$reference)
+      fit <- tryCatch(lm(.dv ~ .grp, data = d), error = function(e) NULL)
+      if (is.null(fit)) next
+      glev <- levels(d$.grp)
+      src <- as.character(ed[[source_col]][1]); tgt <- as.character(ed[[target_col]][1])
+      for (hyp in hyps) {
+        # contrast/equivalence weights may reference levels dropped by min_per_group
+        if (hyp$kind %in% c("contrast", "equivalence")) {
+          need <- names(hyp$weights)[hyp$weights != 0]
+          if (!all(need %in% glev)) next
+        }
+        res <- tryCatch(.adapt_cell(fit, hyp, glev, d), error = function(e) NULL)
+        if (is.null(res) || nrow(res) == 0) next
+        res$hypothesis <- hyp$name; res$kind <- hyp$kind
+        res$role <- hyp$role; res$label <- hyp$label; res$test <- hyp$test
+        res$band <- if (has_band) bn else NA_character_
+        res$spatial <- eg; res$source <- src; res$target <- tgt
+        rows[[length(rows) + 1]] <- res
+      }
+    }
+  }
+  df <- bind_rows(rows)
+  if (nrow(df) == 0) return(df)
+
+  # FDR per hypothesis across its band x edge family (declarative scope).
+  out <- list()
+  for (hn in unique(df$hypothesis)) {
+    sub <- df[df$hypothesis == hn, , drop = FALSE]
+    hyp <- Filter(function(h) identical(h$name, hn), hyps)[[1]]
+    fdr <- .resolve_fdr(hyp, spec, default_method = fdr_method)
+    out[[hn]] <- .apply_fdr(sub, fdr$method, fdr$scope)
+  }
+  df <- bind_rows(out)
+
+  front <- c("hypothesis", "kind", "role", "band", "spatial", "source", "target")
+  df[, c(front, setdiff(names(df), front)), drop = FALSE]
+}
+
+#' Run every declared hypothesis across directed edges and write
+#' <prefix>_directed_edges_hypotheses.csv. Directed-edge analogue of
+#' write_module_hypotheses (one model per ordered source->target edge, reused
+#' across hypotheses). Honors a --hypothesis name filter.
+write_module_directed_edges <- function(df, config, tbl_dir, prefix, dv_cols,
+                                        source_col = "source_roi", target_col = "target_roi",
+                                        band_col = "band", hypothesis = NULL,
+                                        fit_scope = "shared", bands = NULL,
+                                        min_per_group = 3) {
+  spec <- parse_design_spec(config)
+  if (length(spec$hypotheses) == 0) {
+    message("  No hypotheses/contrasts declared — skipping ", prefix, " directed edges.")
+    return(invisible(NULL))
+  }
+  hyp_names <- names(spec$hypotheses)
+  if (!is.null(hypothesis)) {
+    want <- trimws(strsplit(hypothesis, ",")[[1]])
+    hyp_names <- intersect(hyp_names, want)
+    if (length(hyp_names) == 0)
+      message("  No declared hypothesis matches --hypothesis '", hypothesis, "'")
+  }
+  has_band <- !is.null(band_col) && band_col %in% names(df)
+  band_levels <- if (has_band) (bands %||% names(config$bands)) else NULL
+  out <- list()
+  for (dv in dv_cols) {
+    res <- tryCatch(
+      run_directed_edges(df, hyp_names, spec, dv_col = dv,
+                         source_col = source_col, target_col = target_col,
+                         band_col = if (has_band) band_col else NULL,
+                         bands = band_levels, fit_scope = fit_scope,
+                         min_per_group = min_per_group),
+      error = function(e) { message("  directed edges/", dv, ": ", conditionMessage(e)); NULL })
+    if (!is.null(res) && nrow(res) > 0) { res$dv <- dv; out[[dv]] <- res }
+  }
+  hyp_df <- bind_rows(out)
+  if (nrow(hyp_df) > 0) {
+    hyp_df <- .add_legacy_aliases(hyp_df)
+    path <- file.path(tbl_dir, paste0(prefix, "_directed_edges_hypotheses.csv"))
+    write_csv(hyp_df, path)
+    n_sig <- sum(hyp_df$significant, na.rm = TRUE)
+    message("  Saved: ", basename(path), " (", nrow(hyp_df), " rows, ",
+            length(hyp_names), " hypotheses x ", length(dv_cols), " DV; ", n_sig, " sig edges)")
   }
   invisible(hyp_df)
 }

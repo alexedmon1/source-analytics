@@ -23,6 +23,53 @@ has_lme4 <- requireNamespace("lme4", quietly = TRUE) &&
             requireNamespace("lmerTest", quietly = TRUE) &&
             requireNamespace("emmeans", quietly = TRUE)
 
+# --- Source the declarative hypothesis layer -------------------------------
+script_dir <- if (exists("script.dir")) {
+  script.dir
+} else {
+  tryCatch({
+    args_all <- commandArgs(trailingOnly = FALSE)
+    file_arg <- grep("^--file=", args_all, value = TRUE)
+    if (length(file_arg) > 0) {
+      dirname(normalizePath(sub("^--file=", "", file_arg)))
+    } else {
+      "R"
+    }
+  }, error = function(e) "R")
+}
+tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
+source(file.path(script_dir, "hypothesis.R"))
+
+# --- Hypothesis-layer adapters --------------------------------------------
+# TE has three spatial tiers, all migrated to the hypothesis layer:
+#   global         — between-group contrast on per-subject mean TE (one cell)
+#   directed edges — mass-univariate per ordered source->target edge (the
+#                    directed-edge adapter; ~10^3 edges, no joint group*edge fit)
+#   region pair    — emmeans-tabular over directed region pairs (group*region_pair)
+# These helpers reshape the tidy hypothesis rows into the band-keyed frames the
+# TE report consumes (mirrors the PAC slice's .pac_* helpers).
+
+#' Contrast-kind rows -> report-shaped frame (q_value/t_ratio/effect_size kept).
+.te_contrast_rows <- function(h) {
+  if (is.null(h) || nrow(h) == 0) return(data.frame())
+  cr <- h[h$kind == "contrast", , drop = FALSE]
+  if (nrow(cr) == 0) return(data.frame())
+  cr
+}
+
+#' Rebuild the legacy `contrasts` list (name/group_a/group_b) from contrast rows,
+#' so the diagnostic region-pair omnibus keeps iterating contrasts now that
+#' config$contrasts is no longer populated (design-spec migration).
+.contrasts_from_hyp <- function(h) {
+  cr <- .te_contrast_rows(h)
+  if (nrow(cr) == 0 || !all(c("group_a", "group_b") %in% names(cr))) return(list())
+  uc <- unique(cr[, c("contrast", "group_a", "group_b")])
+  uc <- uc[!is.na(uc$group_a) & !is.na(uc$group_b), , drop = FALSE]
+  if (nrow(uc) == 0) return(list())
+  lapply(seq_len(nrow(uc)), function(i)
+    list(name = uc$contrast[i], group_a = uc$group_a[i], group_b = uc$group_b[i]))
+}
+
 # --- Publication theme ---
 theme_pub <- function(base_size = 14) {
   theme_minimal(base_size = base_size) +
@@ -433,7 +480,7 @@ plot_global_te_bar <- function(global_df, group_colors, group_labels,
 # Report
 # ===========================================================================
 
-write_te_summary <- function(global_df, global_ttest_df, directional_df,
+write_te_summary <- function(global_df, hyp_global, hyp_edges,
                              omnibus_df, posthoc_df,
                              config, n_subjects, sfreq,
                              fig_dir, output_path) {
@@ -480,65 +527,81 @@ write_te_summary <- function(global_df, global_ttest_df, directional_df,
   edge_info <- global_df %>% slice(1)
   n_edges_str <- if (nrow(edge_info) > 0) as.character(edge_info$n_edges[1]) else "unknown"
 
-  add("**Statistics:**")
+  add("**Statistics (declarative hypothesis layer):**")
   add("")
-  add("1. **Global:** Mean TE across all ", n_edges_str, " directed edges per subject x band. Welch t-test per band, BH FDR.")
+  add("1. **Global:** between-group contrast on per-subject mean TE (across all ",
+      n_edges_str, " directed edges) per band \u2014 lm(mean_te ~ group), per-band FDR.")
   add("")
-  add("2. **Directional:** One-sample t-test of mean net TE (= TE(X\u2192Y) \u2212 TE(Y\u2192X)) against 0 within each group x band.")
+  add("2. **Directed edges:** mass-univariate group contrast per ordered ",
+      "source\u2192target edge (the directed-edge adapter; source\u2192target and ",
+      "target\u2192source tested independently), FDR across the edge family per band.")
   add("")
   if (nrow(omnibus_df) > 0) {
-    add("3. **Region-pair LMM:** te ~ group * region_pair + (1|subject). Type III ANOVA, BH FDR. Post-hoc: emmeans, Holm correction.")
+    add("3. **Region-pair:** emmeans contrast over directed region pairs ",
+        "(te ~ group * region_pair + (1|subject)); diagnostic Type-III omnibus ",
+        "for the group\u00d7region_pair interaction.")
     add("")
   }
 
-  # --- Global t-test results ---
-  add("## Global TE T-Tests")
+  # --- Global contrasts (hypothesis layer) ---
+  add("## Global TE (between-group contrasts)")
   add("")
-  if (nrow(global_ttest_df) > 0) {
-    add("| Contrast | Band | n_a | n_b | mean_a | mean_b | t | df | p | q | g | Sig |")
-    add("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
-    for (i in seq_len(nrow(global_ttest_df))) {
-      row <- global_ttest_df[i, ]
+  gc <- if (!is.null(hyp_global) && nrow(hyp_global) > 0)
+          hyp_global[hyp_global$kind == "contrast", , drop = FALSE] else data.frame()
+  if (nrow(gc) > 0) {
+    add("| Hypothesis | Band | estimate | t | df | q | Hedges' g | Sig |")
+    add("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    for (i in seq_len(nrow(gc))) {
+      row <- gc[i, ]
       sig_str <- if (isTRUE(row$significant)) "**Yes**" else "No"
-      add(sprintf("| %s | %s | %d | %d | %.5f | %.5f | %.2f | %.1f | %.4f | %.4f | %.2f | %s |",
-                  row$contrast, row$band, row$n_a, row$n_b,
-                  row$mean_a, row$mean_b,
-                  ifelse(is.na(row$t_stat), 0, row$t_stat),
+      add(sprintf("| %s | %s | %.5f | %.2f | %.1f | %.4f | %.2f | %s |",
+                  row$label %||% row$hypothesis, row$band,
+                  ifelse(is.na(row$estimate), 0, row$estimate),
+                  ifelse(is.na(row$t_ratio), 0, row$t_ratio),
                   ifelse(is.na(row$df), 0, row$df),
-                  ifelse(is.na(row$p_value), 1, row$p_value),
                   ifelse(is.na(row$q_value), 1, row$q_value),
                   ifelse(is.na(row$hedges_g), 0, row$hedges_g),
                   sig_str))
     }
     add("")
   } else {
-    add("*No global t-test results computed.*")
+    add("*No global contrast results computed.*")
     add("")
   }
 
-  # --- Directional t-test results ---
-  add("## Directional Analysis (Net TE)")
+  # --- Directed-edge results ---
+  add("## Directed-Edge TE (mass-univariate)")
   add("")
-  if (nrow(directional_df) > 0) {
-    add("Tests whether mean net TE differs from 0 (i.e., whether information flow is asymmetric).")
+  ec <- if (!is.null(hyp_edges) && nrow(hyp_edges) > 0)
+          hyp_edges[hyp_edges$kind == "contrast", , drop = FALSE] else data.frame()
+  if (nrow(ec) > 0) {
+    sig_e <- ec[isTRUE(ec$significant) | (!is.na(ec$significant) & ec$significant), , drop = FALSE]
+    add(sprintf("%d directed edges tested per band x contrast; %d significant after FDR.",
+                length(unique(ec$spatial)), nrow(sig_e)))
     add("")
-    add("| Contrast | Group | Band | n | mean_net_te | sd | t | df | p | q | Sig |")
-    add("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
-    for (i in seq_len(nrow(directional_df))) {
-      row <- directional_df[i, ]
-      sig_str <- if (isTRUE(row$significant)) "**Yes**" else "No"
-      add(sprintf("| %s | %s | %s | %d | %.5f | %.5f | %.2f | %.1f | %.4f | %.4f | %s |",
-                  row$contrast, row$group, row$band, row$n_subjects,
-                  row$mean_net_te, row$sd_net_te,
-                  ifelse(is.na(row$t_stat), 0, row$t_stat),
-                  ifelse(is.na(row$df), 0, row$df),
-                  ifelse(is.na(row$p_value), 1, row$p_value),
-                  ifelse(is.na(row$q_value), 1, row$q_value),
-                  sig_str))
+    if (nrow(sig_e) > 0) {
+      sig_e <- sig_e[order(sig_e$q_value), , drop = FALSE]
+      top_e <- head(sig_e, 30)
+      add("Top significant directed edges (FDR q < 0.05, up to 30 shown):")
+      add("")
+      add("| Hypothesis | Band | Source \u2192 Target | estimate | t | q | Hedges' g |")
+      add("| --- | --- | --- | --- | --- | --- | --- |")
+      for (i in seq_len(nrow(top_e))) {
+        row <- top_e[i, ]
+        add(sprintf("| %s | %s | %s \u2192 %s | %.5f | %.2f | %.4f | %.2f |",
+                    row$label %||% row$hypothesis, row$band, row$source, row$target,
+                    ifelse(is.na(row$estimate), 0, row$estimate),
+                    ifelse(is.na(row$t_ratio), 0, row$t_ratio),
+                    ifelse(is.na(row$q_value), 1, row$q_value),
+                    ifelse(is.na(row$hedges_g), 0, row$hedges_g)))
+      }
+      add("")
+    } else {
+      add("No directed edges reached significance after FDR correction.")
+      add("")
     }
-    add("")
   } else {
-    add("*No directional t-test results computed.*")
+    add("*No directed-edge results computed.*")
     add("")
   }
 
@@ -591,33 +654,39 @@ write_te_summary <- function(global_df, global_ttest_df, directional_df,
   add("")
   any_sig <- FALSE
 
-  if (nrow(global_ttest_df) > 0) {
-    sig_global <- global_ttest_df %>% filter(significant == TRUE)
+  if (!is.null(hyp_global) && nrow(hyp_global) > 0) {
+    sig_global <- hyp_global[hyp_global$kind == "contrast" & !is.na(hyp_global$significant) &
+                             hyp_global$significant, , drop = FALSE]
     if (nrow(sig_global) > 0) {
       any_sig <- TRUE
       for (i in seq_len(nrow(sig_global))) {
         row <- sig_global[i, ]
         add(sprintf("- **%s TE** [%s, global]: t=%.2f, q=%.4f, g=%.2f",
-                    row$band, row$contrast, row$t_stat, row$q_value, row$hedges_g))
+                    row$band, row$label %||% row$hypothesis, row$t_ratio, row$q_value, row$hedges_g))
       }
     }
   }
 
-  if (nrow(directional_df) > 0) {
-    sig_dir <- directional_df %>% filter(significant == TRUE)
-    if (nrow(sig_dir) > 0) {
+  if (!is.null(hyp_edges) && nrow(hyp_edges) > 0) {
+    sig_edge <- hyp_edges[hyp_edges$kind == "contrast" & !is.na(hyp_edges$significant) &
+                          hyp_edges$significant, , drop = FALSE]
+    if (nrow(sig_edge) > 0) {
       any_sig <- TRUE
-      for (i in seq_len(nrow(sig_dir))) {
-        row <- sig_dir[i, ]
-        add(sprintf("- **%s** [%s, %s, directionality]: mean_net_te=%.5f, t=%.2f, q=%.4f",
-                    row$band, row$contrast, row$group,
-                    row$mean_net_te, row$t_stat, row$q_value))
+      n_show <- min(10, nrow(sig_edge))
+      sig_edge <- sig_edge[order(sig_edge$q_value), , drop = FALSE]
+      for (i in seq_len(n_show)) {
+        row <- sig_edge[i, ]
+        add(sprintf("- **%s → %s** [%s, %s, directed edge]: estimate=%.5f, t=%.2f, q=%.4f",
+                    row$source, row$target, row$band, row$label %||% row$hypothesis,
+                    row$estimate, row$t_ratio, row$q_value))
       }
+      if (nrow(sig_edge) > n_show)
+        add(sprintf("- ...and %d more significant directed edges.", nrow(sig_edge) - n_show))
     }
   }
 
   if (!any_sig) {
-    add("- No bands reached significance after FDR correction at any analysis level.")
+    add("- No effects reached significance after FDR correction at any analysis level.")
   }
   add("")
 
@@ -659,6 +728,8 @@ parser$add_argument("--no-figures", action = "store_true", default = FALSE,
                     help = "Skip all figure generation (stats/tables only)")
 parser$add_argument("--roi-categories", default = NULL,
                     help = "Path to roi_categories.yaml (atlas ROI groupings)")
+parser$add_argument("--hypothesis", default = NULL,
+                    help = "Comma-separated declared hypothesis name(s) to run (default: all)")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
@@ -691,9 +762,13 @@ message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 message("Bands: ", paste(names(config$bands), collapse = ", "))
 
-# Load roi_categories from atlas file if provided
+# Load roi_categories from atlas file if provided. The pipeline passes an
+# unwrapped file (categories at top level); the documented proposed file wraps
+# them under a single `roi_categories:` key — unwrap that so either form works.
 if (!is.null(args$roi_categories) && file.exists(args$roi_categories)) {
-  config$roi_categories <- read_yaml(args$roi_categories)
+  rc <- read_yaml(args$roi_categories)
+  if (length(rc) == 1 && identical(names(rc), "roi_categories")) rc <- rc[["roi_categories"]]
+  config$roi_categories <- rc
   message("Loaded roi_categories from: ", args$roi_categories,
           " (", length(config$roi_categories), " regions)")
 }
@@ -706,54 +781,82 @@ message("\n=== Global Transfer Entropy Analysis ===")
 global_df <- compute_global_te(edges)
 message("  Global TE computed: ", nrow(global_df), " subject x band rows")
 
+spec <- tryCatch(parse_design_spec(config), error = function(e) NULL)
+
 if (!figures_only) {
-  global_ttest_df <- run_global_ttests(global_df, config$contrasts, config$bands)
-  if (nrow(global_ttest_df) > 0) {
-    message("\n  === Global T-Test Results ===")
-    for (i in seq_len(nrow(global_ttest_df))) {
-      row <- global_ttest_df[i, ]
+  if (is.null(spec) || length(spec$hypotheses) == 0)
+    stop("No design:/hypotheses: declared in config — nothing to test.")
+
+  # ===========================================================================
+  # 1. Global TE: between-group contrast on per-subject mean TE.
+  # Mean TE collapses the spatial (edge) axis to one value per subject, so the
+  # hypothesis layer has a single cell — handled by the directed-edge adapter
+  # with one synthetic (global) edge (lm(mean_te ~ group), no spatial term).
+  # ===========================================================================
+  message("\n=== Global TE (hypothesis layer) ===")
+  global_edges <- global_df
+  global_edges$source_roi <- "(global)"; global_edges$target_roi <- "(global)"
+  hyp_global <- run_directed_edges(global_edges, names(spec$hypotheses), spec,
+                                   dv_col = "mean_te", band_col = "band")
+  if (!is.null(args$hypothesis) && nrow(hyp_global) > 0)
+    hyp_global <- hyp_global[hyp_global$hypothesis %in%
+                             trimws(strsplit(args$hypothesis, ",")[[1]]), , drop = FALSE]
+  if (nrow(hyp_global) > 0) {
+    hyp_global <- .add_legacy_aliases(hyp_global)
+    write_csv(hyp_global, file.path(tbl_dir, "roi_transfer_entropy_global_hypotheses.csv"))
+    message("  Saved: roi_transfer_entropy_global_hypotheses.csv (", nrow(hyp_global), " rows)")
+    for (i in seq_len(nrow(hyp_global))) {
+      row <- hyp_global[i, ]
       sig_str <- if (isTRUE(row$significant)) " ***" else ""
-      message(sprintf("  %s | %s: t=%.2f, q=%.4f%s",
-                      row$contrast, row$band,
-                      ifelse(is.na(row$t_stat), 0, row$t_stat),
+      message(sprintf("  %s | %s | %s: stat=%.2f, q=%.4f%s", row$hypothesis, row$kind,
+                      row$band, ifelse(is.na(row$stat), 0, row$stat),
                       ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
     }
   }
 
   # ===========================================================================
-  # 2. Directional analysis
+  # 2. Directed-edge analysis: mass-univariate per ordered source->target edge
+  # (the directed-edge adapter). One model per band x edge, reused across
+  # hypotheses; FDR per hypothesis across the edge family (declarative scope).
   # ===========================================================================
-  message("\n=== Directional Analysis (Net TE) ===")
+  message("\n=== Directed-Edge TE (hypothesis layer, mass-univariate) ===")
+  hyp_edges <- write_module_directed_edges(
+    edges, config, tbl_dir, prefix = "roi_transfer_entropy",
+    dv_cols = "te", source_col = "source_roi", target_col = "target_roi",
+    band_col = "band", hypothesis = args$hypothesis)
+  if (is.null(hyp_edges)) hyp_edges <- data.frame()
 
-  directional_df <- run_directional_ttests(edges, config$contrasts, config$bands)
-  if (nrow(directional_df) > 0) {
-    for (i in seq_len(nrow(directional_df))) {
-      row <- directional_df[i, ]
-      sig_str <- if (isTRUE(row$significant)) " ***" else ""
-      message(sprintf("  %s | %s | %s: mean_net=%.5f, t=%.2f, q=%.4f%s",
-                      row$contrast, row$group, row$band,
-                      row$mean_net_te,
-                      ifelse(is.na(row$t_stat), 0, row$t_stat),
-                      ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
-    }
-  }
+  # Rebuild the contrasts list from the hypothesis rows so the diagnostic
+  # region-pair omnibus keeps iterating contrasts (config$contrasts is NULL).
+  te_contrasts <- .contrasts_from_hyp(if (nrow(hyp_global) > 0) hyp_global else hyp_edges)
 
   # ===========================================================================
-  # 3. Region-pair LMM
+  # 3. Region-pair: emmeans-tabular over directed region pairs (group*region_pair).
   # ===========================================================================
+  hyp_region <- data.frame()
   omnibus_df <- data.frame()
   posthoc_df <- data.frame()
 
   if (length(config$roi_categories) > 0 && has_lme4) {
-    message("\n=== Region-Pair TE Analysis ===")
-
+    message("\n=== Region-Pair TE (hypothesis layer) ===")
     region_pair_df <- aggregate_edges_to_region_pairs(edges, config$roi_categories)
     n_region_pairs <- length(unique(region_pair_df$region_pair))
     message("  Aggregated to ", n_region_pairs, " directed region pairs")
 
-    omnibus_df <- run_omnibus_lmm(region_pair_df, config$contrasts, config$bands)
+    hyp_region <- write_module_hypotheses(
+      region_pair_df, config, tbl_dir, prefix = "roi_transfer_entropy_region",
+      dv_cols = "te", spatial_col = "region_pair", band_col = "band",
+      hypothesis = args$hypothesis)
+    if (is.null(hyp_region)) hyp_region <- data.frame()
 
+    posthoc_df <- .te_contrast_rows(hyp_region)
+    if (nrow(posthoc_df) > 0) posthoc_df$region_pair <- posthoc_df$spatial
+
+    # Diagnostic omnibus LMM (group x region_pair interaction-F) — NOT a
+    # hypothesis; provides the interaction the marginal hypothesis layer lacks.
+    omnibus_df <- run_omnibus_lmm(region_pair_df, te_contrasts, config$bands)
     if (nrow(omnibus_df) > 0) {
+      message("\n  === Region-Pair Omnibus (diagnostic) ===")
       for (i in seq_len(nrow(omnibus_df))) {
         row <- omnibus_df[i, ]
         grp_sig <- if (isTRUE(row$group_significant)) " ***" else ""
@@ -763,10 +866,9 @@ if (!figures_only) {
                         row$group_F, row$group_q, grp_sig,
                         row$interaction_F, row$interaction_q, int_sig))
       }
+      write_csv(omnibus_df, file.path(tbl_dir, "roi_transfer_entropy_omnibus_lmm.csv"))
+      message("  Saved: roi_transfer_entropy_omnibus_lmm.csv (diagnostic)")
     }
-
-    posthoc_df <- run_posthoc_emmeans(region_pair_df, config$contrasts,
-                                       config$bands, omnibus_df)
     if (nrow(posthoc_df) > 0) {
       sig_count <- sum(posthoc_df$significant, na.rm = TRUE)
       message("  ", nrow(posthoc_df), " region-pair contrasts, ", sig_count, " significant")
@@ -776,34 +878,16 @@ if (!figures_only) {
   } else {
     message("\n  lme4/lmerTest not available -- skipping region-pair LMM analysis")
   }
-
-  # ===========================================================================
-  # Export tables
-  # ===========================================================================
-  message("\nExporting tables...")
-
-  if (nrow(global_ttest_df) > 0) {
-    write_csv(global_ttest_df, file.path(tbl_dir, "roi_transfer_entropy_global_ttest.csv"))
-    message("  Saved: tables/roi_transfer_entropy_global_ttest.csv")
-  }
-  if (nrow(directional_df) > 0) {
-    write_csv(directional_df, file.path(tbl_dir, "roi_transfer_entropy_directional_ttest.csv"))
-    message("  Saved: tables/roi_transfer_entropy_directional_ttest.csv")
-  }
-  if (nrow(omnibus_df) > 0) {
-    write_csv(omnibus_df, file.path(tbl_dir, "roi_transfer_entropy_omnibus_lmm.csv"))
-    message("  Saved: tables/roi_transfer_entropy_omnibus_lmm.csv")
-  }
-  if (nrow(posthoc_df) > 0) {
-    write_csv(posthoc_df, file.path(tbl_dir, "roi_transfer_entropy_posthoc.csv"))
-    message("  Saved: tables/roi_transfer_entropy_posthoc.csv")
-  }
 } else {
-  message("Figures-only mode: loading existing tables...")
-  global_ttest_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_transfer_entropy_global_ttest.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  directional_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_transfer_entropy_directional_ttest.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  omnibus_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_transfer_entropy_omnibus_lmm.csv"), show_col_types = FALSE), error = function(e) data.frame())
-  posthoc_df <- tryCatch(read_csv(file.path(tbl_dir, "roi_transfer_entropy_posthoc.csv"), show_col_types = FALSE), error = function(e) data.frame())
+  message("Figures-only mode: loading existing hypothesis tables...")
+  rd <- function(f) tryCatch(read_csv(file.path(tbl_dir, f), show_col_types = FALSE),
+                             error = function(e) data.frame())
+  hyp_global <- rd("roi_transfer_entropy_global_hypotheses.csv")
+  hyp_edges  <- rd("roi_transfer_entropy_directed_edges_hypotheses.csv")
+  hyp_region <- rd("roi_transfer_entropy_region_hypotheses.csv")
+  omnibus_df <- rd("roi_transfer_entropy_omnibus_lmm.csv")
+  posthoc_df <- .te_contrast_rows(hyp_region)
+  if (nrow(posthoc_df) > 0) posthoc_df$region_pair <- posthoc_df$spatial
 }
 
 # ===========================================================================
@@ -826,7 +910,7 @@ if (!figures_only) {
   sfreq <- if (!is.null(config$sfreq)) config$sfreq else 500
 
   write_te_summary(
-    global_df, global_ttest_df, directional_df,
+    global_df, hyp_global, hyp_edges,
     omnibus_df, posthoc_df,
     config, n_subjects, sfreq,
     fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md")
