@@ -301,7 +301,6 @@ class StudyConfig:
     groups: dict[str, str]
     group_order: list[str]
     group_colors: dict[str, str]
-    contrasts: list[Contrast]
     bands: dict[str, tuple[float, float]]
     roi_categories: dict[str, list[str]]
     discovery: dict[str, Any]
@@ -386,10 +385,7 @@ class StudyConfig:
             "data_subdir": "pipeline/data",
         }
 
-        contrasts = [Contrast.from_dict(c) for c in data.get("contrasts", [])]
         design_spec = DesignSpec.from_dict(data)
-        if not contrasts and design_spec is not None:
-            contrasts = _contrasts_from_design_spec(design_spec)
 
         bands = {
             name: tuple(limits) for name, limits in data.get("bands", {}).items()
@@ -423,7 +419,6 @@ class StudyConfig:
             groups=data.get("groups", {}),
             group_order=data.get("group_order", list(data.get("groups", {}).keys())),
             group_colors=data.get("group_colors", {}),
-            contrasts=contrasts,
             bands=bands,
             roi_categories=roi_categories,
             discovery=discovery,
@@ -470,10 +465,7 @@ class StudyConfig:
         if "root_dir" not in discovery:
             discovery["root_dir"] = str(config_dir.parent / "derivatives")
 
-        contrasts = [Contrast.from_dict(c) for c in data.get("contrasts", [])]
         design_spec = DesignSpec.from_dict(data)
-        if not contrasts and design_spec is not None:
-            contrasts = _contrasts_from_design_spec(design_spec)
 
         bands = {
             name: tuple(limits) for name, limits in data.get("bands", {}).items()
@@ -506,7 +498,6 @@ class StudyConfig:
             groups=data.get("groups", {}),
             group_order=data.get("group_order", list(data.get("groups", {}).keys())),
             group_colors=data.get("group_colors", {}),
-            contrasts=contrasts,
             bands=bands,
             roi_categories=data.get("roi_categories", {}),
             discovery=discovery,
@@ -573,7 +564,6 @@ class StudyConfig:
             groups=self.groups,
             group_order=self.group_order,
             group_colors=self.group_colors,
-            contrasts=self.contrasts,
             bands=self.bands,
             roi_categories=self.roi_categories,
             discovery=discovery,
@@ -668,7 +658,6 @@ class StudyConfig:
             groups=self.groups,
             group_order=self.group_order,
             group_colors=self.group_colors,
-            contrasts=self.contrasts,
             bands=self.bands,
             roi_categories=self.roi_categories,
             discovery=discovery,
@@ -680,6 +669,18 @@ class StudyConfig:
             design_spec=self.design_spec,
             raw=raw,
         )
+
+    @property
+    def contrasts(self) -> list[Contrast]:
+        """Pairwise contrasts derived on demand from the design spec.
+
+        Replaces the former stored ``contrasts`` field (the legacy bridge). The
+        single source of truth is ``design_spec`` — a legacy ``contrasts:`` block is
+        lifted into it by :meth:`DesignSpec.from_dict`, so this covers both modern and
+        unmigrated configs. Returns the pairwise contrast/equivalence set via
+        :func:`_contrasts_from_design_spec`.
+        """
+        return _contrasts_from_design_spec(self.design_spec) if self.design_spec else []
 
     def referenced_groups(self) -> set[str]:
         """Every group named by a contrast or hypothesis (for subject discovery).
