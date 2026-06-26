@@ -70,6 +70,31 @@ tbl_dir <- if (!is.null(opts[["tbl-dir"]])) opts[["tbl-dir"]] else file.path(out
 dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(tbl_dir, showWarnings = FALSE, recursive = TRUE)
 
+# =============================================================================
+# RETIRED (design-spec migration, 2026-06). vertex_spatial fit a per-contrast
+# GLS spatial-covariance model (corExp + nugget) as a robustness check on the
+# vertex group difference, iterating `config$contrasts`. The contrasts:/
+# hypothesis_testing: blocks were replaced by the declarative design:/hypotheses:
+# spec, so `config$contrasts` is now NULL and this module has no contrasts to fit.
+# It is retired rather than migrated: spatially-resolved vertex inference is
+# delivered by vertex_cluster (cluster-based permutation glass-brain maps) and
+# vertex_nbs (network-based statistic); the spatial-covariance robustness table
+# was never a manuscript result. We emit empty result/residual frames + a note so
+# downstream consumers find a well-formed (empty) output, then exit cleanly.
+.retire_note <- paste0(
+  "vertex_spatial is RETIRED (design-spec migration). The per-contrast GLS ",
+  "spatial-covariance robustness model iterated config$contrasts, which the ",
+  "declarative design:/hypotheses: spec no longer populates. Spatially-resolved ",
+  "vertex inference is provided by vertex_cluster (cluster-permutation glass-brain ",
+  "maps) and vertex_nbs (network-based statistic).")
+write.csv(data.frame(), file.path(tbl_dir, "vertex_spatial_results.csv"), row.names = FALSE)
+write.csv(data.frame(), file.path(tbl_dir, "vertex_spatial_residuals.csv"), row.names = FALSE)
+writeLines(c("# Vertex Spatial Analysis — RETIRED", "", .retire_note),
+           file.path(output_dir, "ANALYSIS_SUMMARY.md"))
+cat("\n", .retire_note, "\n", sep = "")
+quit(status = 0)
+
+# ---- Dead code below (pre-retirement GLS machinery; left for reference) ------
 model_results <- list()
 all_residuals <- data.frame()
 result_idx <- 0
