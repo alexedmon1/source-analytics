@@ -253,6 +253,47 @@ class _ROINetworkBase(NetworkAnalysisBase):
         stats_df.to_csv(self.tbl_dir / f"{self.name}_stats.csv", index=False)
         logger.info("Exported %s_stats.csv (%d rows)", self.name, len(stats_df))
 
+        self._write_graph_hypotheses()
+
+    def _write_graph_hypotheses(self) -> None:
+        """Additive declarative-hypothesis CSV (the nodal tabular contract).
+
+        Per-ROI between-subjects contrast for every declared hypothesis, faceted by
+        connectivity × graph metric, with declarative FDR. Written alongside the
+        legacy ``_stats.csv``; consumes the same in-memory per-subject nodal metrics.
+        """
+        spec = self.config.design_spec
+        if spec is None or not spec.hypotheses:
+            return
+        from ..hypothesis import write_module_hypotheses_tabular
+
+        long_rows: list[dict] = []
+        for uid, group in self._subject_groups.items():
+            sd = self._subject_data.get(uid, {})
+            for band_name in self._selected_bands():
+                for metric in self._connectivity_metrics:
+                    gm = sd.get(band_name, {}).get(metric)
+                    if gm is None:
+                        continue
+                    for graph_metric in ("degree", "clustering", "betweenness"):
+                        vec = getattr(gm, graph_metric).astype(float)
+                        for ri, roi in enumerate(self._roi_labels):
+                            long_rows.append({
+                                "subject": uid, spec.factor: group,
+                                "band": band_name, "conn_metric": metric,
+                                "graph_metric": graph_metric, "roi": roi,
+                                "value": float(vec[ri]),
+                            })
+        if not long_rows:
+            return
+        wanted = self._selection.get("hypothesis")
+        write_module_hypotheses_tabular(
+            pd.DataFrame(long_rows), self.config, self.tbl_dir, prefix=self.name,
+            value_col="value", spatial_col="roi",
+            facet_cols=("conn_metric", "graph_metric"), band_col="band",
+            hypothesis=",".join(sorted(wanted)) if wanted else None,
+        )
+
     # ------------------------------------------------------ graph figures -- #
     def _graph_figures(self) -> None:
         global_csv = self.output_dir / "data" / f"{self.name}_global_metrics.csv"

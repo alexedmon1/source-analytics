@@ -252,6 +252,43 @@ class _VertexNetworkBase(NetworkAnalysisBase):
                 self.tbl_dir / f"{self.name}_stats.csv", index=False)
             logger.info("Exported %s_stats.csv (%d rows)", self.name, len(all_auc_stats))
 
+        self._write_graph_hypotheses()
+
+    def _write_graph_hypotheses(self) -> None:
+        """Additive declarative-hypothesis CSV (the scalar tabular contract).
+
+        Between-subjects contrast on the global AUC for every declared hypothesis,
+        faceted by connectivity × graph metric (no spatial unit), with declarative
+        FDR. Written alongside the legacy permutation ``_stats.csv``.
+        """
+        spec = self.config.design_spec
+        if spec is None or not spec.hypotheses:
+            return
+        from ..hypothesis import write_module_hypotheses_tabular
+
+        long_rows: list[dict] = []
+        for uid, group in self._subject_groups.items():
+            for band_name in self._selected_bands():
+                for metric in self._connectivity_metrics:
+                    aucs = self._subject_aucs.get(uid, {}).get(band_name, {}).get(metric)
+                    if not aucs:
+                        continue
+                    for graph_metric, auc in aucs.items():
+                        long_rows.append({
+                            "subject": uid, spec.factor: group, "band": band_name,
+                            "conn_metric": metric, "graph_metric": graph_metric,
+                            "value": float(auc),
+                        })
+        if not long_rows:
+            return
+        wanted = self._selection.get("hypothesis")
+        write_module_hypotheses_tabular(
+            pd.DataFrame(long_rows), self.config, self.tbl_dir, prefix=self.name,
+            value_col="value", spatial_col=None,
+            facet_cols=("conn_metric", "graph_metric"), band_col="band",
+            hypothesis=",".join(sorted(wanted)) if wanted else None,
+        )
+
     # -------------------------------------------------------- nbs figures -- #
     def _nbs_figures(self) -> None:
         if self._source_coords is None:

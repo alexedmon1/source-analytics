@@ -23,6 +23,7 @@ from .permutation import (
     run_hypothesis_permutation,
     write_module_hypotheses_perm,
 )
+from .tabular import write_module_hypotheses_tabular
 
 __all__ = [
     "DesignSpec",
@@ -31,4 +32,5 @@ __all__ = [
     "run_hypothesis_permutation",
     "write_module_hypotheses_edge",
     "write_module_hypotheses_perm",
+    "write_module_hypotheses_tabular",
 ]
