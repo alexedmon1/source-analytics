@@ -262,6 +262,12 @@ class VertexClusterAnalysis(BaseAnalysis):
         all_voxelwise = []
         all_cluster = []
 
+        # Per-contrast figure state (keyed by contrast name) so EVERY declared
+        # contrast gets its own glass brains — not just whichever ran last.
+        self._band_cluster_results = {}
+        self._feature_cluster_results = {}
+        self._contrast_labels = {}
+
         for contrast in self._pairwise_contrasts():
             group_a_uids = [
                 uid for uid, g in self._subject_groups.items()
@@ -425,10 +431,10 @@ class VertexClusterAnalysis(BaseAnalysis):
                             "p_corrected": float(cp),
                         })
 
-            # Store results for figures phase
-            self._band_cluster_results = band_cluster_results
-            self._feature_cluster_results = feature_cluster_results
-            self._contrast_labels = (label_a, label_b)
+            # Store results for figures phase, keyed by contrast.
+            self._band_cluster_results[contrast.name] = band_cluster_results
+            self._feature_cluster_results[contrast.name] = feature_cluster_results
+            self._contrast_labels[contrast.name] = (label_a, label_b)
 
         # Export CSVs
         if all_voxelwise:
@@ -524,13 +530,15 @@ class VertexClusterAnalysis(BaseAnalysis):
         self._band_cluster_results = saved.get("band_cluster_results", {})
         self._feature_cluster_results = saved.get("feature_cluster_results", {})
         self._source_coords = saved.get("source_coords")
-        # Restore contrast labels from config (pickle doesn't store them directly)
-        if self._pairwise_contrasts():
-            c = self._pairwise_contrasts()[0]
-            self._contrast_labels = (
+        # Restore contrast labels from config (pickle doesn't store them directly),
+        # keyed by contrast name to match the per-contrast results dicts.
+        self._contrast_labels = {
+            c.name: (
                 self.config.get_group_label(c.group_a),
                 self.config.get_group_label(c.group_b),
             )
+            for c in self._pairwise_contrasts()
+        }
         logger.info("Loaded vertex cluster state from %s", pkl_path)
         return True
 
@@ -547,62 +555,69 @@ class VertexClusterAnalysis(BaseAnalysis):
 
         coords = self._source_coords
         fig_dir = self.fig_dir
-        group_labels = getattr(self, "_contrast_labels", ("Group A", "Group B"))
         is_tfce = self._correction_method == "tfce"
 
-        # Band power figures
-        band_results = getattr(self, "_band_cluster_results", {})
-        for band_name, res in band_results.items():
-            safe_name = band_name.lower().replace(" ", "_")
-            plot_band_comparison(
-                coords=coords,
-                mean_a=res["mean_a"],
-                mean_b=res["mean_b"],
-                t_map=res["t_map"],
-                cluster_labels=res.get("cluster_labels"),
-                cluster_pvalues=res.get("cluster_pvalues"),
-                band_name=band_name,
-                group_labels=group_labels,
-                output_path=fig_dir / f"vertex_cluster_{safe_name}.png",
-                p_corrected=res.get("p_corrected"),
-            )
-            # TFCE score maps
-            if is_tfce and "tfce_scores" in res:
-                plot_glass_brain(
+        # Results are keyed by contrast name -> {band/feature: result}. Render a
+        # glass-brain set per contrast, with the contrast in the filename.
+        band_by_contrast = getattr(self, "_band_cluster_results", {})
+        feat_by_contrast = getattr(self, "_feature_cluster_results", {})
+        labels_by_contrast = getattr(self, "_contrast_labels", {})
+
+        for contrast_name, band_results in band_by_contrast.items():
+            safe_contrast = contrast_name.lower().replace(" ", "_")
+            group_labels = labels_by_contrast.get(contrast_name, ("Group A", "Group B"))
+            feature_results = feat_by_contrast.get(contrast_name, {})
+            logger.info("Rendering glass brains for contrast '%s'", contrast_name)
+
+            # Band power figures
+            for band_name, res in band_results.items():
+                safe_name = band_name.lower().replace(" ", "_")
+                plot_band_comparison(
                     coords=coords,
-                    values=res["tfce_scores"],
-                    title=f"TFCE Scores — {band_name}",
-                    output_path=fig_dir / f"tfce_scores_{safe_name}.png",
-                    cmap="RdBu_r",
+                    mean_a=res["mean_a"],
+                    mean_b=res["mean_b"],
+                    t_map=res["t_map"],
+                    cluster_labels=res.get("cluster_labels"),
+                    cluster_pvalues=res.get("cluster_pvalues"),
+                    band_name=band_name,
+                    group_labels=group_labels,
+                    output_path=fig_dir / f"vertex_cluster_{safe_contrast}_{safe_name}.png",
+                    p_corrected=res.get("p_corrected"),
+                )
+                # TFCE score maps
+                if is_tfce and "tfce_scores" in res:
+                    plot_glass_brain(
+                        coords=coords,
+                        values=res["tfce_scores"],
+                        title=f"TFCE Scores — {band_name}",
+                        output_path=fig_dir / f"tfce_scores_{safe_contrast}_{safe_name}.png",
+                        cmap="RdBu_r",
+                    )
+
+            # Feature figures
+            for feat_name, res in feature_results.items():
+                plot_band_comparison(
+                    coords=coords,
+                    mean_a=res["mean_a"],
+                    mean_b=res["mean_b"],
+                    t_map=res["t_map"],
+                    cluster_labels=res.get("cluster_labels"),
+                    cluster_pvalues=res.get("cluster_pvalues"),
+                    band_name=feat_name,
+                    group_labels=group_labels,
+                    output_path=fig_dir / f"vertex_cluster_{safe_contrast}_{feat_name}.png",
+                    p_corrected=res.get("p_corrected"),
                 )
 
-        # Feature figures
-        feature_results = getattr(self, "_feature_cluster_results", {})
-        for feat_name, res in feature_results.items():
-            plot_band_comparison(
-                coords=coords,
-                mean_a=res["mean_a"],
-                mean_b=res["mean_b"],
-                t_map=res["t_map"],
-                cluster_labels=res.get("cluster_labels"),
-                cluster_pvalues=res.get("cluster_pvalues"),
-                band_name=feat_name,
-                group_labels=group_labels,
-                output_path=fig_dir / f"vertex_cluster_{feat_name}.png",
-                p_corrected=res.get("p_corrected"),
-            )
-
-        # Summary figure
-        all_results = {}
-        all_results.update(band_results)
-        all_results.update(feature_results)
-        if all_results:
-            plot_vertex_cluster_summary(
-                band_results=all_results,
-                coords=coords,
-                output_path=fig_dir / "vertex_cluster_summary.png",
-                group_labels=group_labels,
-            )
+            # Summary figure
+            all_results = {**band_results, **feature_results}
+            if all_results:
+                plot_vertex_cluster_summary(
+                    band_results=all_results,
+                    coords=coords,
+                    output_path=fig_dir / f"vertex_cluster_{safe_contrast}_summary.png",
+                    group_labels=group_labels,
+                )
 
     def summary(self) -> None:
         """Call R script for formatted tables and ANALYSIS_SUMMARY.md."""
