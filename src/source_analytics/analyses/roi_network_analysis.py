@@ -389,7 +389,7 @@ class _ROINetworkBase(NetworkAnalysisBase):
                 ax.set_title(f"{gm_name.replace('_', ' ').title()} — {metric_label}")
                 ax.legend()
                 fig.tight_layout()
-                fig.savefig(fig_dir / f"{self.name}_{metric}_{gm_name}".lower() + ".png", dpi=150)
+                fig.savefig(fig_dir / (f"{self.name}_{metric}_{gm_name}".lower() + ".png"), dpi=150)
                 plt.close(fig)
 
     # --------------------------------------------------------- summaries --- #
