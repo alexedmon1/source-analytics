@@ -63,11 +63,11 @@ source(file.path(script_dir, "hypothesis.R"))
 .contrasts_from_hyp <- function(h) {
   cr <- .te_contrast_rows(h)
   if (nrow(cr) == 0 || !all(c("group_a", "group_b") %in% names(cr))) return(list())
-  uc <- unique(cr[, c("contrast", "group_a", "group_b")])
+  uc <- unique(cr[, c("hypothesis", "group_a", "group_b")])
   uc <- uc[!is.na(uc$group_a) & !is.na(uc$group_b), , drop = FALSE]
   if (nrow(uc) == 0) return(list())
   lapply(seq_len(nrow(uc)), function(i)
-    list(name = uc$contrast[i], group_a = uc$group_a[i], group_b = uc$group_b[i]))
+    list(name = uc$hypothesis[i], group_a = uc$group_a[i], group_b = uc$group_b[i]))
 }
 
 # --- Publication theme ---
@@ -557,10 +557,10 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
       add(sprintf("| %s | %s | %.5f | %.2f | %.1f | %.4f | %.2f | %s |",
                   row$label %||% row$hypothesis, row$band,
                   ifelse(is.na(row$estimate), 0, row$estimate),
-                  ifelse(is.na(row$t_ratio), 0, row$t_ratio),
+                  ifelse(is.na(row$stat), 0, row$stat),
                   ifelse(is.na(row$df), 0, row$df),
                   ifelse(is.na(row$q_value), 1, row$q_value),
-                  ifelse(is.na(row$hedges_g), 0, row$hedges_g),
+                  ifelse(is.na(row$effect_size), 0, row$effect_size),
                   sig_str))
     }
     add("")
@@ -591,9 +591,9 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
         add(sprintf("| %s | %s | %s \u2192 %s | %.5f | %.2f | %.4f | %.2f |",
                     row$label %||% row$hypothesis, row$band, row$source, row$target,
                     ifelse(is.na(row$estimate), 0, row$estimate),
-                    ifelse(is.na(row$t_ratio), 0, row$t_ratio),
+                    ifelse(is.na(row$stat), 0, row$stat),
                     ifelse(is.na(row$q_value), 1, row$q_value),
-                    ifelse(is.na(row$hedges_g), 0, row$hedges_g)))
+                    ifelse(is.na(row$effect_size), 0, row$effect_size)))
       }
       add("")
     } else {
@@ -636,7 +636,7 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
           row <- sig_ph[i, ]
           add(sprintf("| %s | %s | %.5f | %.5f | %.2f | %.4f | %.2f |",
                       row$band, row$region_pair, row$estimate, row$SE,
-                      row$t_ratio, row$q_value, row$hedges_g))
+                      row$stat, row$q_value, row$effect_size))
         }
         add("")
       } else {
@@ -662,7 +662,7 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
       for (i in seq_len(nrow(sig_global))) {
         row <- sig_global[i, ]
         add(sprintf("- **%s TE** [%s, global]: t=%.2f, q=%.4f, g=%.2f",
-                    row$band, row$label %||% row$hypothesis, row$t_ratio, row$q_value, row$hedges_g))
+                    row$band, row$label %||% row$hypothesis, row$stat, row$q_value, row$effect_size))
       }
     }
   }
@@ -678,7 +678,7 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
         row <- sig_edge[i, ]
         add(sprintf("- **%s → %s** [%s, %s, directed edge]: estimate=%.5f, t=%.2f, q=%.4f",
                     row$source, row$target, row$band, row$label %||% row$hypothesis,
-                    row$estimate, row$t_ratio, row$q_value))
+                    row$estimate, row$stat, row$q_value))
       }
       if (nrow(sig_edge) > n_show)
         add(sprintf("- ...and %d more significant directed edges.", nrow(sig_edge) - n_show))
