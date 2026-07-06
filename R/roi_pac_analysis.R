@@ -66,11 +66,11 @@ source(file.path(script_dir, "hypothesis.R"))
 .contrasts_from_hyp <- function(h) {
   cr <- .pac_contrast_rows(h)
   if (nrow(cr) == 0 || !all(c("group_a", "group_b") %in% names(cr))) return(list())
-  uc <- unique(cr[, c("contrast", "group_a", "group_b")])
+  uc <- unique(cr[, c("hypothesis", "group_a", "group_b")])
   uc <- uc[!is.na(uc$group_a) & !is.na(uc$group_b), , drop = FALSE]
   if (nrow(uc) == 0) return(list())
   lapply(seq_len(nrow(uc)), function(i)
-    list(name = uc$contrast[i], group_a = uc$group_a[i], group_b = uc$group_b[i]))
+    list(name = uc$hypothesis[i], group_a = uc$group_a[i], group_b = uc$group_b[i]))
 }
 
 # Define sig_stars locally if not sourced
@@ -571,27 +571,27 @@ plot_pac_significance_heatmap <- function(posthoc_df, output_dir) {
     return(invisible(NULL))
   }
 
-  for (cname in unique(posthoc_df$contrast)) {
+  for (cname in unique(posthoc_df$hypothesis)) {
     pdata <- posthoc_df %>%
-      filter(contrast == cname) %>%
+      filter(hypothesis == cname) %>%
       mutate(
         sig_label = ifelse(significant, "*", ""),
-        region = fct_reorder(region, hedges_g, .fun = function(x) mean(abs(x), na.rm = TRUE))
+        region = fct_reorder(region, effect_size, .fun = function(x) mean(abs(x), na.rm = TRUE))
       )
 
     if (nrow(pdata) == 0) next
 
     # Symmetric color scale centered at 0
-    max_abs_g <- max(abs(pdata$hedges_g), na.rm = TRUE)
+    max_abs_g <- max(abs(pdata$effect_size), na.rm = TRUE)
     clim <- ceiling(max_abs_g * 10) / 10
 
     n_regions <- length(unique(pdata$region))
     n_pairs <- length(unique(pdata$freq_pair))
 
-    p <- ggplot(pdata, aes(x = freq_pair, y = region, fill = hedges_g)) +
+    p <- ggplot(pdata, aes(x = freq_pair, y = region, fill = effect_size)) +
       geom_tile(color = "white", linewidth = 0.5) +
       geom_text(aes(label = sig_label), size = 5, color = "black", fontface = "bold") +
-      geom_text(aes(label = sprintf("%.2f", hedges_g)), size = 3, vjust = -0.5) +
+      geom_text(aes(label = sprintf("%.2f", effect_size)), size = 3, vjust = -0.5) +
       scale_fill_gradient2(
         low = "#1B7837", mid = "white", high = "#762A83",
         midpoint = 0, limits = c(-clim, clim),
@@ -700,13 +700,13 @@ write_pac_summary <- function(global_df, global_ttest_df,
       row <- global_ttest_df[i, ]
       sig_str <- if (isTRUE(row$significant)) "**Yes**" else "No"
       add(sprintf("| %s | %s | %.3f | %.2f | %.1f | %.4f | %.4f | %.2f | %s |",
-                  row$contrast, row$freq_pair,
+                  row$hypothesis, row$freq_pair,
                   ifelse(is.na(row$estimate), 0, row$estimate),
-                  ifelse(is.na(row$t_ratio), 0, row$t_ratio),
+                  ifelse(is.na(row$stat), 0, row$stat),
                   ifelse(is.na(row$df), 0, row$df),
                   ifelse(is.na(row$p_value), 1, row$p_value),
                   ifelse(is.na(row$q_value), 1, row$q_value),
-                  ifelse(is.na(row$hedges_g), 0, row$hedges_g),
+                  ifelse(is.na(row$effect_size), 0, row$effect_size),
                   sig_str))
     }
     add("")
@@ -752,8 +752,8 @@ write_pac_summary <- function(global_df, global_ttest_df,
           for (i in seq_len(nrow(fp_sig))) {
             row <- fp_sig[i, ]
             add(sprintf("| %s | %.3f | %.3f | %.2f | %.4f | %.2f |",
-                        row$region, row$estimate, row$SE, row$t_ratio,
-                        row$q_value, row$hedges_g))
+                        row$region, row$estimate, row$SE, row$stat,
+                        row$q_value, row$effect_size))
           }
           add("")
         }
@@ -782,8 +782,8 @@ write_pac_summary <- function(global_df, global_ttest_df,
       for (i in seq_len(nrow(sig_global))) {
         row <- sig_global[i, ]
         add(sprintf("- **%s** [%s, global]: t=%.2f, q=%.4f, g=%.2f (estimate=%.3f)",
-                    row$freq_pair, row$contrast,
-                    row$t_ratio, row$q_value, row$hedges_g, row$estimate))
+                    row$freq_pair, row$hypothesis,
+                    row$stat, row$q_value, row$effect_size, row$estimate))
       }
     }
   }
@@ -919,8 +919,8 @@ if (!figures_only) {
       row <- global_ttest_df[i, ]
       sig_str <- if (isTRUE(row$significant)) " ***" else ""
       message(sprintf("  %s | %s: t=%.2f, q=%.4f%s",
-                      row$contrast, row$freq_pair,
-                      ifelse(is.na(row$t_ratio), 0, row$t_ratio),
+                      row$hypothesis, row$freq_pair,
+                      ifelse(is.na(row$stat), 0, row$stat),
                       ifelse(is.na(row$q_value), 1, row$q_value), sig_str))
     }
   }

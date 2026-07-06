@@ -40,19 +40,32 @@ format_omnibus_table <- function(df) {
 #' @param sig_df data.frame of significant post-hoc results
 #' @param spatial_col character — "roi" or "region"
 #' @return character vector of markdown lines
-format_posthoc_section <- function(sig_df, spatial_col = "roi") {
+#' Fill native hypothesis-schema columns from legacy aliases where missing, so a
+#' reader can use the native names regardless of the frame's origin. Hyp-derived
+#' frames already carry the native columns (no-op); own-schema diagnostic frames
+#' (e.g. the region-nested post-hoc) carry only the legacy names and get filled.
+.native_posthoc <- function(df) {
+  if (!"dv" %in% names(df) && "power_type" %in% names(df)) df$dv <- df$power_type
+  if (!"stat" %in% names(df) && "t_ratio" %in% names(df)) df$stat <- df$t_ratio
+  if (!"effect_size" %in% names(df) && "hedges_g" %in% names(df)) df$effect_size <- df$hedges_g
+  if (!"spatial" %in% names(df) && "roi" %in% names(df)) df$spatial <- df$roi
+  df
+}
+
+format_posthoc_section <- function(sig_df, spatial_col = "spatial") {
   lines <- character()
   add <- function(...) lines <<- c(lines, paste0(...))
 
-  label <- if (spatial_col == "roi") "ROI" else "Region"
+  sig_df <- .native_posthoc(sig_df)
+  label <- if (spatial_col == "region") "Region" else "ROI"
 
   if (nrow(sig_df) > 0) {
     add("Significant ", tolower(label), "-level group differences (Holm-corrected q < 0.05):")
     add("")
 
-    for (pt in unique(sig_df$power_type)) {
-      for (bname in unique(sig_df$band[sig_df$power_type == pt])) {
-        band_sig <- sig_df %>% filter(power_type == pt, band == bname)
+    for (pt in unique(sig_df$dv)) {
+      for (bname in unique(sig_df$band[sig_df$dv == pt])) {
+        band_sig <- sig_df %>% filter(dv == pt, band == bname)
         add("#### ", bname, " (", pt, ")")
         add("")
         add("| ", label, " | Estimate | SE | t | q | Hedges' g |")
@@ -60,8 +73,8 @@ format_posthoc_section <- function(sig_df, spatial_col = "roi") {
         for (i in seq_len(nrow(band_sig))) {
           row <- band_sig[i, ]
           add(sprintf("| %s | %.4f | %.4f | %.2f | %.4f | %.2f |",
-                      row[[spatial_col]], row$estimate, row$SE, row$t_ratio,
-                      row$q_value, row$hedges_g))
+                      row[[spatial_col]], row$estimate, row$SE, row$stat,
+                      row$q_value, row$effect_size))
         }
         add("")
       }
@@ -220,8 +233,8 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
   add("")
   if (nrow(posthoc_df) > 0) {
     sig_posthoc <- posthoc_df %>% filter(significant == TRUE)
-    add_lines(format_posthoc_section(sig_posthoc, "roi"))
-    add("**Total ROIs tested:** ", length(unique(posthoc_df$roi)),
+    add_lines(format_posthoc_section(sig_posthoc, "spatial"))
+    add("**Total ROIs tested:** ", length(unique(posthoc_df$spatial)),
         " across ", length(unique(posthoc_df$band)), " band(s)")
     add("")
     add("**Significant ROIs:** ", nrow(sig_posthoc))
@@ -253,10 +266,10 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
                     paste(findings, collapse = "; ")))
         if (nrow(posthoc_region_df) > 0) {
           band_regions <- posthoc_region_df %>%
-            filter(contrast == row$contrast, band == row$band,
-                   power_type == row$power_type, significant == TRUE)
+            filter(hypothesis == row$contrast, band == row$band,
+                   dv == row$power_type, significant == TRUE)
           if (nrow(band_regions) > 0) {
-            reg_strs <- sprintf("%s (g=%.2f)", band_regions$region, band_regions$hedges_g)
+            reg_strs <- sprintf("%s (g=%.2f)", band_regions$region, band_regions$effect_size)
             add("  - Significant regions: ", paste(reg_strs, collapse = ", "))
           }
         }
@@ -303,10 +316,10 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
                     paste(findings, collapse = "; ")))
         if (nrow(posthoc_df) > 0) {
           band_rois <- posthoc_df %>%
-            filter(contrast == row$contrast, band == row$band,
-                   power_type == row$power_type, significant == TRUE)
+            filter(hypothesis == row$contrast, band == row$band,
+                   dv == row$power_type, significant == TRUE)
           if (nrow(band_rois) > 0) {
-            roi_strs <- sprintf("%s (g=%.2f)", band_rois$roi, band_rois$hedges_g)
+            roi_strs <- sprintf("%s (g=%.2f)", band_rois$spatial, band_rois$effect_size)
             add("  - Significant ROIs: ", paste(roi_strs, collapse = ", "))
           }
         }

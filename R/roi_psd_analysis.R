@@ -300,12 +300,12 @@ if (length(config$roi_categories) > 0) {
   if (nrow(region_ph) > 0) {
     sig_bands <- region_ph %>%
       filter(significant == TRUE) %>%
-      distinct(band, power_type, contrast)
+      distinct(band, dv, hypothesis)
 
     for (i in seq_len(nrow(sig_bands))) {
       b <- sig_bands$band[i]
-      pt <- sig_bands$power_type[i]
-      ctr <- sig_bands$contrast[i]
+      pt <- sig_bands$dv[i]
+      ctr <- sig_bands$hypothesis[i]
       message("  Plotting band-by-region: ", b, " (", pt, ", ", ctr, ")")
       plot_band_by_region(band_df, config$roi_categories, group_colors,
                           group_labels, group_order, fig_dir,

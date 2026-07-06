@@ -652,27 +652,27 @@ plot_aperiodic_significance_heatmap <- function(posthoc_df, output_dir) {
     return(invisible(NULL))
   }
 
-  for (cname in unique(posthoc_df$contrast)) {
+  for (cname in unique(posthoc_df$hypothesis)) {
     pdata <- posthoc_df %>%
-      filter(contrast == cname) %>%
+      filter(hypothesis == cname) %>%
       mutate(
         sig_label = ifelse(significant, "*", ""),
-        roi = fct_reorder(roi, hedges_g, .fun = function(x) mean(abs(x), na.rm = TRUE)),
+        roi = fct_reorder(spatial, effect_size, .fun = function(x) mean(abs(x), na.rm = TRUE)),
         dv_label = dplyr::recode(dv, exponent = "Exponent", offset = "Offset")
       )
 
     if (nrow(pdata) == 0) next
 
     # Symmetric color scale centered at 0
-    max_abs_g <- max(abs(pdata$hedges_g), na.rm = TRUE)
+    max_abs_g <- max(abs(pdata$effect_size), na.rm = TRUE)
     clim <- ceiling(max_abs_g * 10) / 10
 
     n_rois <- length(unique(pdata$roi))
 
-    p <- ggplot(pdata, aes(x = dv_label, y = roi, fill = hedges_g)) +
+    p <- ggplot(pdata, aes(x = dv_label, y = roi, fill = effect_size)) +
       geom_tile(color = "white", linewidth = 0.5) +
       geom_text(aes(label = sig_label), size = 5, color = "black", fontface = "bold") +
-      geom_text(aes(label = sprintf("%.2f", hedges_g)), size = 3, vjust = -0.5) +
+      geom_text(aes(label = sprintf("%.2f", effect_size)), size = 3, vjust = -0.5) +
       scale_fill_gradient2(
         low = "#4D9221", mid = "white", high = "#C51B7D",
         midpoint = 0, limits = c(-clim, clim),
@@ -790,8 +790,8 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
         for (i in seq_len(nrow(sig_region))) {
           row <- sig_region[i, ]
           add(sprintf("| %s | %s | %.4f | %.4f | %.2f | %.4f | %.2f |",
-                      row$dv, row$region, row$estimate, row$SE, row$t_ratio,
-                      row$q_value, row$hedges_g))
+                      row$dv, row$region, row$estimate, row$SE, row$stat,
+                      row$q_value, row$effect_size))
         }
         add("")
       } else {
@@ -844,8 +844,8 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
         for (i in seq_len(nrow(dv_sig))) {
           row <- dv_sig[i, ]
           add(sprintf("| %s | %.4f | %.4f | %.2f | %.4f | %.2f |",
-                      row$roi, row$estimate, row$SE, row$t_ratio,
-                      row$q_value, row$hedges_g))
+                      row$spatial, row$estimate, row$SE, row$stat,
+                      row$q_value, row$effect_size))
         }
         add("")
       }
@@ -853,7 +853,7 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
       add("No individual ROIs reached significance after Holm correction.")
       add("")
     }
-    add("**Total ROIs tested:** ", length(unique(posthoc_df$roi)))
+    add("**Total ROIs tested:** ", length(unique(posthoc_df$spatial)))
     add("")
     add("**Significant ROIs:** ", nrow(sig_posthoc))
     add("")

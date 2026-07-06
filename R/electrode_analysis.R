@@ -236,12 +236,12 @@ for (ptype in c("relative", "absolute")) {
 
 # Channel-level forest plots (post-hoc)
 if (nrow(posthoc_df) > 0) {
-  for (ptype in unique(posthoc_df$power_type)) {
-    for (cname in unique(posthoc_df$contrast)) {
+  for (ptype in unique(posthoc_df$dv)) {
+    for (cname in unique(posthoc_df$hypothesis)) {
       pdata <- posthoc_df %>%
-        dplyr::filter(contrast == cname, power_type == ptype) %>%
+        dplyr::filter(hypothesis == cname, dv == ptype) %>%
         dplyr::mutate(
-          roi = forcats::fct_reorder(roi, estimate),
+          roi = forcats::fct_reorder(spatial, estimate),
           sig_label = ifelse(significant, "*", "")
         )
 

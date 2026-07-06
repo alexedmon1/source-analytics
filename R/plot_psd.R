@@ -286,27 +286,27 @@ plot_significance_heatmap <- function(posthoc_df, output_dir) {
     return(invisible(NULL))
   }
 
-  power_types <- unique(posthoc_df$power_type)
+  power_types <- unique(posthoc_df$dv)
   if (length(power_types) == 0) power_types <- "relative"
 
   for (ptype in power_types) {
-    for (cname in unique(posthoc_df$contrast)) {
+    for (cname in unique(posthoc_df$hypothesis)) {
       pdata <- posthoc_df %>%
-        filter(contrast == cname, power_type == ptype) %>%
+        filter(hypothesis == cname, dv == ptype) %>%
         mutate(
           sig_label = ifelse(significant, "*", ""),
-          roi = fct_reorder(roi, hedges_g, .fun = function(x) mean(abs(x), na.rm = TRUE))
+          roi = fct_reorder(spatial, effect_size, .fun = function(x) mean(abs(x), na.rm = TRUE))
         )
 
       if (nrow(pdata) == 0) next
 
       # Symmetric color scale centered at 0
-      max_abs_g <- max(abs(pdata$hedges_g), na.rm = TRUE)
+      max_abs_g <- max(abs(pdata$effect_size), na.rm = TRUE)
       clim <- ceiling(max_abs_g * 10) / 10  # Round up to nearest 0.1
 
       n_rois <- length(unique(pdata$roi))
 
-      p <- ggplot(pdata, aes(x = band, y = roi, fill = hedges_g)) +
+      p <- ggplot(pdata, aes(x = band, y = roi, fill = effect_size)) +
         geom_tile(color = "white", linewidth = 0.5) +
         geom_text(aes(label = sig_label), size = 7, color = "black", fontface = "bold") +
         scale_fill_gradient2(
@@ -343,27 +343,27 @@ plot_region_significance_heatmap <- function(posthoc_region_df, output_dir) {
     return(invisible(NULL))
   }
 
-  power_types <- unique(posthoc_region_df$power_type)
+  power_types <- unique(posthoc_region_df$dv)
   if (length(power_types) == 0) power_types <- "relative"
 
   for (ptype in power_types) {
-    for (cname in unique(posthoc_region_df$contrast)) {
+    for (cname in unique(posthoc_region_df$hypothesis)) {
       pdata <- posthoc_region_df %>%
-        filter(contrast == cname, power_type == ptype) %>%
+        filter(hypothesis == cname, dv == ptype) %>%
         mutate(
           sig_label = ifelse(significant, "*", ""),
-          region = fct_reorder(region, hedges_g, .fun = function(x) mean(abs(x), na.rm = TRUE))
+          region = fct_reorder(region, effect_size, .fun = function(x) mean(abs(x), na.rm = TRUE))
         )
 
       if (nrow(pdata) == 0) next
 
-      max_abs_g <- max(abs(pdata$hedges_g), na.rm = TRUE)
+      max_abs_g <- max(abs(pdata$effect_size), na.rm = TRUE)
       clim <- ceiling(max_abs_g * 10) / 10
 
-      p <- ggplot(pdata, aes(x = band, y = region, fill = hedges_g)) +
+      p <- ggplot(pdata, aes(x = band, y = region, fill = effect_size)) +
         geom_tile(color = "white", linewidth = 0.5) +
         geom_text(aes(label = sig_label), size = 7, color = "black", fontface = "bold") +
-        geom_text(aes(label = sprintf("%.2f", hedges_g)), size = 5, vjust = -0.5) +
+        geom_text(aes(label = sprintf("%.2f", effect_size)), size = 5, vjust = -0.5) +
         scale_fill_gradient2(
           low = "#2166AC", mid = "white", high = "#B2182B",
           midpoint = 0, limits = c(-clim, clim),
@@ -441,8 +441,8 @@ plot_band_by_region <- function(band_df, roi_categories, group_colors,
   # Add significance markers for specific contrast
   if (!is.null(posthoc_region_df) && nrow(posthoc_region_df) > 0 && !is.null(contrast)) {
     sig_regions <- posthoc_region_df %>%
-      filter(band == target_band, power_type == !!power_type,
-             contrast == !!contrast, significant == TRUE)
+      filter(band == target_band, dv == !!power_type,
+             hypothesis == !!contrast, significant == TRUE)
 
     if (nrow(sig_regions) > 0) {
       # Get y positions for brackets
