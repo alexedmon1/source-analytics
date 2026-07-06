@@ -302,14 +302,6 @@ def write_module_hypotheses_tabular(
         return None
 
     out = pd.DataFrame(all_rows)
-    # Legacy-schema aliases (lightbox / figure consumers read these names).
-    out["contrast"] = out["hypothesis"]
-    if "spatial" in out:
-        out["roi"] = out["spatial"]
-    out["t_ratio"] = np.where(out["stat_type"] == "t", out["stat"], np.nan)
-    out["hedges_g"] = np.where(out["effect_size_type"] == "hedges_g", out["effect_size"], np.nan)
-    out["p_fdr"] = out["q_value"]
-
     front = ["hypothesis", "kind", "role", "band", "spatial", *facet_cols]
     out = out[[c for c in front if c in out.columns]
               + [c for c in out.columns if c not in front]]

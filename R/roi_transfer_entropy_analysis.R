@@ -802,7 +802,6 @@ if (!figures_only) {
     hyp_global <- hyp_global[hyp_global$hypothesis %in%
                              trimws(strsplit(args$hypothesis, ",")[[1]]), , drop = FALSE]
   if (nrow(hyp_global) > 0) {
-    hyp_global <- .add_legacy_aliases(hyp_global)
     write_csv(hyp_global, file.path(tbl_dir, "roi_transfer_entropy_global_hypotheses.csv"))
     message("  Saved: roi_transfer_entropy_global_hypotheses.csv (", nrow(hyp_global), " rows)")
     for (i in seq_len(nrow(hyp_global))) {

@@ -94,11 +94,14 @@ def test_spatial_specificity_and_schema(tmp_path):
         facet_cols=("conn_metric", "graph_metric"), band_col="band",
     )
     assert out is not None
-    # schema + legacy aliases
+    # native hypothesis schema
     for col in ("hypothesis", "kind", "band", "spatial", "estimate", "p_value",
-                "q_value", "significant", "effect_size", "contrast", "roi",
-                "t_ratio", "hedges_g", "p_fdr", "conn_metric", "graph_metric"):
+                "q_value", "significant", "effect_size", "stat",
+                "conn_metric", "graph_metric"):
         assert col in out.columns, f"missing column {col}"
+    # legacy aliases dropped (native schema is the sole contract)
+    for col in ("contrast", "roi", "t_ratio", "hedges_g", "p_fdr", "power_type"):
+        assert col not in out.columns, f"legacy alias {col} should be dropped"
     # signal ROI A is significant for disease_effect; null ROI C is not
     de = out[out.hypothesis == "disease_effect"]
     a = de[de.spatial == "A"].iloc[0]
