@@ -107,6 +107,22 @@ Conventions: `S_xy(f)` = cross-spectral density, `S_xx` = auto-spectrum,
 
 ---
 
+## Connectivity density & source-vs-sensor comparison (`vertex_connectivity.py`, `fcd_comparison_analysis.py`)
+
+### Functional connectivity density — `fcd`
+- **Reference:** **Tomasi D, Volkow ND (2010).** "Functional connectivity density mapping." *PNAS* 107(21):9885–9890.
+- **Equation:** per node `i`, `FCD_i = k_i / (n − 1)` where `k_i = Σ_{j≠i} 𝟙[C_ij > τ]` is the thresholded degree (count of supra-threshold connections) and `n−1` normalizes by the max possible degree → `FCD ∈ [0,1]`. Directed/centered metrics (dPLI) threshold `|C_ij − c| > τ` with center `c=0.5`.
+- **Our code (`compute_fcd`):** `degree = (conn > threshold).sum(axis=1) / (n−1)`, diagonal zeroed, `threshold=0.05` (config), `FCD_CENTER={"dpli":0.5}`. ✅ **Matches** the normalized-degree definition. **Deviation:** Tomasi & Volkow use a Pearson-r threshold `≈0.6`; our `τ=0.05` is tuned to the FC-six metrics' scales (imag-coh/PLI/wPLI live near 0), an explicit study choice — see Deviations.
+- **Note:** the same kernel runs at vertex (source) and channel (sensor) resolution, giving a resolution-normalized quantity comparable across the two. Confidence: high.
+
+### FCD spatial heterogeneity + source-vs-sensor concordance — `fcd_comparison`
+- **Reference:** FCD as above (Tomasi & Volkow 2010); coefficient of variation is the standard normalized dispersion (Everitt & Skrondal, *Cambridge Dictionary of Statistics*).
+- **Equation:** per subject × band × metric × level, two summaries of the FCD map `{FCD_i}`: **global** `mean_i FCD_i`; **spatial heterogeneity** `CV = SD_i(FCD_i) / mean_i(FCD_i)` (sample SD, ddof=1). Group effect = Hedges g (bias-corrected) of each summary, per contrast, at each level; concordance = sign agreement of source vs sensor g. Cross-subject source-vs-sensor concordance = Pearson r of the summary.
+- **Our code (`fcd_comparison_analysis.py`: `_fcd_summaries`, `statistics`):** reads `electrode_fcd.csv` (sensor) + `vertex_fcd.csv` (source); ✅ matches the definitions above.
+- **Note (resolution):** absolute CV is NOT comparable across resolutions (n=30 channels vs ~n=200 vertices sample the FCD field at different granularity), so CV magnitude is reported per level, not differenced across levels. Each **group contrast is within a level**, so the source-vs-sensor comparison of the group EFFECT (g, direction) is resolution-fair — the same logic as `electrode_comparison` for spectral power. Confidence: high.
+
+---
+
 ## Deviations requiring a decision
 
 These are where our implementation does not exactly follow the cited paper. Each

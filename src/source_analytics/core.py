@@ -18,6 +18,7 @@ from .analyses.vertex_cluster_analysis import VertexClusterAnalysis
 from .analyses.electrode_analysis import ElectrodeAnalysis
 from .analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
 from .analyses.electrode_connectivity_analysis import ElectrodeConnectivityAnalysis
+from .analyses.fcd_comparison_analysis import FCDComparisonAnalysis
 from .analyses.vertex_connectivity_analysis import VertexConnectivityAnalysis
 from .analyses.vertex_specparam_analysis import VertexSpecparamAnalysis
 from .analyses.vertex_mvpa_analysis import VertexMVPAAnalysis
@@ -52,6 +53,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "electrode_aperiodic": ElectrodeAperiodicAnalysis,
     "electrode_comparison": ElectrodeComparisonAnalysis,
     "electrode_connectivity": ElectrodeConnectivityAnalysis,
+    "fcd_comparison": FCDComparisonAnalysis,
     "vertex_connectivity": VertexConnectivityAnalysis,
     "vertex_cross_freq": VertexCrossFreqAnalysis,
     "vertex_specparam": VertexSpecparamAnalysis,
@@ -134,6 +136,7 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
     "electrode_aperiodic":  {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "description": "Sensor-level aperiodic (1/f) analysis"},
     "electrode_comparison": {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "supplements": "electrode_psd",       "description": "Source vs electrode comparison"},
     "electrode_connectivity": {"category": "resting", "level": "electrode",  "domain": "Connectivity",    "description": "Sensor pairwise connectivity + FCD (source-vs-sensor comparator)"},
+    "fcd_comparison":       {"category": "resting", "level": "electrode",  "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Source vs sensor FCD comparison (mean + spatial CV)"},
     "roi_evoked":           {"category": "evoked",  "level": "roi",        "domain": "Evoked",          "description": "ITC, ERSP, STP for trial-based paradigms"},
     "vertex_evoked":        {"category": "evoked",  "level": "vertex",     "domain": "Evoked",          "description": "Vertex-level ITC, ERSP, STP (cluster-corrected) for trial-based paradigms"},
     "electrode_evoked":     {"category": "evoked",  "level": "electrode",  "domain": "Evoked",          "description": "Electrode-level ITC, ERSP, STP for trial-based paradigms"},
