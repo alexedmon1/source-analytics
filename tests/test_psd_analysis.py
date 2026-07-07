@@ -17,9 +17,9 @@ def test_psd_csv_export(sample_config_yaml):
     assert len(issues) == 0, f"Validation issues: {issues}"
 
     # Run PSD analysis (R will be called but may fail in CI — that's ok)
-    analyzer.run_analysis("psd")
+    analyzer.run_analysis("roi_psd")
 
-    psd_dir = config.output_dir / "psd"
+    psd_dir = config.output_dir / "roi_psd"
     assert psd_dir.exists()
 
     # Check Python CSV exports exist

@@ -26,8 +26,15 @@ SFREQ = 500.0
 DURATION = 10.0  # seconds
 
 
-def _make_roi_timeseries(sfreq: float, duration: float, n_rois: int = 8) -> dict[str, np.ndarray]:
-    """Generate synthetic ROI timeseries with realistic spectral content."""
+def _make_roi_timeseries(
+    sfreq: float, duration: float, n_rois: int = 8, signed: bool = False
+) -> dict[str, np.ndarray]:
+    """Generate synthetic ROI timeseries with realistic spectral content.
+
+    ``signed=True`` returns the phase-preserving signed time course (matching
+    ``step6_roi_timeseries_signed.pkl``); ``signed=False`` returns the magnitude
+    (``step6_roi_timeseries_magnitude.pkl``).
+    """
     rng = np.random.default_rng(42)
     n_times = int(sfreq * duration)
     t = np.arange(n_times) / sfreq
@@ -39,9 +46,18 @@ def _make_roi_timeseries(sfreq: float, duration: float, n_rois: int = 8) -> dict
         signal += 0.5 * np.sin(2 * np.pi * 10 * t)  # alpha
         signal += 0.3 * np.sin(2 * np.pi * 40 * t)  # gamma
         signal += 0.2 * np.sin(2 * np.pi * 6 * t)   # theta
-        roi_ts[name] = np.abs(signal).astype(np.float32)  # magnitude
+        roi_ts[name] = (signal if signed else np.abs(signal)).astype(np.float32)
 
     return roi_ts
+
+
+def _write_roi_timeseries(data_dir: Path, roi_ts_signed, roi_ts_magnitude) -> None:
+    """Write both ROI-timeseries variants the loader looks for (signed by default,
+    magnitude for the legacy/magnitude path)."""
+    with open(data_dir / "step6_roi_timeseries_signed.pkl", "wb") as f:
+        pickle.dump(roi_ts_signed, f)
+    with open(data_dir / "step6_roi_timeseries_magnitude.pkl", "wb") as f:
+        pickle.dump(roi_ts_magnitude, f)
 
 
 def _make_info(sfreq: float) -> MagicMock:
@@ -56,9 +72,11 @@ def synthetic_subject_dir(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
 
-    roi_ts = _make_roi_timeseries(SFREQ, DURATION)
-    with open(data_dir / "step6_roi_timeseries_magnitude.pkl", "wb") as f:
-        pickle.dump(roi_ts, f)
+    _write_roi_timeseries(
+        data_dir,
+        _make_roi_timeseries(SFREQ, DURATION, signed=True),
+        _make_roi_timeseries(SFREQ, DURATION, signed=False),
+    )
 
     info = _make_info(SFREQ)
     with open(data_dir / "step1_info.pkl", "wb") as f:
@@ -80,15 +98,16 @@ def synthetic_study_dir(tmp_path):
             data_dir = subj_dir / "data"
             data_dir.mkdir(parents=True)
 
-            # Add slight group difference in gamma for KO
-            roi_ts = _make_roi_timeseries(SFREQ, DURATION)
+            # Add slight group difference in gamma for KO (both variants)
+            roi_ts_signed = _make_roi_timeseries(SFREQ, DURATION, signed=True)
+            roi_ts_mag = _make_roi_timeseries(SFREQ, DURATION, signed=False)
             if "KO" in group_name:
-                for name in roi_ts:
-                    t = np.arange(len(roi_ts[name])) / SFREQ
-                    roi_ts[name] = roi_ts[name] + 0.2 * np.abs(np.sin(2 * np.pi * 45 * t)).astype(np.float32)
+                for rt in (roi_ts_signed, roi_ts_mag):
+                    for name in rt:
+                        t = np.arange(len(rt[name])) / SFREQ
+                        rt[name] = (rt[name] + 0.2 * np.abs(np.sin(2 * np.pi * 45 * t))).astype(np.float32)
 
-            with open(data_dir / "step6_roi_timeseries_magnitude.pkl", "wb") as f:
-                pickle.dump(roi_ts, f)
+            _write_roi_timeseries(data_dir, roi_ts_signed, roi_ts_mag)
 
             info = _make_info(SFREQ)
             with open(data_dir / "step1_info.pkl", "wb") as f:
