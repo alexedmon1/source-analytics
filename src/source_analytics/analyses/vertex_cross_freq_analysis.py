@@ -176,7 +176,34 @@ class VertexCrossFreqAnalysis(BaseAnalysis):
             logger.info("Saved AAC/PPC matrices pkl")
 
     # ----------------------------------------------------------- statistics
+    def _reload_maps_from_disk(self) -> bool:
+        """Reconstruct per-subject CFC maps + coords + groups from persisted CSVs
+        so statistics/figures are regenerable via --steps (no reprocessing)."""
+        data_dir = self.output_dir / "data"
+        maps_csv = data_dir / "vertex_cross_freq_maps.csv"
+        coords_csv = data_dir / "source_coords.csv"
+        if not maps_csv.exists():
+            logger.warning("No persisted maps at %s; cannot reload", maps_csv)
+            return False
+        if coords_csv.exists():
+            self._source_coords = pd.read_csv(coords_csv)[["x", "y", "z"]].to_numpy(dtype=float)
+        df = pd.read_csv(maps_csv)
+        self._subject_maps = {}
+        self._subject_groups = {}
+        for (uid, group), g in df.groupby(["subject", "group"], sort=False):
+            self._subject_groups[uid] = group
+            m: dict = {}
+            for (metric, freq_pair), gg in g.groupby(["metric", "freq_pair"], sort=False):
+                gg = gg.sort_values("vertex_idx")
+                m[f"{metric}|{freq_pair}"] = gg["value"].to_numpy(dtype=float)
+            self._subject_maps[uid] = m
+        logger.info("Reloaded %d subjects' CFC maps from %s",
+                    len(self._subject_maps), maps_csv)
+        return True
+
     def statistics(self) -> None:
+        if not self._subject_maps:
+            self._reload_maps_from_disk()
         if self._source_coords is None:
             logger.error("No source coordinates — cannot run statistics")
             return
@@ -251,7 +278,11 @@ class VertexCrossFreqAnalysis(BaseAnalysis):
                 hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
             )
 
+        self._save_cluster_state()
+
     def figures(self) -> None:
+        if not self._cluster_results:
+            self._load_cluster_state()
         if self._source_coords is None:
             return
         coords = self._source_coords

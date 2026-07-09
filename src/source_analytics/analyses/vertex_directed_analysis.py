@@ -169,7 +169,35 @@ class VertexDirectedAnalysis(BaseAnalysis):
                 pickle.dump(self._dtf_matrices, f)
             logger.info("Saved vertex_dtf_matrices.pkl")
 
+    def _reload_maps_from_disk(self) -> bool:
+        """Reconstruct per-subject directed maps + coords + groups from the
+        persisted CSVs, so statistics/figures are regenerable via --steps
+        without re-running process/aggregate."""
+        data_dir = self.output_dir / "data"
+        maps_csv = data_dir / "vertex_directed.csv"
+        coords_csv = data_dir / "source_coords.csv"
+        if not maps_csv.exists():
+            logger.warning("No persisted maps at %s; cannot reload", maps_csv)
+            return False
+        if coords_csv.exists():
+            self._source_coords = pd.read_csv(coords_csv)[["x", "y", "z"]].to_numpy(dtype=float)
+        df = pd.read_csv(maps_csv)
+        self._subject_maps = {}
+        self._subject_groups = {}
+        for (uid, group), g in df.groupby(["subject", "group"], sort=False):
+            self._subject_groups[uid] = group
+            bands: dict = {}
+            for band, gb in g.groupby("band", sort=False):
+                gb = gb.sort_values("vertex_idx")
+                bands[band] = {m: gb[m].to_numpy(dtype=float) for m in self._measures}
+            self._subject_maps[uid] = bands
+        logger.info("Reloaded %d subjects' directed maps from %s",
+                    len(self._subject_maps), maps_csv)
+        return True
+
     def statistics(self) -> None:
+        if not self._subject_maps:
+            self._reload_maps_from_disk()
         if self._source_coords is None:
             logger.error("No source coordinates — cannot run statistics")
             return
@@ -251,7 +279,11 @@ class VertexDirectedAnalysis(BaseAnalysis):
                 hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
             )
 
+        self._save_cluster_state()
+
     def figures(self) -> None:
+        if not self._cluster_results:
+            self._load_cluster_state()
         if self._source_coords is None:
             return
         coords = self._source_coords

@@ -214,7 +214,37 @@ class VertexConnectivityAnalysis(BaseAnalysis):
                 pickle.dump(self._conn_matrices, f)
             logger.info("Saved connectivity matrices to %s", pkl_path)
 
+    def _reload_maps_from_disk(self) -> bool:
+        """Reconstruct per-subject FCD maps + coords + groups from persisted CSVs,
+        so statistics (and thence figures) is regenerable via --steps without
+        re-running the expensive process/aggregate. Mirrors vertex_cluster's
+        reload discipline — figures must be a pure function of persisted data."""
+        data_dir = self.output_dir / "data"
+        fcd_csv = data_dir / "vertex_fcd.csv"
+        coords_csv = data_dir / "source_coords.csv"
+        if not fcd_csv.exists():
+            logger.warning("No persisted FCD at %s; cannot reload", fcd_csv)
+            return False
+        if coords_csv.exists():
+            cdf = pd.read_csv(coords_csv)
+            self._source_coords = cdf[["x", "y", "z"]].to_numpy(dtype=float)
+        df = pd.read_csv(fcd_csv)
+        self._subject_data = {}
+        self._subject_groups = {}
+        for (uid, group), g in df.groupby(["subject", "group"], sort=False):
+            self._subject_groups[uid] = group
+            fcd: dict = {}
+            for (band, metric), gg in g.groupby(["band", "metric"], sort=False):
+                arr = gg.sort_values("vertex_idx")["fcd"].to_numpy(dtype=float)
+                fcd.setdefault(band, {})[metric] = arr
+            self._subject_data[uid] = {"fcd": fcd}
+        logger.info("Reloaded %d subjects' FCD maps from %s",
+                    len(self._subject_data), fcd_csv)
+        return True
+
     def statistics(self) -> None:
+        if not self._subject_data:
+            self._reload_maps_from_disk()
         if self._source_coords is None:
             logger.error("No source coordinates — cannot run statistics")
             return
@@ -324,7 +354,12 @@ class VertexConnectivityAnalysis(BaseAnalysis):
                 hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
             )
 
+        # Persist the cluster-test results so figures() can regenerate from disk.
+        self._save_cluster_state()
+
     def figures(self) -> None:
+        if not self._cluster_results:
+            self._load_cluster_state()
         if self._source_coords is None:
             return
 

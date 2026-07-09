@@ -199,6 +199,43 @@ class BaseAnalysis(ABC):
         spec = self.config.design_spec
         return _contrasts_from_design_spec(spec) if spec is not None else []
 
+    # ---- Figure-state persistence (regenerable figures) ------------------
+    # Standard: figures() must be regenerable from persisted data via
+    # `--steps figures` alone — never dependent on in-memory state from an
+    # earlier step in the same process. Map/cluster modules use these to
+    # persist their cluster-test results in statistics() and reload them in
+    # figures(); the good model is vertex_cluster.
+
+    def _save_cluster_state(self, **extra) -> None:
+        """Pickle this module's cluster-test results + coords so figures() can
+        regenerate without re-running statistics. Writes data/<name>_results.pkl."""
+        import pickle
+        path = self.output_dir / "data" / f"{self.name}_results.pkl"
+        state = {
+            "cluster_results": getattr(self, "_cluster_results", {}),
+            "source_coords": getattr(self, "_source_coords", None),
+            **extra,
+        }
+        with open(path, "wb") as f:
+            pickle.dump(state, f)
+        logger.info("Saved %s", path.name)
+
+    def _load_cluster_state(self) -> bool:
+        """Reload cluster-test results from data/<name>_results.pkl (for
+        `--steps figures`). Returns True if loaded."""
+        import pickle
+        path = self.output_dir / "data" / f"{self.name}_results.pkl"
+        if not path.exists():
+            logger.warning("No saved figure state at %s", path)
+            return False
+        with open(path, "rb") as f:
+            saved = pickle.load(f)
+        self._cluster_results = saved.get("cluster_results", {})
+        if saved.get("source_coords") is not None:
+            self._source_coords = saved["source_coords"]
+        logger.info("Loaded %s figure state from %s", self.name, path.name)
+        return True
+
     @abstractmethod
     def setup(self) -> None:
         """Initialize analysis-specific data structures."""

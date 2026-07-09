@@ -177,7 +177,13 @@ class FCDComparisonAnalysis(BaseAnalysis):
         self._stats_df = stats_df
 
     def figures(self) -> None:
+        # Regenerable from persisted data: reload the per-subject summary if the
+        # in-memory frame is absent (e.g. `--steps figures` standalone).
         comp = self._comparison_df
+        if comp is None or comp.empty:
+            summ = self.output_dir / "data" / "fcd_subject_summary.csv"
+            if summ.exists():
+                comp = pd.read_csv(summ)
         if comp is None or comp.empty:
             return
         import matplotlib
