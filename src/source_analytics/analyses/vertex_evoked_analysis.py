@@ -179,7 +179,34 @@ class VertexEvokedAnalysis(BaseAnalysis):
             coords_df.index.name = "vertex_idx"
             coords_df.to_csv(data_dir / "source_coords.csv")
 
+    def _reload_maps_from_disk(self) -> bool:
+        """Reconstruct per-subject evoked measures + coords + groups from the
+        persisted CSVs, so statistics/figures are regenerable via --steps."""
+        data_dir = self.output_dir / "data"
+        csv = data_dir / "vertex_evoked_measures.csv"
+        coords_csv = data_dir / "source_coords.csv"
+        if not csv.exists():
+            logger.warning("No persisted measures at %s; cannot reload", csv)
+            return False
+        if coords_csv.exists():
+            self._source_coords = pd.read_csv(coords_csv)[["x", "y", "z"]].to_numpy(dtype=float)
+        df = pd.read_csv(csv)
+        self._measure_rows = df.to_dict("records")
+        self._subject_measures = {}
+        self._subject_groups = {}
+        for (uid, group), g in df.groupby(["subject", "group"], sort=False):
+            self._subject_groups[uid] = group
+            m: dict = {}
+            for mname, gg in g.groupby("measure_name", sort=False):
+                m[mname] = gg.sort_values("vertex_idx")["value"].to_numpy(dtype=float)
+            self._subject_measures[uid] = m
+        logger.info("Reloaded %d subjects' evoked measures from %s",
+                    len(self._subject_measures), csv)
+        return True
+
     def statistics(self) -> None:
+        if not self._subject_measures:
+            self._reload_maps_from_disk()
         if self._source_coords is None:
             logger.error("No source coordinates — cannot run statistics")
             return
@@ -241,7 +268,11 @@ class VertexEvokedAnalysis(BaseAnalysis):
             )
             logger.info("Exported vertex_evoked_stats.csv (%d rows)", len(all_stats))
 
+        self._save_cluster_state()
+
     def figures(self) -> None:
+        if not self._cluster_results:
+            self._load_cluster_state()
         if self._source_coords is None:
             return
         coords = self._source_coords

@@ -354,7 +354,49 @@ class VertexGraphAnalysis(_VertexNetworkBase):
         self._graph_statistics()
 
     def figures(self) -> None:
-        pass
+        """AUC group-effect heatmaps, regenerated from the persisted stats table
+        (band x connectivity-metric per graph metric, per contrast)."""
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        stats_csv = self.tbl_dir / "vertex_graph_stats.csv"
+        if not stats_csv.exists():
+            logger.warning("No vertex_graph_stats.csv — skipping figures")
+            return
+        df = pd.read_csv(stats_csv)
+        if df.empty:
+            return
+        bands = list(dict.fromkeys(df["band"]))
+        conns = sorted(df["conn_metric"].unique())
+        for (contrast, gmetric), sub in df.groupby(["contrast", "metric"], sort=False):
+            mat = np.full((len(conns), len(bands)), np.nan)
+            sig = np.zeros_like(mat, dtype=bool)
+            for _, r in sub.iterrows():
+                if r["band"] not in bands:
+                    continue
+                i, j = conns.index(r["conn_metric"]), bands.index(r["band"])
+                mat[i, j] = r["hedges_g"]
+                sig[i, j] = bool(r["significant"])
+            vmax = float(np.nanmax(np.abs(mat))) if np.isfinite(mat).any() else 1.0
+            vmax = vmax or 1.0
+            fig, ax = plt.subplots(figsize=(1.1 * len(bands) + 2, 0.5 * len(conns) + 2))
+            im = ax.imshow(mat, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
+            ax.set_xticks(range(len(bands)))
+            ax.set_xticklabels(bands, rotation=45, ha="right", fontsize=8)
+            ax.set_yticks(range(len(conns)))
+            ax.set_yticklabels(conns, fontsize=8)
+            for i in range(len(conns)):
+                for j in range(len(bands)):
+                    if not np.isnan(mat[i, j]):
+                        ax.text(j, i, f"{mat[i, j]:.2f}" + ("*" if sig[i, j] else ""),
+                                ha="center", va="center", fontsize=7)
+            ax.set_title(f"{gmetric} AUC effect (Hedges g) — {contrast}", fontsize=10)
+            fig.colorbar(im, ax=ax, label="Hedges g")
+            fig.tight_layout()
+            fname = f"graph_auc_{gmetric}_{contrast}".lower().replace(" ", "_") + ".png"
+            fig.savefig(self.fig_dir / fname, dpi=200)
+            plt.close(fig)
 
     def summary(self) -> None:
         self._write_summary(graph=True, nbs=False)

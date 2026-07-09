@@ -11,6 +11,8 @@ from source_analytics.analyses import (
     vertex_connectivity_analysis as vc,
     vertex_directed_analysis as vd,
     vertex_cross_freq_analysis as vcf,
+    vertex_evoked_analysis as ve,
+    vertex_network_analysis as vn,
     fcd_comparison_analysis as fc,
 )
 
@@ -20,6 +22,7 @@ MAP_MODULES = [
     (vc.VertexConnectivityAnalysis, "vertex_connectivity"),
     (vd.VertexDirectedAnalysis, "vertex_directed"),
     (vcf.VertexCrossFreqAnalysis, "vertex_cross_freq"),
+    (ve.VertexEvokedAnalysis, "vertex_evoked"),
 ]
 
 
@@ -46,3 +49,11 @@ def test_fcd_comparison_figures_reload_from_csv():
     fig_src = inspect.getsource(fc.FCDComparisonAnalysis.figures)
     assert "fcd_subject_summary.csv" in fig_src, \
         "fcd_comparison.figures() must reload its per-subject summary CSV"
+
+
+def test_vertex_graph_figures_read_persisted_table():
+    # vertex_graph has no in-memory state to rely on; its figures() must render
+    # from the persisted stats table (not be a `pass` stub).
+    fig_src = inspect.getsource(vn.VertexGraphAnalysis.figures)
+    assert "vertex_graph_stats.csv" in fig_src, \
+        "vertex_graph.figures() must render from its persisted stats table"
