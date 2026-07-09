@@ -114,7 +114,8 @@ def resolve_analysis_name(name: str) -> str:
 #   supplements = a SECONDARY analysis that can only run after the named primary
 #                 (it consumes the primary's output). Absent = primary.
 ANALYSIS_METADATA: dict[str, dict[str, str]] = {
-    "roi_psd":              {"category": "resting", "level": "roi",        "domain": "Spectral",        "description": "PSD (power spectral density)"},
+    "roi_psd":              {"category": "resting", "level": "roi",        "domain": "Spectral",        "description": "PSD (power spectral density)",
+                             "about": "Resting-state oscillatory power in each source-localized ROI. For every ROI and frequency band, per-subject band power is estimated from the ROI time course — both absolute power and relative power (the band's share of total 1-100 Hz power) — and compared between groups with a linear mixed model (subject as a random effect) under each declared contrast; effect sizes are Hedges' g, with p-values FDR-corrected within band. Read it as: which ROIs differ in oscillatory power, in which bands, and in which direction (an up arrow means the first-listed group of the pair has higher power). Relative power controls for overall amplitude and isolates the spectral shape; absolute power reflects raw magnitude."},
     "roi_aperiodic":        {"category": "resting", "level": "roi",        "domain": "Spectral",        "description": "1/f aperiodic decomposition"},
     "roi_connectivity":     {"category": "resting", "level": "roi",        "domain": "Connectivity",    "description": "ROI pairwise connectivity"},
     "roi_cross_freq":       {"category": "resting", "level": "roi",        "domain": "Cross-frequency", "description": "Cross-frequency coupling (PAC, AAC, n:m PPC)"},
