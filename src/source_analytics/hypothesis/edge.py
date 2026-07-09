@@ -168,22 +168,36 @@ def _nbs_components(arrays: list[np.ndarray], stat_fn, threshold: float,
 
 def _component_rows(comps: list[tuple[np.ndarray, int]], masses: list[float],
                     peaks: list[float], pvals: list[float],
-                    stat_type: str) -> list[dict[str, Any]]:
-    """Subnetwork contract → one row per component (or a no-component row)."""
+                    stat_type: str,
+                    vertex_rois: list[str | None] | None = None) -> list[dict[str, Any]]:
+    """Subnetwork contract → one row per component (or a no-component row).
+
+    ``vertex_rois`` (one atlas-ROI name per node, optional) adds a ``region``
+    column naming the regions of the nodes in each subnetwork.
+    """
+    from ..atlas.atlas_utils import format_region_coverage
+
     if not comps:
-        return [{
+        row = {
             "component_id": 0, "n_edges": 0, "mass": float("nan"),
             "peak_stat": float("nan"), "component_p": float("nan"),
             "significant": False, "stat_type": stat_type,
-        }]
+        }
+        if vertex_rois is not None:
+            row["region"] = ""
+        return [row]
     rows = []
-    for ci, ((_, n_edges), mass, peak, p) in enumerate(
+    for ci, ((nodes, n_edges), mass, peak, p) in enumerate(
             zip(comps, masses, peaks, pvals), start=1):
-        rows.append({
+        row = {
             "component_id": ci, "n_edges": int(n_edges), "mass": float(mass),
             "peak_stat": float(peak), "component_p": float(p),
             "significant": float(p) < 0.05, "stat_type": stat_type,
-        })
+        }
+        if vertex_rois is not None:
+            row["region"] = format_region_coverage(
+                [vertex_rois[int(v)] for v in nodes if int(v) < len(vertex_rois)])
+        rows.append(row)
     return rows
 
 
@@ -200,11 +214,13 @@ def run_hypothesis_edge(
     spec: DesignSpec | None = None,
     covariates: dict[str, np.ndarray] | None = None,
     seed: int = 42,
+    vertex_rois: list[str | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Run ONE hypothesis over per-subject connectivity matrices → component rows.
 
     subject_matrices: {uid -> (n, n)} for a single (band, metric) cell, ALL
-    subjects. subject_groups: {uid -> group}.
+    subjects. subject_groups: {uid -> group}. ``vertex_rois`` (one ROI name per
+    node) adds a ``region`` column naming each subnetwork's node regions.
     """
     present = set(subject_groups.values())
     groups = _fit_groups(hyp, spec, present)
@@ -235,7 +251,7 @@ def run_hypothesis_edge(
         f_thresh = float(stats.f.ppf(1 - _OMNIBUS_NBS_ALPHA, k - 1, n_total - k))
         _, comps, masses, peaks, pvals = _nbs_components(
             arrays, _f_edges, f_thresh, n_perms, seed)
-        return _component_rows(comps, masses, peaks, pvals, "F")
+        return _component_rows(comps, masses, peaks, pvals, "F", vertex_rois)
 
     if hyp.kind == "contrast":
         w = {g: float(hyp.weights[g]) for g in groups}
@@ -252,13 +268,13 @@ def run_hypothesis_edge(
                 n_permutations=n_perms, seed=seed)
             comps = _components(np.abs(r.t_matrix) > nbs_threshold)
             masses, peaks = _mass_peak(r.t_matrix, comps, nbs_threshold)
-            return _component_rows(comps, masses, peaks, r.component_pvalues, "t")
+            return _component_rows(comps, masses, peaks, r.component_pvalues, "t", vertex_rois)
         # General weighted contrast.
         weights = [w[g] for g in groups]
         _, comps, masses, peaks, pvals = _nbs_components(
             arrays, lambda arr: _weighted_t_edges(arr, weights),
             nbs_threshold, n_perms, seed)
-        return _component_rows(comps, masses, peaks, pvals, "t")
+        return _component_rows(comps, masses, peaks, pvals, "t", vertex_rois)
 
     if hyp.kind == "equivalence":
         # Per-edge TOST (sd margin) on the pairwise contrast; one summary row.
@@ -282,13 +298,16 @@ def run_hypothesis_edge(
             equiv = (diff - zc * se > -margin) & (diff + zc * se < margin)
         n_equiv = int(np.nansum(equiv))
         n_edges = len(diff)
-        return [{
+        row = {
             "component_id": 0, "n_edges": n_edges, "mass": float("nan"),
             "peak_stat": float("nan"), "component_p": float("nan"),
             "significant": False, "stat_type": "tost",
             "n_equivalent": n_equiv,
             "frac_equivalent": float(n_equiv / n_edges) if n_edges else 0.0,
-        }]
+        }
+        if vertex_rois is not None:
+            row["region"] = ""  # edge-level TOST has no node subnetwork
+        return [row]
 
     return []  # regression deferred
 
@@ -308,10 +327,14 @@ def write_module_hypotheses_edge(
     n_perms: int,
     hypothesis: str | None = None,
     seed: int = 42,
+    coords=None,
+    atlas_dir=None,
 ):
     """Run every declared hypothesis over per-cell connectivity matrices.
 
     matrices_by_cell: {(band, metric) -> {uid -> (n, n)}}, ALL subjects per cell.
+    ``coords`` + ``atlas_dir`` (optional): when both are given (vertex modules),
+    each subnetwork row gets a ``region`` column naming the regions of its nodes.
     Writes ``<prefix>_hypotheses.csv``; returns the rows DataFrame (or None).
     """
     import pandas as pd
@@ -321,6 +344,15 @@ def write_module_hypotheses_edge(
     if spec is None or not spec.hypotheses:
         logger.info("  No hypotheses/contrasts declared — skipping %s edge hypotheses.", prefix)
         return None
+
+    # Node ROI labels once (nodes are shared across all hypotheses/cells).
+    vertex_rois = None
+    if coords is not None and atlas_dir is not None:
+        try:
+            from ..atlas.atlas_utils import label_vertices_to_rois
+            vertex_rois = label_vertices_to_rois(np.asarray(coords, dtype=float), atlas_dir)
+        except Exception as e:  # noqa: BLE001 — descriptive, never fatal
+            logger.warning("  Node ROI labeling failed (%s); regions omitted", e)
 
     hyps = spec.hypotheses
     if hypothesis:
@@ -336,7 +368,8 @@ def write_module_hypotheses_edge(
             try:
                 comps = run_hypothesis_edge(
                     hyp, subject_matrices, subject_groups, spec=spec,
-                    nbs_threshold=nbs_threshold, n_perms=n_perms, seed=seed)
+                    nbs_threshold=nbs_threshold, n_perms=n_perms, seed=seed,
+                    vertex_rois=vertex_rois)
             except Exception as e:  # noqa: BLE001 — keep the sweep going
                 logger.warning("  %s [%s/%s]: %s", hyp.name, band, dv, e)
                 continue

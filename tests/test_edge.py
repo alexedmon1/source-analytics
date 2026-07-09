@@ -112,3 +112,31 @@ def test_equivalence_returns_tost_summary():
     assert len(rows) == 1 and rows[0]["stat_type"] == "tost"
     assert 0.0 <= rows[0]["frac_equivalent"] <= 1.0
     assert rows[0]["n_edges"] == N_NODE * (N_NODE - 1) // 2
+
+
+def test_region_labels_name_subnetwork_nodes():
+    # With vertex_rois provided, each subnetwork row gets a `region` naming the
+    # regions of its nodes. The planted clique is nodes 0..4 -> label them Motor_R.
+    rng = np.random.default_rng(0)
+    mats, sgroups = _make({"A": (14, 2.0), "B": (14, 0.0)}, rng)
+    hyp = Hypothesis(name="a_vs_b", kind="contrast", weights={"A": 1.0, "B": -1.0})
+    vertex_rois = ["Motor_R" if i < 5 else "Visual_Parietal_L" for i in range(N_NODE)]
+
+    rows = run_hypothesis_edge(hyp, mats, sgroups, vertex_rois=vertex_rois, **KW)
+
+    assert all("region" in r for r in rows), "region column must be present when labeled"
+    sig = [r for r in rows if r["significant"]]
+    assert sig, "planted subnetwork should survive"
+    # the planted clique is entirely Motor_R
+    assert any("Motor_R" in (r["region"] or "") for r in sig)
+
+
+def test_nbs_permutation_test_exposes_component_nodes():
+    rng = np.random.default_rng(0)
+    mats, sgroups = _make({"A": (14, 2.0), "B": (14, 0.0)}, rng)
+    mats_a = [mats[u] for u, g in sgroups.items() if g == "A"]
+    mats_b = [mats[u] for u, g in sgroups.items() if g == "B"]
+    res = nbs_permutation_test(mats_a, mats_b, nbs_threshold=2.0, n_permutations=200, seed=7)
+    # node membership is aligned 1:1 with component sizes/pvalues
+    assert len(res.component_nodes) == len(res.component_sizes)
+    assert all(isinstance(nodes, list) and len(nodes) >= 2 for nodes in res.component_nodes)

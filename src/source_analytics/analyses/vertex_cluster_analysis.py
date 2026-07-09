@@ -262,6 +262,10 @@ class VertexClusterAnalysis(BaseAnalysis):
         all_voxelwise = []
         all_cluster = []
 
+        # Per-vertex ROI labels (for the anatomical coverage of each significant
+        # cluster). Computed once — coords are fixed across all contrasts/bands.
+        vertex_rois = self._label_vertex_regions(self._source_coords)
+
         # Per-contrast figure state (keyed by contrast name) so EVERY declared
         # contrast gets its own glass brains — not just whichever ran last.
         self._band_cluster_results = {}
@@ -362,6 +366,7 @@ class VertexClusterAnalysis(BaseAnalysis):
                                 "cluster_stat": float(cs),
                                 "peak_t": peak_t,
                                 "p_corrected": float(cp),
+                                "region": self._cluster_region(vertex_rois, mask),
                             })
 
             # --- Feature metrics (slope, peak_alpha) ---
@@ -429,6 +434,7 @@ class VertexClusterAnalysis(BaseAnalysis):
                             "cluster_stat": float(cs),
                             "peak_t": peak_t,
                             "p_corrected": float(cp),
+                            "region": self._cluster_region(vertex_rois, mask),
                         })
 
             # Store results for figures phase, keyed by contrast.
@@ -494,6 +500,7 @@ class VertexClusterAnalysis(BaseAnalysis):
             n_perms=self._n_permutations, threshold=self._cluster_threshold,
             distance_mm=self._adjacency_distance,
             hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
+            atlas_dir=self._atlas_dir,
         )
 
         # Save full results dict for reuse

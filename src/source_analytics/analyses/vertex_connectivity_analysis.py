@@ -352,6 +352,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
                 n_perms=self._n_permutations, threshold=self._cluster_threshold,
                 distance_mm=self._adjacency_distance,
                 hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
+                atlas_dir=self._atlas_dir,
             )
 
         # Persist the cluster-test results so figures() can regenerate from disk.

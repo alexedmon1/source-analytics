@@ -127,20 +127,37 @@ def _perm_cluster(
     return obs, labels, masses, cluster_p
 
 
+def _format_equiv_region(equiv_mask: np.ndarray, vertex_rois: list[str | None]) -> str:
+    """Anatomical coverage of the vertices judged equivalent in a TOST map."""
+    from ..atlas.atlas_utils import format_region_coverage
+    idx = np.where(np.asarray(equiv_mask))[0]
+    return format_region_coverage([vertex_rois[i] for i in idx if i < len(vertex_rois)])
+
+
 def _cluster_rows(
     stat_map: np.ndarray,
     labels: np.ndarray,
     masses: list[float],
     pvalues: list[float],
     stat_type: str,
+    vertex_rois: list[str | None] | None = None,
 ) -> list[dict[str, Any]]:
-    """Map+cluster contract → one row per surviving cluster (or a no-cluster row)."""
+    """Map+cluster contract → one row per surviving cluster (or a no-cluster row).
+
+    ``vertex_rois`` (one atlas-ROI name per vertex, optional) adds a ``region``
+    column describing each cluster's anatomical coverage.
+    """
+    from ..atlas.atlas_utils import format_region_coverage
+
     if not masses:
-        return [{
+        row = {
             "cluster_id": 0, "n_vertices": 0, "mass": float("nan"),
             "peak_stat": float("nan"), "peak_vertex": -1,
             "cluster_p": float("nan"), "significant": False, "stat_type": stat_type,
-        }]
+        }
+        if vertex_rois is not None:
+            row["region"] = ""
+        return [row]
     rows = []
     for ci in range(1, len(masses) + 1):
         mask = labels == ci
@@ -150,7 +167,7 @@ def _cluster_rows(
         seg = stat_map[mask]
         peak_local = int(np.argmax(np.abs(seg)))
         cp = float(pvalues[ci - 1])
-        rows.append({
+        row = {
             "cluster_id": ci,
             "n_vertices": nv,
             "mass": float(masses[ci - 1]),
@@ -159,7 +176,11 @@ def _cluster_rows(
             "cluster_p": cp,
             "significant": cp < 0.05,
             "stat_type": stat_type,
-        })
+        }
+        if vertex_rois is not None:
+            row["region"] = format_region_coverage(
+                [vertex_rois[i] for i in np.where(mask)[0] if i < len(vertex_rois)])
+        rows.append(row)
     return rows
 
 
@@ -187,11 +208,13 @@ def run_hypothesis_permutation(
     spec: DesignSpec | None = None,
     covariates: dict[str, np.ndarray] | None = None,
     seed: int = 42,
+    vertex_rois: list[str | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Run ONE hypothesis over per-subject vertex maps → list of cluster-row dicts.
 
     subject_maps: {uid -> (n_vertices,)} for a single (band, dv) cell, ALL subjects.
-    subject_groups: {uid -> group}. coords: (n_vertices, 3).
+    subject_groups: {uid -> group}. coords: (n_vertices, 3). ``vertex_rois`` (one
+    atlas-ROI name per vertex) adds a ``region`` column to each cluster row.
     """
     present = set(subject_groups.values())
     groups = _fit_groups(hyp, spec, present)
@@ -216,7 +239,7 @@ def run_hypothesis_permutation(
         f_thresh = float(stats.f.ppf(1 - _OMNIBUS_CLUSTER_ALPHA, k - 1, n_total - k))
         stat_map, labels, masses, pvals = _perm_cluster(
             arrays, _f_map, coords, f_thresh, 1, n_perms, distance_mm, seed)
-        return _cluster_rows(stat_map, labels, masses, pvals, "F")
+        return _cluster_rows(stat_map, labels, masses, pvals, "F", vertex_rois)
 
     if hyp.kind == "contrast":
         w = {g: float(hyp.weights[g]) for g in groups}
@@ -232,13 +255,13 @@ def run_hypothesis_permutation(
                 data_a, data_b, coords, n_perms=n_perms, threshold=threshold,
                 tail=0, distance_mm=distance_mm, seed=seed)
             return _cluster_rows(r.t_map, r.cluster_labels, r.cluster_stats,
-                                 r.cluster_pvalues, "t")
+                                 r.cluster_pvalues, "t", vertex_rois)
         # General weighted contrast.
         weights = [w[g] for g in groups]
         stat_map, labels, masses, pvals = _perm_cluster(
             arrays, lambda arr: _weighted_t_map(arr, weights),
             coords, threshold, 0, n_perms, distance_mm, seed)
-        return _cluster_rows(stat_map, labels, masses, pvals, "t")
+        return _cluster_rows(stat_map, labels, masses, pvals, "t", vertex_rois)
 
     if hyp.kind == "equivalence":
         # Per-vertex TOST (sd margin) on the pairwise contrast; summary row.
@@ -260,13 +283,17 @@ def run_hypothesis_permutation(
         with np.errstate(invalid="ignore"):
             equiv = (diff - zc * se > -margin) & (diff + zc * se < margin)
         n_equiv = int(np.nansum(equiv))
-        return [{
+        row = {
             "cluster_id": 0, "n_vertices": len(diff), "mass": float("nan"),
             "peak_stat": float("nan"), "peak_vertex": -1, "cluster_p": float("nan"),
             "significant": False, "stat_type": "tost",
             "n_equivalent": n_equiv,
             "frac_equivalent": float(n_equiv / len(diff)) if len(diff) else 0.0,
-        }]
+        }
+        if vertex_rois is not None:
+            # Region of the equivalent vertices (where KO≈WT), if any.
+            row["region"] = _format_equiv_region(equiv, vertex_rois)
+        return [row]
 
     if hyp.kind == "regression":
         # Per-vertex slope on a continuous predictor + predictor-shuffle clusters.
@@ -294,10 +321,14 @@ def write_module_hypotheses_perm(
     distance_mm: float,
     hypothesis: str | None = None,
     seed: int = 42,
+    atlas_dir=None,
 ):
     """Run every declared hypothesis over per-cell vertex maps; write <prefix>_hypotheses.csv.
 
     maps_by_cell: {(band, dv) -> {uid -> (n_vertices,)}}, ALL subjects per cell.
+    ``atlas_dir`` (optional): when given, each cluster row gets a ``region``
+    column naming its anatomical coverage (skip for non-source modules, e.g.
+    scalp-electrode connectivity, whose coords are a montage, not brain mm).
     Returns the rows DataFrame (or None if nothing declared).
     """
     import pandas as pd
@@ -307,6 +338,15 @@ def write_module_hypotheses_perm(
     if spec is None or not spec.hypotheses:
         logger.info("  No hypotheses/contrasts declared — skipping %s perm hypotheses.", prefix)
         return None
+
+    # Label vertices once (coords are shared across all hypotheses/cells).
+    vertex_rois = None
+    if atlas_dir is not None:
+        try:
+            from ..atlas.atlas_utils import label_vertices_to_rois
+            vertex_rois = label_vertices_to_rois(np.asarray(coords, dtype=float), atlas_dir)
+        except Exception as e:  # noqa: BLE001 — descriptive, never fatal
+            logger.warning("  Vertex ROI labeling failed (%s); regions omitted", e)
 
     hyps = spec.hypotheses
     if hypothesis:
@@ -322,7 +362,8 @@ def write_module_hypotheses_perm(
             try:
                 clusters = run_hypothesis_permutation(
                     hyp, subject_maps, subject_groups, coords, spec=spec,
-                    n_perms=n_perms, threshold=threshold, distance_mm=distance_mm, seed=seed)
+                    n_perms=n_perms, threshold=threshold, distance_mm=distance_mm, seed=seed,
+                    vertex_rois=vertex_rois)
             except Exception as e:  # noqa: BLE001 — keep the sweep going
                 logger.warning("  %s [%s/%s]: %s", hyp.name, band, dv, e)
                 continue

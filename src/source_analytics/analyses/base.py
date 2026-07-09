@@ -357,6 +357,36 @@ class BaseAnalysis(ABC):
             return ["--no-figures"]
         return []
 
+    # ---- Anatomical labeling of vertex clusters --------------------------- #
+    def _label_vertex_regions(self, coords_mm) -> list[str | None]:
+        """One atlas-ROI name per vertex, for describing where clusters sit.
+
+        Returns an all-``None`` list when no atlas or no coords are available, so
+        callers can add a (blank) ``region`` column unconditionally.
+        """
+        import numpy as np
+
+        n = 0 if coords_mm is None else len(coords_mm)
+        if self._atlas_dir is None or n == 0:
+            return [None] * n
+        try:
+            from ..atlas.atlas_utils import label_vertices_to_rois
+            return label_vertices_to_rois(np.asarray(coords_mm, dtype=float), self._atlas_dir)
+        except Exception as e:  # noqa: BLE001 — labeling is descriptive, never fatal
+            logger.warning("Vertex ROI labeling failed (%s); regions omitted", e)
+            return [None] * n
+
+    @staticmethod
+    def _cluster_region(vertex_rois: list[str | None], mask) -> str:
+        """Anatomical-coverage string ('ROI x%, … (+N ROIs ≤5%)') for the cluster
+        selected by ``mask`` (a boolean array over vertices)."""
+        import numpy as np
+        from ..atlas.atlas_utils import format_region_coverage
+
+        idx = np.where(mask)[0]
+        labels = [vertex_rois[i] for i in idx if i < len(vertex_rois)]
+        return format_region_coverage(labels)
+
     def run(
         self,
         subjects: list[SubjectInfo],

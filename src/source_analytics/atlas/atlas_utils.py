@@ -405,6 +405,88 @@ def _map_sources_to_rois_proximity(
     return roi_source_mapping
 
 
+def label_vertices_to_rois(
+    coords_mm: np.ndarray,
+    atlas_dir: str | Path,
+    *,
+    include_categories: list[str] | None = None,
+) -> list[str | None]:
+    """Assign each vertex to one atlas ROI (name) via nearest labeled voxel.
+
+    Same assignment path as :func:`extract_roi_timeseries` (raw affine, nested
+    ``rois`` mapping, nearest-labeled fallback), but returns one ROI *name* per
+    vertex — used to describe which regions a significant cluster covers.
+
+    Parameters
+    ----------
+    coords_mm : ndarray, shape (n_vertices, 3)
+        Vertex coordinates in mm (same frame as the atlas).
+    atlas_dir : str or Path
+    include_categories : list[str], optional
+        Restrict assignable ROIs to these atlas categories (None = all ROIs).
+
+    Returns
+    -------
+    list[str | None]
+        ROI name per vertex (``None`` only if a vertex mapped to no labeled ROI).
+    """
+    atlas_dir = Path(atlas_dir)
+    label_data, affine = load_atlas(atlas_dir, raw_affine=True)
+    roi_mapping = load_roi_mapping(atlas_dir)
+    rois = roi_mapping.get("rois", roi_mapping)
+
+    included_roi_ids: set[int] | None = None
+    if include_categories:
+        categories = roi_mapping.get("categories", {})
+        included_roi_ids = set()
+        for category in include_categories:
+            included_roi_ids.update(categories.get(category, []))
+
+    SKIP_LABEL_NAMES = {"Background", "Exterior"}
+    label_to_roi: dict[int, str] = {}
+    for roi_id_str, roi_info in rois.items():
+        label_id = int(roi_id_str)
+        roi_name = roi_info.get("name", roi_info.get("abbreviation", f"ROI_{label_id}"))
+        if roi_name in SKIP_LABEL_NAMES:
+            continue
+        if included_roi_ids is not None and label_id not in included_roi_ids:
+            continue
+        label_to_roi[label_id] = roi_name
+
+    coords_mm = np.asarray(coords_mm, dtype=float)
+    mapping = _map_sources_to_rois_nearest(coords_mm, label_data, affine, label_to_roi)
+    per_vertex: list[str | None] = [None] * len(coords_mm)
+    for roi_name, idxs in mapping.items():
+        for i in idxs:
+            per_vertex[i] = roi_name
+    return per_vertex
+
+
+def format_region_coverage(roi_labels: list[str | None], threshold: float = 0.05) -> str:
+    """Describe a cluster's regional composition as ``'ROI x%, ROI y% (+N ROIs ≤5%)'``.
+
+    Lists every ROI whose share of the cluster's vertices exceeds *threshold*
+    (default 5%), ordered by share, and tallies the remaining minor ROIs. Shares
+    are of the total cluster vertex count. Returns '' for an empty cluster.
+    """
+    from collections import Counter
+
+    n = len(roi_labels)
+    if n == 0:
+        return ""
+    counts = Counter(r for r in roi_labels if r)
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    listed = [(roi, c) for roi, c in ranked if c / n > threshold]
+    n_minor = len(ranked) - len(listed)
+    pct = int(round(threshold * 100))
+    parts = [f"{roi} {round(100 * c / n)}%" for roi, c in listed]
+    text = ", ".join(parts)
+    if n_minor > 0:
+        tail = f"+{n_minor} ROIs ≤{pct}%" if text else f"{n_minor} ROIs ≤{pct}%"
+        text = f"{text} ({tail})" if text else tail
+    return text
+
+
 def extract_roi_timeseries(
     stc_data: np.ndarray,
     coords_mm: np.ndarray,

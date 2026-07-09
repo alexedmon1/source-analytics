@@ -23,6 +23,7 @@ import logging
 
 import pandas as pd
 
+from ..atlas.atlas_utils import format_region_coverage
 from ..stats.graph_metrics import nbs_permutation_test
 from .base import BaseAnalysis
 
@@ -127,15 +128,24 @@ class NetworkAnalysisBase(BaseAnalysis):
                             )
                         )
 
+        # Per-vertex ROI labels, so each subnetwork can report the regions of its
+        # participating nodes (vertex modules only; ROI-NBS nodes are ROIs already).
+        vertex_rois = self._label_vertex_regions(getattr(self, "_source_coords", None))
+
         rows = []
         for key, nbs in self._nbs_results.items():
+            nodes_per_comp = getattr(nbs, "component_nodes", []) or []
             for i, (size, pval) in enumerate(
                 zip(nbs.component_sizes, nbs.component_pvalues)
             ):
-                rows.append({
+                row = {
                     "key": key, "component": i + 1,
                     "n_edges": size, "p_corrected": pval,
-                })
+                }
+                if any(r is not None for r in vertex_rois) and i < len(nodes_per_comp):
+                    row["region"] = format_region_coverage(
+                        [vertex_rois[v] for v in nodes_per_comp[i] if v < len(vertex_rois)])
+                rows.append(row)
         if rows:
             out = self.tbl_dir / self._nbs_results_filename
             pd.DataFrame(rows).to_csv(out, index=False)
@@ -174,4 +184,5 @@ class NetworkAnalysisBase(BaseAnalysis):
             prefix=self.name, nbs_threshold=self._nbs_threshold,
             n_perms=self._nbs_permutations,
             hypothesis=",".join(sorted(wanted)) if wanted else None, seed=42,
+            coords=getattr(self, "_source_coords", None), atlas_dir=self._atlas_dir,
         )

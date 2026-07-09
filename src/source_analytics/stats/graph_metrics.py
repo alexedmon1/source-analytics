@@ -84,6 +84,7 @@ class NBSResult:
     t_matrix: np.ndarray  # (n_vertices, n_vertices)
     n_permutations: int
     n_significant_components: int
+    component_nodes: list[list[int]] = field(default_factory=list)  # node ids per component
 
 
 def _threshold_matrix(
@@ -476,18 +477,23 @@ def _vectorized_welch_t(A: np.ndarray, B: np.ndarray) -> np.ndarray:
     return t_matrix
 
 
-def _find_components(adj: np.ndarray) -> list[int]:
+def _find_components(adj: np.ndarray, with_nodes: bool = False):
     """Find connected components and count edges in each.
 
     Parameters
     ----------
     adj : ndarray, shape (n, n)
         Boolean adjacency matrix.
+    with_nodes : bool
+        When True, return ``(edge_count, node_list)`` tuples instead of bare
+        edge counts (used to describe which vertices a component covers). The
+        default (False) preserves the fast, count-only contract the permutation
+        null relies on.
 
     Returns
     -------
-    component_edge_counts : list[int]
-        Number of edges in each component with >= 2 nodes.
+    list[int] | list[tuple[int, list[int]]]
+        Per component with >= 2 nodes: edge count (default) or (edge count, nodes).
     """
     n = adj.shape[0]
     visited = np.zeros(n, dtype=bool)
@@ -514,7 +520,7 @@ def _find_components(adj: np.ndarray) -> list[int]:
             comp_arr = np.array(comp)
             sub = adj[np.ix_(comp_arr, comp_arr)]
             edge_count = int(np.triu(sub, k=1).sum())
-            components.append(edge_count)
+            components.append((edge_count, [int(v) for v in comp]) if with_nodes else edge_count)
 
     return components
 
@@ -564,7 +570,9 @@ def nbs_permutation_test(
     # Find supra-threshold edges
     suprathresh = np.abs(t_matrix) > nbs_threshold
 
-    observed_components = _find_components(suprathresh)
+    observed_with_nodes = _find_components(suprathresh, with_nodes=True)
+    observed_components = [ec for ec, _ in observed_with_nodes]
+    observed_nodes = [nodes for _, nodes in observed_with_nodes]
 
     if not observed_components:
         logger.info("NBS: no supra-threshold components found")
@@ -575,6 +583,7 @@ def nbs_permutation_test(
             t_matrix=t_matrix,
             n_permutations=n_permutations,
             n_significant_components=0,
+            component_nodes=[],
         )
 
     logger.info(
@@ -615,4 +624,5 @@ def nbs_permutation_test(
         t_matrix=t_matrix,
         n_permutations=n_permutations,
         n_significant_components=n_sig,
+        component_nodes=observed_nodes,
     )
