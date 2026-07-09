@@ -30,7 +30,11 @@ from ..io.loader import SubjectLoader
 from ..spectral.pac import get_valid_pac_pairs, compute_local_pac_vertices
 from ..spectral.cross_freq import compute_aac, compute_ppc
 from .roi_cross_freq_analysis import _nm_ratio
-from ..stats.cluster_permutation import cluster_permutation_test, hedges_g
+from ..stats.cluster_permutation import (
+    cluster_permutation_test,
+    has_significant_cluster as _has_significant_cluster,
+    hedges_g,
+)
 from ..viz.glass_brain import plot_band_comparison
 from pathlib import Path
 from .base import BaseAnalysis
@@ -287,18 +291,24 @@ class VertexCrossFreqAnalysis(BaseAnalysis):
         if self._source_coords is None:
             return
         coords = self._source_coords
+        n = 0
         for key, info in self._cluster_results.items():
             result = info["result"]
+            if not _has_significant_cluster(result):
+                continue
+            contrast = info.get("contrast", key)
             metric, freq_pair = info["metric"], info["freq_pair"]
-            safe = f"{metric}_{freq_pair}".lower().replace(" ", "_")
+            safe = f"{contrast}_{metric}_{freq_pair}".lower().replace(" ", "_")
             plot_band_comparison(
                 coords=coords, mean_a=info["mean_a"], mean_b=info["mean_b"],
                 t_map=result.t_map, cluster_labels=result.cluster_labels,
                 cluster_pvalues=result.cluster_pvalues,
-                band_name=f"{metric.upper()} — {freq_pair}",
+                band_name=f"{metric.upper()} — {freq_pair} — {contrast}",
                 group_labels=info["group_labels"],
                 output_path=self.fig_dir / f"cfc_{safe}.png",
             )
+            n += 1
+        logger.info("vertex_cross_freq: %d significant-cluster figures", n)
 
     def summary(self) -> None:
         data_dir = self.output_dir / "data"

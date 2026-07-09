@@ -29,6 +29,26 @@ class ClusterResult:
     n_permutations: int
 
 
+def has_significant_cluster(result, alpha: float = 0.05) -> bool:
+    """True if a cluster/TFCE result has at least one significant cluster.
+
+    Accepts either a ClusterResult-like object or a plain dict (the plot-state
+    dicts some modules keep). Works for cluster-permutation results
+    (``cluster_pvalues``) and TFCE results carrying a per-vertex ``p_corrected``
+    map. Used to emit figures only where a contrast has a corrected finding.
+    """
+    def _get(key):
+        return result.get(key) if isinstance(result, dict) else getattr(result, key, None)
+
+    pv = _get("cluster_pvalues")
+    if pv is not None and len(pv):
+        return any(p is not None and p < alpha for p in pv)
+    pc = _get("p_corrected")  # TFCE per-vertex
+    if pc is not None:
+        return bool(np.any(np.asarray(pc, dtype=float) < alpha))
+    return False
+
+
 def voxelwise_ttest(
     data_a: np.ndarray,
     data_b: np.ndarray,

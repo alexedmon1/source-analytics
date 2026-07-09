@@ -28,7 +28,11 @@ from ..spectral.vertex_connectivity import (
     FCD_CENTER,
 )
 from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
-from ..stats.cluster_permutation import cluster_permutation_test, hedges_g
+from ..stats.cluster_permutation import (
+    cluster_permutation_test,
+    has_significant_cluster as _has_significant_cluster,
+    hedges_g,
+)
 from ..viz.glass_brain import plot_glass_brain, plot_band_comparison
 from .base import BaseAnalysis, find_r_script_dir
 
@@ -305,6 +309,7 @@ class VertexConnectivityAnalysis(BaseAnalysis):
                         "mean_a": data_a.mean(axis=0),
                         "mean_b": data_b.mean(axis=0),
                         "group_labels": (label_a, label_b),
+                        "contrast": contrast.name,
                         "band": band_name,
                         "metric": metric,
                     }
@@ -367,11 +372,18 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         coords = self._source_coords
         fig_dir = self.fig_dir
 
+        # Emit a glass brain ONLY where the contrast has a significant cluster —
+        # one figure per (contrast, band, metric), named with the contrast so
+        # nothing is overwritten. Non-significant cells produce no figure.
+        n = 0
         for key, info in self._cluster_results.items():
             result = info["result"]
+            if not _has_significant_cluster(result):
+                continue
+            contrast = info.get("contrast", key)
             band = info["band"]
             metric = info.get("metric", "imag_coherence")
-            safe_name = f"{band}_{metric}".lower().replace(" ", "_")
+            safe_name = f"{contrast}_{band}_{metric}".lower().replace(" ", "_")
             group_labels = info["group_labels"]
 
             plot_band_comparison(
@@ -381,10 +393,12 @@ class VertexConnectivityAnalysis(BaseAnalysis):
                 t_map=result.t_map,
                 cluster_labels=result.cluster_labels,
                 cluster_pvalues=result.cluster_pvalues,
-                band_name=f"FCD ({metric}) — {band}",
+                band_name=f"FCD ({metric}) — {band} — {contrast}",
                 group_labels=group_labels,
                 output_path=fig_dir / f"fcd_{safe_name}.png",
             )
+            n += 1
+        logger.info("vertex_connectivity: %d significant-cluster figures", n)
 
     def summary(self) -> None:
         data_dir = self.output_dir / "data"

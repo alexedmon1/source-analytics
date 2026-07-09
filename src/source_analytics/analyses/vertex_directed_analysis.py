@@ -34,7 +34,11 @@ from ..spectral.directed import (
     DEFAULT_ORDER,
     DEFAULT_RIDGE,
 )
-from ..stats.cluster_permutation import cluster_permutation_test, hedges_g
+from ..stats.cluster_permutation import (
+    cluster_permutation_test,
+    has_significant_cluster as _has_significant_cluster,
+    hedges_g,
+)
 from ..viz.glass_brain import plot_band_comparison
 from .base import BaseAnalysis
 
@@ -288,8 +292,11 @@ class VertexDirectedAnalysis(BaseAnalysis):
         if self._source_coords is None:
             return
         coords = self._source_coords
+        n = 0
         for key, info in self._cluster_results.items():
             result = info["result"]
+            if not _has_significant_cluster(result):
+                continue
             safe = key.lower().replace(" ", "_")
             plot_band_comparison(
                 coords=coords,
@@ -297,10 +304,12 @@ class VertexDirectedAnalysis(BaseAnalysis):
                 t_map=result.t_map,
                 cluster_labels=result.cluster_labels,
                 cluster_pvalues=result.cluster_pvalues,
-                band_name=f"DTF {info['measure']} — {info['band']}",
+                band_name=f"DTF {info['measure']} — {info['band']} — {info.get('contrast', '')}",
                 group_labels=info["group_labels"],
                 output_path=self.fig_dir / f"dtf_{safe}.png",
             )
+            n += 1
+        logger.info("vertex_directed: %d significant-cluster figures", n)
 
     def summary(self) -> None:
         lines = [

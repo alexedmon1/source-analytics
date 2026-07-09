@@ -25,7 +25,11 @@ from ..io.loader import SubjectLoader
 from ..spectral.vertex import compute_psd_vertices
 from ..spectral.vertex_aperiodic import fit_aperiodic_vertices
 from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
-from ..stats.cluster_permutation import cluster_permutation_test, hedges_g
+from ..stats.cluster_permutation import (
+    cluster_permutation_test,
+    has_significant_cluster as _has_significant_cluster,
+    hedges_g,
+)
 from ..viz.glass_brain import plot_glass_brain, plot_band_comparison
 from .base import BaseAnalysis
 
@@ -440,9 +444,13 @@ class VertexSpecparamAnalysis(BaseAnalysis):
 
         for key, info in self._cluster_results.items():
             result = info["result"]
+            if not _has_significant_cluster(result):
+                continue
             param = info["param"]
+            contrast = info.get("contrast", key)
             group_labels = info["group_labels"]
 
+            safe = f"{contrast}_{param}".lower().replace(" ", "_")
             plot_band_comparison(
                 coords=coords,
                 mean_a=info["mean_a"],
@@ -450,9 +458,9 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 t_map=result.t_map,
                 cluster_labels=result.cluster_labels,
                 cluster_pvalues=result.cluster_pvalues,
-                band_name=param,
+                band_name=f"{param} — {contrast}",
                 group_labels=group_labels,
-                output_path=fig_dir / f"specparam_{param}.png",
+                output_path=fig_dir / f"specparam_{safe}.png",
             )
 
         # Per-band peak presence maps

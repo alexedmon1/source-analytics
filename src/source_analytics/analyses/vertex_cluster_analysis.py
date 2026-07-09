@@ -31,6 +31,7 @@ from ..spectral.vertex import (
 )
 from ..stats.cluster_permutation import (
     cluster_permutation_test,
+    has_significant_cluster as _has_significant_cluster,
     hedges_g,
     voxelwise_ttest,
 )
@@ -576,8 +577,12 @@ class VertexClusterAnalysis(BaseAnalysis):
             feature_results = feat_by_contrast.get(contrast_name, {})
             logger.info("Rendering glass brains for contrast '%s'", contrast_name)
 
-            # Band power figures
+            # Band power figures — only where the band has a significant cluster.
+            sig_band_results = {}
             for band_name, res in band_results.items():
+                if not _has_significant_cluster(res):
+                    continue
+                sig_band_results[band_name] = res
                 safe_name = band_name.lower().replace(" ", "_")
                 plot_band_comparison(
                     coords=coords,
@@ -601,8 +606,12 @@ class VertexClusterAnalysis(BaseAnalysis):
                         cmap="RdBu_r",
                     )
 
-            # Feature figures
+            # Feature figures — only where significant.
+            sig_feature_results = {}
             for feat_name, res in feature_results.items():
+                if not _has_significant_cluster(res):
+                    continue
+                sig_feature_results[feat_name] = res
                 plot_band_comparison(
                     coords=coords,
                     mean_a=res["mean_a"],
@@ -616,8 +625,8 @@ class VertexClusterAnalysis(BaseAnalysis):
                     p_corrected=res.get("p_corrected"),
                 )
 
-            # Summary figure
-            all_results = {**band_results, **feature_results}
+            # Summary figure — only when the contrast has ≥1 significant map.
+            all_results = {**sig_band_results, **sig_feature_results}
             if all_results:
                 plot_vertex_cluster_summary(
                     band_results=all_results,
