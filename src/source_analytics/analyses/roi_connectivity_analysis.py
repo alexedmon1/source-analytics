@@ -67,7 +67,8 @@ class ConnectivityAnalysis(BaseAnalysis):
         self._metrics = self._select("metric", self._ROI_METRICS)
         self._edge_rows.clear()
 
-    def process_subject(self, subject: SubjectInfo) -> None:
+    def _compute_subject(self, subject: SubjectInfo):
+        """Pure per-subject ROI connectivity compute (parallel-safe)."""
         loader = SubjectLoader(subject.data_dir)
 
         # Use signed timeseries to preserve oscillatory phase
@@ -79,15 +80,8 @@ class ConnectivityAnalysis(BaseAnalysis):
         sfreq = loader.load_sfreq()
         draws = self._equalize_roi_timeseries(roi_ts, sfreq)
 
-        if self._sfreq is None:
-            self._sfreq = sfreq
-        elif sfreq != self._sfreq:
-            logger.warning(
-                "Subject %s has sfreq=%.0f, expected %.0f",
-                subject.subject_id, sfreq, self._sfreq,
-            )
-
         uid = f"{subject.group}_{subject.subject_id}"
+        edge_rows: list[dict] = []
 
         # Compute connectivity per bootstrap draw and average matrices
         avg_results: dict[str, dict[str, np.ndarray]] | None = None
@@ -137,7 +131,17 @@ class ConnectivityAnalysis(BaseAnalysis):
                     }
                     for m, mat in sel_mats.items():
                         row[m] = float(mat[i, j])
-                    self._edge_rows.append(row)
+                    edge_rows.append(row)
+
+        return {"uid": uid, "sfreq": float(sfreq), "edge_rows": edge_rows}
+
+    def _merge_subject(self, payload) -> None:
+        if self._sfreq is None:
+            self._sfreq = payload["sfreq"]
+        elif payload["sfreq"] != self._sfreq:
+            logger.warning("Subject %s has sfreq=%.0f, expected %.0f",
+                           payload["uid"], payload["sfreq"], self._sfreq)
+        self._edge_rows.extend(payload["edge_rows"])
 
     def aggregate(self) -> None:
         """Export edge-level CSV for R consumption."""

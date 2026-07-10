@@ -197,10 +197,16 @@ class ElectrodeConnectivityAnalysis(BaseAnalysis):
         return draws
 
     # ------------------------------------------------------------- per subject
-    def process_subject(self, subject: SubjectInfo) -> None:
+    def _compute_subject(self, subject: SubjectInfo):
+        """Pure per-subject sensor connectivity + FCD compute (parallel-safe).
+
+        Channel-layout reference locking / mismatch-skip happens in
+        :meth:`_merge_subject` (serial in the parent), preserving the exact
+        first-subject-wins reference behaviour.
+        """
         eeg_path = self._find_eeg_path(subject)
         if eeg_path is None:
-            return
+            return None
 
         target_sfreq = (
             self.config.electrode.get("target_sfreq")
@@ -210,29 +216,7 @@ class ElectrodeConnectivityAnalysis(BaseAnalysis):
             eeg_path, target_sfreq=target_sfreq,
         )
 
-        if self._sfreq is None:
-            self._sfreq = sfreq
-        elif sfreq != self._sfreq:
-            logger.warning(
-                "Subject %s has sfreq=%.0f, expected %.0f",
-                subject.subject_id, sfreq, self._sfreq,
-            )
-
-        # Lock channel layout from the first subject; all subjects must match
-        # so the per-channel FCD vectors stack into a coherent (n_subj, n_ch).
-        if self._ch_names is None:
-            self._ch_names = list(ch_names)
-            self._ch_coords = ch_coords
-        elif list(ch_names) != self._ch_names:
-            logger.warning(
-                "Subject %s channel layout differs from reference; skipping",
-                subject.subject_id,
-            )
-            return
-
         uid = f"{subject.group}_{subject.subject_id}"
-        self._subject_groups[uid] = subject.group
-
         draws = self._get_electrode_draws(data, sfreq)
 
         subject_fcd: dict[str, dict[str, np.ndarray]] = {}
@@ -270,8 +254,31 @@ class ElectrodeConnectivityAnalysis(BaseAnalysis):
             subject_fcd[band_name] = band_fcd
             subject_conn[band_name] = band_conn
 
-        self._fcd[uid] = subject_fcd
-        self._conn_matrices[uid] = subject_conn
+        return {
+            "uid": uid, "group": subject.group, "sfreq": float(sfreq),
+            "ch_names": list(ch_names), "ch_coords": ch_coords,
+            "subject_fcd": subject_fcd, "subject_conn": subject_conn,
+        }
+
+    def _merge_subject(self, payload) -> None:
+        if self._sfreq is None:
+            self._sfreq = payload["sfreq"]
+        elif payload["sfreq"] != self._sfreq:
+            logger.warning("Subject %s has sfreq=%.0f, expected %.0f",
+                           payload["uid"], payload["sfreq"], self._sfreq)
+        # Lock channel layout from the first merged subject; skip mismatches so
+        # the per-channel FCD vectors stack into a coherent (n_subj, n_ch).
+        if self._ch_names is None:
+            self._ch_names = list(payload["ch_names"])
+            self._ch_coords = payload["ch_coords"]
+        elif list(payload["ch_names"]) != self._ch_names:
+            logger.warning("Subject %s channel layout differs from reference; skipping",
+                           payload["uid"])
+            return
+        uid = payload["uid"]
+        self._subject_groups[uid] = payload["group"]
+        self._fcd[uid] = payload["subject_fcd"]
+        self._conn_matrices[uid] = payload["subject_conn"]
 
     # ------------------------------------------------------------- aggregate
     def aggregate(self) -> None:
