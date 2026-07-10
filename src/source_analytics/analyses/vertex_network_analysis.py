@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import pickle
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -42,6 +43,20 @@ from ._network_base import NetworkAnalysisBase
 from .base import find_r_script_dir
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=2)
+def _load_conn_pkl(path: str, _mtime_ns: int):
+    """Unpickle a precomputed-connectivity dict ONCE per process (cached).
+
+    ``_mtime_ns`` is part of the cache key so a rebuilt pickle invalidates the
+    cache. Returns the dict, or None if it can't be read.
+    """
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _generate_vertex_labels(
@@ -106,32 +121,18 @@ class _VertexNetworkBase(NetworkAnalysisBase):
         self._nbs_results.clear()
 
     # ----------------------------------------------------- process steps --- #
-    def _process_matrices(self, subject: SubjectInfo) -> None:
-        """Build/load per band × metric vertex connectivity (graph + NBS need it)."""
+    def _compute_matrices(self, subject: SubjectInfo) -> dict:
+        """Pure: build/load per band × metric vertex connectivity. No self mutation."""
         loader = SubjectLoader(subject.data_dir)
         uid = f"{subject.group}_{subject.subject_id}"
         stc_data = loader.load_source_timecourses()
         sfreq = loader.load_sfreq()
         coords = loader.load_source_coords()
-        if self._sfreq is None:
-            self._sfreq = sfreq
 
-        if self._vertex_indices is None:
-            mask = self.config.get_vertex_mask(coords)
-            self._vertex_indices = np.where(mask)[0]
-            self._source_coords = coords[mask]
-            if self.config.has_vertex_filter:
-                logger.info("Vertex filter: %d/%d vertices retained",
-                            len(self._vertex_indices), len(coords))
-            try:
-                from ..atlas import find_atlas_dir, load_vertex_roi_labels
-                atlas_labels = load_vertex_roi_labels(self._source_coords, find_atlas_dir())
-            except Exception:
-                atlas_labels = None
-            self._vertex_labels = _generate_vertex_labels(self._source_coords, atlas_labels)
-
-        stc_data = stc_data[self._vertex_indices]
-        self._subject_groups[uid] = subject.group
+        mask = self.config.get_vertex_mask(coords)
+        vertex_indices = np.where(mask)[0]
+        source_coords = coords[mask]
+        stc_data = stc_data[vertex_indices]
 
         subject_conn: dict[str, dict[str, np.ndarray]] = {}
         for band_name, (fmin, fmax) in self._selected_bands().items():
@@ -155,31 +156,71 @@ class _VertexNetworkBase(NetworkAnalysisBase):
                             stc_data, sfreq, (fmin, fmax), metric=metric)
                 band_conn[metric] = conn_mat
             subject_conn[band_name] = band_conn
-        self._conn_matrices[uid] = subject_conn
 
-    def _process_graph(self, subject: SubjectInfo) -> None:
-        """Multi-density AUC graph metrics from the built matrices (graph only)."""
-        uid = f"{subject.group}_{subject.subject_id}"
+        return {
+            "uid": uid, "group": subject.group, "sfreq": float(sfreq),
+            "vertex_indices": vertex_indices, "source_coords": source_coords,
+            "conn": subject_conn,
+        }
+
+    def _merge_matrices(self, payload: dict) -> None:
+        """Store a matrices payload; set lazy vertex/atlas state on first subject."""
+        uid = payload["uid"]
+        if self._sfreq is None:
+            self._sfreq = payload["sfreq"]
+        if self._vertex_indices is None:
+            self._vertex_indices = payload["vertex_indices"]
+            self._source_coords = payload["source_coords"]
+            if self.config.has_vertex_filter:
+                logger.info("Vertex filter: %d vertices retained",
+                            len(self._vertex_indices))
+            try:
+                from ..atlas import find_atlas_dir, load_vertex_roi_labels
+                atlas_labels = load_vertex_roi_labels(self._source_coords, find_atlas_dir())
+            except Exception:
+                atlas_labels = None
+            self._vertex_labels = _generate_vertex_labels(self._source_coords, atlas_labels)
+        self._subject_groups[uid] = payload["group"]
+        self._conn_matrices[uid] = payload["conn"]
+
+    def _process_matrices(self, subject: SubjectInfo) -> None:
+        """Serial build/load per band × metric vertex connectivity (graph + NBS)."""
+        self._merge_matrices(self._compute_matrices(subject))
+
+    def _compute_graph_metrics(self, uid: str, group: str,
+                               conn: dict[str, dict[str, np.ndarray]]) -> dict:
+        """Pure: multi-density AUC graph metrics from a subject's matrices."""
         subject_auc_by_band: dict[str, dict[str, dict[str, float]]] = {}
-        for band_name, band_conn in self._conn_matrices.get(uid, {}).items():
+        auc_rows: list[dict] = []
+        density_rows: list[dict] = []
+        for band_name, band_conn in conn.items():
             band_auc: dict[str, dict[str, float]] = {}
             for metric, conn_mat in band_conn.items():
                 auc_result = compute_auc(
                     conn_mat, density_min=self._density_min,
                     density_max=self._density_max, density_step=self._density_step)
                 band_auc[metric] = auc_result.auc
-                row = {"subject": uid, "group": subject.group,
+                row = {"subject": uid, "group": group,
                        "band": band_name, "conn_metric": metric}
                 row.update(auc_result.auc)
-                self._auc_rows.append(row)
+                auc_rows.append(row)
                 for gm in auc_result.metrics_by_density:
-                    drow = {"subject": uid, "group": subject.group, "band": band_name,
+                    drow = {"subject": uid, "group": group, "band": band_name,
                             "conn_metric": metric, "density": gm.density}
                     for mn in GLOBAL_METRIC_NAMES:
                         drow[mn] = getattr(gm, mn)
-                    self._density_rows.append(drow)
+                    density_rows.append(drow)
             subject_auc_by_band[band_name] = band_auc
-        self._subject_aucs[uid] = subject_auc_by_band
+        return {"subject_aucs": subject_auc_by_band,
+                "auc_rows": auc_rows, "density_rows": density_rows}
+
+    def _process_graph(self, subject: SubjectInfo) -> None:
+        """Serial AUC graph metrics from the already-built matrices."""
+        uid = f"{subject.group}_{subject.subject_id}"
+        gp = self._compute_graph_metrics(uid, subject.group, self._conn_matrices.get(uid, {}))
+        self._subject_aucs[uid] = gp["subject_aucs"]
+        self._auc_rows.extend(gp["auc_rows"])
+        self._density_rows.extend(gp["density_rows"])
 
     def _load_precomputed_conn(self, uid: str, band_name: str, metric: str) -> np.ndarray | None:
         vc_pkl = (self.config.output_dir / "vertex_connectivity" / "data"
@@ -187,8 +228,11 @@ class _VertexNetworkBase(NetworkAnalysisBase):
         if not vc_pkl.exists():
             return None
         try:
-            with open(vc_pkl, "rb") as f:
-                all_conn = pickle.load(f)
+            # Cached per process: the whole dict was previously unpickled on every
+            # (uid, band, metric) call — ~2100 full reloads for one graph run.
+            all_conn = _load_conn_pkl(str(vc_pkl), vc_pkl.stat().st_mtime_ns)
+            if all_conn is None:
+                return None
             val = all_conn.get(uid, {}).get(band_name)
             if val is None:
                 return None
@@ -343,9 +387,18 @@ class VertexGraphAnalysis(_VertexNetworkBase):
 
     name = "vertex_graph"
 
-    def process_subject(self, subject: SubjectInfo) -> None:
-        self._process_matrices(subject)
-        self._process_graph(subject)
+    def _compute_subject(self, subject: SubjectInfo) -> dict:
+        """Pure per-subject compute (matrices + AUC graph metrics) — parallel-safe."""
+        mp = self._compute_matrices(subject)
+        gp = self._compute_graph_metrics(mp["uid"], mp["group"], mp["conn"])
+        return {**mp, **gp}
+
+    def _merge_subject(self, payload: dict) -> None:
+        self._merge_matrices(payload)
+        uid = payload["uid"]
+        self._subject_aucs[uid] = payload["subject_aucs"]
+        self._auc_rows.extend(payload["auc_rows"])
+        self._density_rows.extend(payload["density_rows"])
 
     def aggregate(self) -> None:
         self._graph_aggregate()
