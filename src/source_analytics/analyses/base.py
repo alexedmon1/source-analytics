@@ -99,6 +99,26 @@ class BaseAnalysis(ABC):
         paradigm = self.config.paradigm_name or ""
         return self.config.results_dir / "tables" / paradigm / self.name
 
+    def _clear_fig_dir(self) -> None:
+        """Remove image files from this module's figure dir before regenerating.
+
+        Figures are a full regeneration from persisted data, so lingering images
+        from a previous run (e.g. renamed/gated-out figures) must not survive —
+        otherwise stale, misleading plots pile up alongside the current set.
+        """
+        if not self.fig_dir.exists():
+            return
+        n = 0
+        for p in self.fig_dir.iterdir():
+            if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".svg", ".pdf"}:
+                try:
+                    p.unlink()
+                    n += 1
+                except OSError as e:  # noqa: PERF203
+                    logger.warning("Could not remove stale figure %s: %s", p.name, e)
+        if n:
+            logger.info("Cleared %d stale figure(s) from %s", n, self.fig_dir.name)
+
     def _equalize_roi_timeseries(
         self, roi_ts: dict[str, "np.ndarray"], sfreq: float,
     ) -> list[dict[str, "np.ndarray"]]:
@@ -523,6 +543,7 @@ class BaseAnalysis(ABC):
 
         if _should_run("figures"):
             logger.info("Step 5/6: Figures")
+            self._clear_fig_dir()  # stale figures from a prior run must not linger
             self.figures()
         else:
             logger.info("Step 5/6: Figures — skipped")
