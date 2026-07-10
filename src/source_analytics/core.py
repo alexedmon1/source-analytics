@@ -227,6 +227,7 @@ class StudyAnalyzer:
         analysis_name: str,
         steps: set[str] | None = None,
         select: dict[str, frozenset[str]] | None = None,
+        jobs: int = 1,
     ) -> None:
         """Run a single named analysis.
 
@@ -265,7 +266,7 @@ class StudyAnalyzer:
             "Running '%s' on %d subjects (%d groups)",
             canonical_name, len(subjects), len(set(s.group for s in subjects)),
         )
-        analysis.run(subjects, steps=steps, select=select)
+        analysis.run(subjects, steps=steps, select=select, jobs=jobs)
 
     def validate(self) -> list[str]:
         """Validate the study configuration and subject discovery."""

@@ -113,7 +113,8 @@ class VertexClusterAnalysis(BaseAnalysis):
         self._source_coords = None
         self._vertex_indices = None
 
-    def process_subject(self, subject: SubjectInfo) -> None:
+    def _compute_subject(self, subject: SubjectInfo):
+        """Pure per-subject band-power / slope / peak-alpha compute (parallel-safe)."""
         loader = SubjectLoader(subject.data_dir)
         uid = f"{subject.group}_{subject.subject_id}"
 
@@ -122,27 +123,10 @@ class VertexClusterAnalysis(BaseAnalysis):
         sfreq = loader.load_sfreq()
         coords = loader.load_source_coords()
 
-        if self._sfreq is None:
-            self._sfreq = sfreq
-        elif sfreq != self._sfreq:
-            logger.warning(
-                "Subject %s has sfreq=%.0f, expected %.0f",
-                subject.subject_id, sfreq, self._sfreq,
-            )
-
-        # Apply vertex filter (compute mask once from first subject)
-        if self._vertex_indices is None:
-            mask = self.config.get_vertex_mask(coords)
-            self._vertex_indices = np.where(mask)[0]
-            self._source_coords = coords[mask]
-            if self.config.has_vertex_filter:
-                logger.info(
-                    "Vertex filter: %d/%d vertices retained",
-                    len(self._vertex_indices), len(coords),
-                )
-
-        stc_data = stc_data[self._vertex_indices]
-        coords = self._source_coords
+        mask = self.config.get_vertex_mask(coords)
+        vertex_indices = np.where(mask)[0]
+        source_coords = coords[mask]
+        stc_data = stc_data[vertex_indices]
         n_vertices = stc_data.shape[0]
 
         # Compute PSD for all vertices: (n_vertices, n_freqs)
@@ -159,34 +143,54 @@ class VertexClusterAnalysis(BaseAnalysis):
         slope = compute_spectral_slope(freqs, psd)
         peak_alpha = compute_peak_frequency(freqs, psd, search_range=(6, 13))
 
-        # Store per-subject data for statistics
-        self._subject_groups[uid] = subject.group
-        self._subject_data[uid] = {
-            "band_power": band_power,
-            "slope": slope,
-            "peak_alpha": peak_alpha,
-        }
-
         # Accumulate rows for CSV export (use original vertex indices)
+        band_power_rows: list[dict] = []
         for band_name, bp in band_power.items():
             for vi in range(n_vertices):
-                self._band_power_rows.append({
+                band_power_rows.append({
                     "subject": uid,
                     "group": subject.group,
-                    "vertex_idx": int(self._vertex_indices[vi]),
+                    "vertex_idx": int(vertex_indices[vi]),
                     "band": band_name,
                     "absolute": float(bp["absolute"][vi]),
                     "relative": float(bp["relative"][vi]),
                 })
 
+        feature_rows: list[dict] = []
         for vi in range(n_vertices):
-            self._feature_rows.append({
+            feature_rows.append({
                 "subject": uid,
                 "group": subject.group,
-                "vertex_idx": int(self._vertex_indices[vi]),
+                "vertex_idx": int(vertex_indices[vi]),
                 "spectral_slope": float(slope[vi]),
                 "peak_alpha_freq": float(peak_alpha[vi]),
             })
+
+        return {
+            "uid": uid, "group": subject.group, "sfreq": float(sfreq),
+            "vertex_indices": vertex_indices, "source_coords": source_coords,
+            "subject_data": {"band_power": band_power, "slope": slope,
+                             "peak_alpha": peak_alpha},
+            "band_power_rows": band_power_rows, "feature_rows": feature_rows,
+        }
+
+    def _merge_subject(self, payload) -> None:
+        uid = payload["uid"]
+        if self._sfreq is None:
+            self._sfreq = payload["sfreq"]
+        elif payload["sfreq"] != self._sfreq:
+            logger.warning("Subject %s has sfreq=%.0f, expected %.0f",
+                           uid, payload["sfreq"], self._sfreq)
+        if self._vertex_indices is None:
+            self._vertex_indices = payload["vertex_indices"]
+            self._source_coords = payload["source_coords"]
+            if self.config.has_vertex_filter:
+                logger.info("Vertex filter: %d vertices retained",
+                            len(self._vertex_indices))
+        self._subject_groups[uid] = payload["group"]
+        self._subject_data[uid] = payload["subject_data"]
+        self._band_power_rows.extend(payload["band_power_rows"])
+        self._feature_rows.extend(payload["feature_rows"])
 
     def aggregate(self) -> None:
         """Export CSVs."""

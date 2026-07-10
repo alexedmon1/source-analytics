@@ -89,7 +89,8 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         self._vertex_indices = None
         self._cluster_results.clear()
 
-    def process_subject(self, subject: SubjectInfo) -> None:
+    def _compute_subject(self, subject: SubjectInfo):
+        """Pure per-subject connectivity + FCD compute (parallel-safe)."""
         loader = SubjectLoader(subject.data_dir)
         uid = f"{subject.group}_{subject.subject_id}"
 
@@ -98,25 +99,14 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         sfreq = loader.load_sfreq()
         coords = loader.load_source_coords()
 
-        if self._sfreq is None:
-            self._sfreq = sfreq
+        mask = self.config.get_vertex_mask(coords)
+        vertex_indices = np.where(mask)[0]
+        source_coords = coords[mask]
+        stc_data = stc_data[vertex_indices]
 
-        # Apply vertex filter (compute mask once from first subject)
-        if self._vertex_indices is None:
-            mask = self.config.get_vertex_mask(coords)
-            self._vertex_indices = np.where(mask)[0]
-            self._source_coords = coords[mask]
-            if self.config.has_vertex_filter:
-                logger.info(
-                    "Vertex filter: %d/%d vertices retained",
-                    len(self._vertex_indices), len(coords),
-                )
-
-        stc_data = stc_data[self._vertex_indices]
-
-        self._subject_groups[uid] = subject.group
         subject_fcd: dict[str, dict[str, np.ndarray]] = {}
         subject_conn: dict[str, dict[str, np.ndarray]] = {}
+        fcd_rows: list[dict] = []
 
         use_multi = len(self._metrics) > 1
 
@@ -179,10 +169,10 @@ class VertexConnectivityAnalysis(BaseAnalysis):
 
                 n_vertices = len(fcd)
                 for vi in range(n_vertices):
-                    self._fcd_rows.append({
+                    fcd_rows.append({
                         "subject": uid,
                         "group": subject.group,
-                        "vertex_idx": int(self._vertex_indices[vi]),
+                        "vertex_idx": int(vertex_indices[vi]),
                         "band": band_name,
                         "metric": metric,
                         "fcd": float(fcd[vi]),
@@ -191,8 +181,27 @@ class VertexConnectivityAnalysis(BaseAnalysis):
             subject_fcd[band_name] = band_fcd
             subject_conn[band_name] = band_conn
 
-        self._subject_data[uid] = {"fcd": subject_fcd}
-        self._conn_matrices[uid] = subject_conn
+        return {
+            "uid": uid, "group": subject.group, "sfreq": float(sfreq),
+            "vertex_indices": vertex_indices, "source_coords": source_coords,
+            "subject_fcd": subject_fcd, "subject_conn": subject_conn,
+            "fcd_rows": fcd_rows,
+        }
+
+    def _merge_subject(self, payload) -> None:
+        uid = payload["uid"]
+        if self._sfreq is None:
+            self._sfreq = payload["sfreq"]
+        if self._vertex_indices is None:
+            self._vertex_indices = payload["vertex_indices"]
+            self._source_coords = payload["source_coords"]
+            if self.config.has_vertex_filter:
+                logger.info("Vertex filter: %d vertices retained",
+                            len(self._vertex_indices))
+        self._subject_groups[uid] = payload["group"]
+        self._subject_data[uid] = {"fcd": payload["subject_fcd"]}
+        self._conn_matrices[uid] = payload["subject_conn"]
+        self._fcd_rows.extend(payload["fcd_rows"])
 
     def aggregate(self) -> None:
         data_dir = self.output_dir / "data"

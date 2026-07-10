@@ -41,11 +41,12 @@ def _run_single(
     analysis_name: str,
     steps: set[str] | None = None,
     select: dict[str, frozenset[str]] | None = None,
+    jobs: int = 1,
 ):
     """Run one analysis on a (possibly paradigm-scoped) config."""
     analyzer = StudyAnalyzer(config)
     _print_study_summary(config, analyzer)
-    analyzer.run_analysis(analysis_name, steps=steps, select=select)
+    analyzer.run_analysis(analysis_name, steps=steps, select=select, jobs=jobs)
     print(f"\nDone. Output: {config.output_dir / analysis_name}")
 
 
@@ -142,6 +143,7 @@ def cmd_run(args):
 
     # Parse --metric / --band / --select sub-output selection
     select = _parse_selection(args)
+    jobs = getattr(args, "jobs", 1) or 1
 
     strict = getattr(args, "strict_output", False)
     force = getattr(args, "force", False)
@@ -153,7 +155,7 @@ def cmd_run(args):
                 # Scope to one paradigm + one analysis
                 aconfig = config.for_paradigm_analysis(args.paradigm, args.analysis)
                 _check_output_clean(aconfig.output_dir, args.analysis, strict=strict, force=force)
-                _run_single(aconfig, args.analysis, steps=steps, select=select)
+                _run_single(aconfig, args.analysis, steps=steps, select=select, jobs=jobs)
             else:
                 # Run all analyses listed for this paradigm
                 analyses = config.get_paradigm_analyses(args.paradigm)
@@ -166,7 +168,7 @@ def cmd_run(args):
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(args.paradigm, analysis_name)
                     _check_output_clean(aconfig.output_dir, analysis_name, strict=strict, force=force)
-                    _run_single(aconfig, analysis_name, steps=steps, select=select)
+                    _run_single(aconfig, analysis_name, steps=steps, select=select, jobs=jobs)
                     print()
         else:
             if args.analysis:
@@ -185,7 +187,7 @@ def cmd_run(args):
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(pname, analysis_name)
                     _check_output_clean(aconfig.output_dir, analysis_name, strict=strict, force=force)
-                    _run_single(aconfig, analysis_name, steps=steps, select=select)
+                    _run_single(aconfig, analysis_name, steps=steps, select=select, jobs=jobs)
                     print()
     else:
         # Legacy single-paradigm config
@@ -195,7 +197,7 @@ def cmd_run(args):
         _check_output_clean(config.output_dir, args.analysis, strict=strict, force=force)
         analyzer = StudyAnalyzer(config)
         _print_study_summary(config, analyzer)
-        analyzer.run_analysis(args.analysis, steps=steps, select=select)
+        analyzer.run_analysis(args.analysis, steps=steps, select=select, jobs=jobs)
         print(f"\nDone. Output: {config.output_dir / args.analysis}")
 
 
@@ -574,6 +576,13 @@ def main():
         "--steps",
         help="Comma-separated lifecycle steps to run (default: all). "
         f"Valid: {', '.join(sorted(VALID_STEPS))}",
+    )
+    p_run.add_argument(
+        "--jobs", "-j", type=int, default=1, metavar="N",
+        help="Parallel worker processes for the per-subject process step "
+        "(default 1 = serial). N<=0 uses all-but-one core. Only parallel-capable "
+        "modules (the vertex analyses) use it; others run serially. Results are "
+        "identical to serial regardless of N.",
     )
     p_run.add_argument(
         "--metric",

@@ -94,34 +94,30 @@ class VertexCrossFreqAnalysis(BaseAnalysis):
         self._vertex_indices = None
 
     # ------------------------------------------------------------ processing
-    def process_subject(self, subject: SubjectInfo) -> None:
+    def _compute_subject(self, subject: SubjectInfo):
+        """Pure per-subject cross-frequency compute (parallel-safe): loads the
+        subject, computes its maps/matrices, returns a payload. No self mutation."""
         loader = SubjectLoader(subject.data_dir)
         uid = f"{subject.group}_{subject.subject_id}"
 
         stc_data = loader.load_source_timecourses()
         sfreq = loader.load_sfreq()
         coords = loader.load_source_coords()
-        if self._sfreq is None:
-            self._sfreq = sfreq
 
-        if self._vertex_indices is None:
-            mask = self.config.get_vertex_mask(coords)
-            self._vertex_indices = np.where(mask)[0]
-            self._source_coords = coords[mask]
-            if self.config.has_vertex_filter:
-                logger.info("Vertex filter: %d/%d vertices retained",
-                            len(self._vertex_indices), len(coords))
-        stc_data = stc_data[self._vertex_indices]
+        mask = self.config.get_vertex_mask(coords)
+        vertex_indices = np.where(mask)[0]
+        source_coords = coords[mask]
+        stc_data = stc_data[vertex_indices]
 
         pairs = get_valid_pac_pairs(self._selected_bands())
         if not pairs:
             logger.warning("No valid cross-frequency band pairs for %s", subject.subject_id)
-            return
+            return None
 
-        self._subject_groups[uid] = subject.group
-        self._subject_maps.setdefault(uid, {})
-        self._matrices.setdefault(uid, {})
         bands = self.config.bands
+        subject_maps: dict[str, np.ndarray] = {}
+        matrices: dict[str, np.ndarray] = {}
+        map_rows: list[dict] = []
 
         for phase_band, amp_band in pairs:
             band_x, band_y = bands[phase_band], bands[amp_band]
@@ -136,7 +132,7 @@ class VertexCrossFreqAnalysis(BaseAnalysis):
                     vmap = z
                 elif metric == "aac":
                     mat = compute_aac(stc_data, sfreq, band_x, band_y)
-                    self._matrices[uid][f"aac|{freq_pair}"] = mat
+                    matrices[f"aac|{freq_pair}"] = mat
                     vmap = _node_strength(mat)
                 else:  # ppc
                     if self._ppc_surrogates > 0:
@@ -148,17 +144,38 @@ class VertexCrossFreqAnalysis(BaseAnalysis):
                     else:
                         plf = compute_ppc(stc_data, sfreq, band_x, band_y,
                                           n=_nm_ratio(band_x, band_y)[0], m=1)
-                    self._matrices[uid][f"ppc|{freq_pair}"] = plf
+                    matrices[f"ppc|{freq_pair}"] = plf
                     vmap = _node_strength(plf)
 
-                self._subject_maps[uid][f"{metric}|{freq_pair}"] = vmap
+                subject_maps[f"{metric}|{freq_pair}"] = vmap
                 for vi in range(len(vmap)):
-                    self._map_rows.append({
+                    map_rows.append({
                         "subject": uid, "group": subject.group,
-                        "vertex_idx": int(self._vertex_indices[vi]),
+                        "vertex_idx": int(vertex_indices[vi]),
                         "metric": metric, "freq_pair": freq_pair,
                         "value": float(vmap[vi]),
                     })
+
+        return {
+            "uid": uid, "group": subject.group, "sfreq": float(sfreq),
+            "vertex_indices": vertex_indices, "source_coords": source_coords,
+            "subject_maps": subject_maps, "matrices": matrices, "map_rows": map_rows,
+        }
+
+    def _merge_subject(self, payload) -> None:
+        uid = payload["uid"]
+        if self._sfreq is None:
+            self._sfreq = payload["sfreq"]
+        if self._vertex_indices is None:
+            self._vertex_indices = payload["vertex_indices"]
+            self._source_coords = payload["source_coords"]
+            if self.config.has_vertex_filter:
+                logger.info("Vertex filter: %d vertices retained",
+                            len(self._vertex_indices))
+        self._subject_groups[uid] = payload["group"]
+        self._subject_maps[uid] = payload["subject_maps"]
+        self._matrices[uid] = payload["matrices"]
+        self._map_rows.extend(payload["map_rows"])
 
     # ----------------------------------------------------------- aggregate
     def aggregate(self) -> None:

@@ -98,26 +98,19 @@ class VertexDirectedAnalysis(BaseAnalysis):
         outflow = m.sum(axis=0) / (n - 1)   # col i: total outflow from vertex i
         return {"outflow": outflow, "inflow": inflow, "netflow": outflow - inflow}
 
-    def process_subject(self, subject: SubjectInfo) -> None:
+    def _compute_subject(self, subject: SubjectInfo):
+        """Pure per-subject ridge-MVAR DTF compute (parallel-safe)."""
         loader = SubjectLoader(subject.data_dir)
         uid = f"{subject.group}_{subject.subject_id}"
 
         stc_data = loader.load_source_timecourses()  # signed
         sfreq = loader.load_sfreq()
         coords = loader.load_source_coords()
-        if self._sfreq is None:
-            self._sfreq = sfreq
 
-        if self._vertex_indices is None:
-            mask = self.config.get_vertex_mask(coords)
-            self._vertex_indices = np.where(mask)[0]
-            self._source_coords = coords[mask]
-            if self.config.has_vertex_filter:
-                logger.info(
-                    "Vertex filter: %d/%d vertices retained",
-                    len(self._vertex_indices), len(coords),
-                )
-        stc_data = stc_data[self._vertex_indices]
+        mask = self.config.get_vertex_mask(coords)
+        vertex_indices = np.where(mask)[0]
+        source_coords = coords[mask]
+        stc_data = stc_data[vertex_indices]
 
         # One ridge-MVAR fit per subject; DTF read out across all bands.
         A, _ = fit_mvar(stc_data, order=self._mvar_order, ridge=self._mvar_ridge)
@@ -130,9 +123,9 @@ class VertexDirectedAnalysis(BaseAnalysis):
         freqs = np.linspace(0, sfreq / 2, self._n_freqs)
         dtf = dtf_spectrum(A, sfreq, freqs)  # (n, n, n_freqs), [i,j] = j -> i
 
-        self._subject_groups[uid] = subject.group
         subj_maps: dict[str, dict[str, np.ndarray]] = {}
         subj_mats: dict[str, np.ndarray] = {}
+        rows: list[dict] = []
 
         for band_name, (fmin, fmax) in self._selected_bands().items():
             idx = (freqs >= fmin) & (freqs <= fmax)
@@ -142,17 +135,35 @@ class VertexDirectedAnalysis(BaseAnalysis):
             subj_mats[band_name] = mat
             maps = self._reduce(mat)
             subj_maps[band_name] = maps
-            for vi in range(len(self._vertex_indices)):
+            for vi in range(len(vertex_indices)):
                 row = {
                     "subject": uid, "group": subject.group,
-                    "vertex_idx": int(self._vertex_indices[vi]), "band": band_name,
+                    "vertex_idx": int(vertex_indices[vi]), "band": band_name,
                 }
                 for meas in self._measures:
                     row[meas] = float(maps[meas][vi])
-                self._rows.append(row)
+                rows.append(row)
 
-        self._subject_maps[uid] = subj_maps
-        self._dtf_matrices[uid] = subj_mats
+        return {
+            "uid": uid, "group": subject.group, "sfreq": float(sfreq),
+            "vertex_indices": vertex_indices, "source_coords": source_coords,
+            "subject_maps": subj_maps, "dtf_matrices": subj_mats, "rows": rows,
+        }
+
+    def _merge_subject(self, payload) -> None:
+        uid = payload["uid"]
+        if self._sfreq is None:
+            self._sfreq = payload["sfreq"]
+        if self._vertex_indices is None:
+            self._vertex_indices = payload["vertex_indices"]
+            self._source_coords = payload["source_coords"]
+            if self.config.has_vertex_filter:
+                logger.info("Vertex filter: %d vertices retained",
+                            len(self._vertex_indices))
+        self._subject_groups[uid] = payload["group"]
+        self._subject_maps[uid] = payload["subject_maps"]
+        self._dtf_matrices[uid] = payload["dtf_matrices"]
+        self._rows.extend(payload["rows"])
 
     def aggregate(self) -> None:
         data_dir = self.output_dir / "data"

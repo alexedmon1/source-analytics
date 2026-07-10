@@ -241,10 +241,80 @@ class BaseAnalysis(ABC):
         """Initialize analysis-specific data structures."""
         ...
 
-    @abstractmethod
     def process_subject(self, subject: SubjectInfo) -> None:
-        """Process a single subject's data. Called once per subject."""
-        ...
+        """Process a single subject's data. Called once per subject (serial path).
+
+        Default implementation = compute the per-subject payload then merge it,
+        so a module that implements the parallel-friendly
+        :meth:`_compute_subject` / :meth:`_merge_subject` pair gets the serial
+        path for free. Legacy modules override this directly instead.
+        """
+        payload = self._compute_subject(subject)
+        if payload is not None:
+            self._merge_subject(payload)
+
+    # ---- Parallel-friendly per-subject contract (opt-in) ------------------ #
+    # A module becomes ``--jobs`` parallel-capable by implementing BOTH of these:
+    #   _compute_subject: pure, loads the subject's data and RETURNS a picklable
+    #                     payload; MUST NOT mutate self (runs in a worker process).
+    #   _merge_subject:   stores a payload into self's accumulators (runs in the
+    #                     parent, serially — order-independent).
+    def _compute_subject(self, subject: SubjectInfo):
+        """Pure per-subject compute → picklable payload (or None). Override to
+        enable ``--jobs`` parallelism."""
+        raise NotImplementedError(
+            f"{self.name} does not implement _compute_subject; it must either "
+            "override process_subject (serial) or provide _compute_subject/_merge_subject."
+        )
+
+    def _merge_subject(self, payload) -> None:
+        """Merge a payload from :meth:`_compute_subject` into self."""
+        raise NotImplementedError
+
+    def _parallel_capable(self) -> bool:
+        """True when this module overrides the parallel per-subject compute."""
+        return type(self)._compute_subject is not BaseAnalysis._compute_subject
+
+    def _resolve_jobs(self, jobs: int) -> int:
+        """Effective worker count. CLI ``jobs`` wins; else ``jobs:`` in the study
+        config; ``-1``/``0`` → all but one core. Clamped to [1, #subjects]."""
+        import os
+
+        n = jobs
+        if n in (None, 1):
+            cfg_n = self.config.raw.get("jobs")
+            if cfg_n is not None:
+                n = int(cfg_n)
+        if n is None:
+            n = 1
+        if n <= 0:  # -1 / 0 → auto: leave one core free
+            n = max(1, (os.cpu_count() or 1) - 1)
+        return max(1, int(n))
+
+    def _process_subjects_parallel(self, subjects: list[SubjectInfo], n_jobs: int) -> None:
+        """Compute per-subject payloads in worker processes, merge in the parent.
+
+        Each worker runs :meth:`_compute_subject` (pure; self-loads the subject's
+        data) and returns a picklable payload; the parent merges serially, so the
+        result is identical to the serial path regardless of worker count/order.
+        """
+        from joblib import Parallel, delayed
+
+        logger.info("Step 2/6: Processing %d subjects (%d parallel workers)",
+                    len(subjects), n_jobs)
+        results = Parallel(n_jobs=n_jobs, prefer="processes")(
+            delayed(_compute_subject_worker)(self, s) for s in subjects
+        )
+        merged = 0
+        for subject, payload in zip(subjects, results):
+            if payload is None:
+                continue
+            try:
+                self._merge_subject(payload)
+                merged += 1
+            except Exception as e:  # noqa: BLE001
+                logger.error("  Failed to merge %s: %s", subject.subject_id, e)
+        logger.info("  Merged %d/%d subjects", merged, len(subjects))
 
     @abstractmethod
     def aggregate(self) -> None:
@@ -392,6 +462,7 @@ class BaseAnalysis(ABC):
         subjects: list[SubjectInfo],
         steps: set[str] | None = None,
         select: dict[str, frozenset[str]] | None = None,
+        jobs: int = 1,
     ) -> None:
         """Execute the analysis lifecycle.
 
@@ -424,13 +495,17 @@ class BaseAnalysis(ABC):
         self.setup()
 
         if _should_run("process"):
-            logger.info("Step 2/6: Processing %d subjects", len(subjects))
-            for i, subject in enumerate(subjects, 1):
-                logger.info("  [%d/%d] %s (%s)", i, len(subjects), subject.subject_id, subject.group)
-                try:
-                    self.process_subject(subject)
-                except Exception as e:
-                    logger.error("  Failed to process %s: %s", subject.subject_id, e)
+            n_jobs = self._resolve_jobs(jobs)
+            if n_jobs > 1 and self._parallel_capable() and len(subjects) > 1:
+                self._process_subjects_parallel(subjects, n_jobs)
+            else:
+                logger.info("Step 2/6: Processing %d subjects", len(subjects))
+                for i, subject in enumerate(subjects, 1):
+                    logger.info("  [%d/%d] %s (%s)", i, len(subjects), subject.subject_id, subject.group)
+                    try:
+                        self.process_subject(subject)
+                    except Exception as e:
+                        logger.error("  Failed to process %s: %s", subject.subject_id, e)
         else:
             logger.info("Step 2/6: Processing — skipped")
 
@@ -459,3 +534,17 @@ class BaseAnalysis(ABC):
             logger.info("Step 6/6: Summary — skipped")
 
         logger.info("=== %s complete ===", self.name)
+
+
+def _compute_subject_worker(analysis: "BaseAnalysis", subject: SubjectInfo):
+    """Top-level worker for the parallel process step (picklable entry point).
+
+    Runs in a joblib worker process: computes ONE subject's payload via
+    ``analysis._compute_subject`` and returns it. Failures are logged and return
+    ``None`` so a bad subject can't abort the whole sweep.
+    """
+    try:
+        return analysis._compute_subject(subject)
+    except Exception as e:  # noqa: BLE001
+        logger.error("  Failed to process %s: %s", subject.subject_id, e)
+        return None

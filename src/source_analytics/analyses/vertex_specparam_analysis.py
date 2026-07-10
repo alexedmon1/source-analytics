@@ -91,18 +91,14 @@ class VertexSpecparamAnalysis(BaseAnalysis):
         self._source_coords = None
         self._cluster_results.clear()
 
-    def process_subject(self, subject: SubjectInfo) -> None:
+    def _compute_subject(self, subject: SubjectInfo):
+        """Pure per-subject specparam/FOOOF compute (parallel-safe)."""
         loader = SubjectLoader(subject.data_dir)
         uid = f"{subject.group}_{subject.subject_id}"
 
         stc_data = loader.load_source_timecourses()
         sfreq = loader.load_sfreq()
         coords = loader.load_source_coords()
-
-        if self._sfreq is None:
-            self._sfreq = sfreq
-        if self._source_coords is None:
-            self._source_coords = coords
 
         # Compute PSD
         fmax = self._freq_range[1] + 10
@@ -132,9 +128,7 @@ class VertexSpecparamAnalysis(BaseAnalysis):
             bands=self._bands,
         )
 
-        self._subject_groups[uid] = subject.group
-        self._subject_data[uid] = params
-
+        param_rows: list[dict] = []
         n_vertices = psd.shape[0]
         for vi in range(n_vertices):
             row = {
@@ -151,7 +145,22 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 row[f"has_{key}_peak"] = bool(params[f"has_{key}_peak"][vi])
                 row[f"{key}_peak_freq"] = float(params[f"{key}_peak_freq"][vi])
                 row[f"{key}_peak_power"] = float(params[f"{key}_peak_power"][vi])
-            self._param_rows.append(row)
+            param_rows.append(row)
+
+        return {
+            "uid": uid, "group": subject.group, "sfreq": float(sfreq),
+            "source_coords": coords, "params": params, "param_rows": param_rows,
+        }
+
+    def _merge_subject(self, payload) -> None:
+        uid = payload["uid"]
+        if self._sfreq is None:
+            self._sfreq = payload["sfreq"]
+        if self._source_coords is None:
+            self._source_coords = payload["source_coords"]
+        self._subject_groups[uid] = payload["group"]
+        self._subject_data[uid] = payload["params"]
+        self._param_rows.extend(payload["param_rows"])
 
     def aggregate(self) -> None:
         data_dir = self.output_dir / "data"
