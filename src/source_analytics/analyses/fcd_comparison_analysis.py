@@ -34,6 +34,7 @@ import pandas as pd
 
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
+from ..viz.constants import metric_display
 from .base import BaseAnalysis
 from .electrode_comparison_analysis import _hedges_g_ci
 
@@ -208,7 +209,7 @@ class FCDComparisonAnalysis(BaseAnalysis):
                 ax.plot(lims, lims, ls="--", c="grey", lw=0.8)
             ax.set_xlabel("Sensor mean FCD")
             ax.set_ylabel("Source mean FCD")
-            ax.set_title(f"Source vs sensor mean FCD — {metric}")
+            ax.set_title(f"Source vs sensor mean FCD — {metric_display(metric)}")
             ax.legend(fontsize=7, title="Band")
             fig.tight_layout()
             fig.savefig(self.fig_dir / f"fcd_concordance_mean_{metric}.png", dpi=200)
@@ -224,7 +225,7 @@ class FCDComparisonAnalysis(BaseAnalysis):
             ax.set_xticks(x)
             ax.set_xticklabels(bands, rotation=45, ha="right", fontsize=8)
             ax.set_ylabel("FCD spatial CV (SD/mean)")
-            ax.set_title(f"FCD spatial heterogeneity — {metric}")
+            ax.set_title(f"FCD spatial heterogeneity — {metric_display(metric)}")
             ax.legend(fontsize=8)
             fig.tight_layout()
             fig.savefig(self.fig_dir / f"fcd_heterogeneity_{metric}.png", dpi=200)

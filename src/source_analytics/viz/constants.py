@@ -41,6 +41,22 @@ METRIC_LABELS = {
     "partial_corr": "Partial Correlation",
 }
 
+# Compact display for figure titles/labels (proper acronym case), keyed by the
+# lowercase metric token. Prefer this in plots over the raw column name.
+METRIC_DISPLAY = {
+    "imag_coherence": "Imag. coherence", "coherence": "Coherence",
+    "pli": "PLI", "wpli": "wPLI", "dwpli": "dwPLI", "dpli": "dPLI",
+    "aec": "AEC", "partial_corr": "Partial corr.", "partial_correlation": "Partial corr.",
+    "pac": "PAC", "aac": "AAC", "ppc": "PPC", "dtf": "DTF", "te": "TE",
+}
+
+
+def metric_display(m) -> str:
+    """Compact, properly-capitalized metric label for plots (AEC, dwPLI, …)."""
+    if m is None:
+        return ""
+    return METRIC_DISPLAY.get(str(m).strip().lower(), str(m))
+
 # Group display settings
 GROUP_COLORS = {
     "KO_VEH": "#E74C3C",
