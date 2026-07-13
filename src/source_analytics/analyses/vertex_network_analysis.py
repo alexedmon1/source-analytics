@@ -334,7 +334,45 @@ class _VertexNetworkBase(NetworkAnalysisBase):
         )
 
     # -------------------------------------------------------- nbs figures -- #
+    def _save_nbs_state(self) -> None:
+        """Persist the significant subnetworks' t-matrices so _nbs_figures can be
+        regenerated with `--steps figures` (source_coords already saved). Only
+        significant keys are stored (float32), keeping the pickle small."""
+        sig = {k: v.t_matrix.astype("float32")
+               for k, v in self._nbs_results.items()
+               if getattr(v, "n_significant_components", 0) > 0}
+        if not sig:
+            return
+        path = self.output_dir / "data" / f"{self.name}_nbs_state.pkl"
+        with open(path, "wb") as f:
+            pickle.dump(sig, f)
+        logger.info("Saved NBS figure state (%d significant key(s))", len(sig))
+
+    def _load_nbs_state(self) -> bool:
+        """Reload persisted NBS figure state (t-matrices + source coords)."""
+        from types import SimpleNamespace
+        path = self.output_dir / "data" / f"{self.name}_nbs_state.pkl"
+        if not path.exists():
+            return False
+        try:
+            with open(path, "rb") as f:
+                sig = pickle.load(f)
+        except Exception:  # noqa: BLE001
+            return False
+        # every stored key is significant by construction
+        self._nbs_results = {
+            k: SimpleNamespace(t_matrix=t, n_significant_components=1)
+            for k, t in sig.items()
+        }
+        if self._source_coords is None:
+            cc = self.output_dir / "data" / "source_coords.csv"
+            if cc.exists():
+                self._source_coords = pd.read_csv(cc)[["x", "y", "z"]].to_numpy()
+        return True
+
     def _nbs_figures(self) -> None:
+        if not self._nbs_results:
+            self._load_nbs_state()
         if self._source_coords is None:
             return
         for key, nbs in self._nbs_results.items():
@@ -469,6 +507,7 @@ class VertexNBSAnalysis(_VertexNetworkBase):
     def statistics(self) -> None:
         self._run_nbs()
         self._run_nbs_hypotheses()
+        self._save_nbs_state()
 
     def figures(self) -> None:
         self._nbs_figures()
@@ -494,6 +533,7 @@ class VertexNetworkAnalysis(_VertexNetworkBase):
         self._graph_statistics()
         self._run_nbs()
         self._run_nbs_hypotheses()
+        self._save_nbs_state()
 
     def figures(self) -> None:
         self._nbs_figures()
