@@ -655,7 +655,7 @@ def plot_connectivity_multicontrast(
     plot_type: str = "circos",
     title: str = "",
     threshold: float = 0.0,
-    dpi: int = 300,
+    dpi: int = 150,
     show_roi_labels: bool = True,
 ) -> None:
     """Multi-row comparison figure: one row per contrast.
@@ -685,18 +685,44 @@ def plot_connectivity_multicontrast(
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
 
-    n_rows = len(contrast_data)
-    if n_rows == 0:
+    n_contrasts = len(contrast_data)
+    if n_contrasts == 0:
         return
 
-    if plot_type == "circos":
-        col_w = 8 if show_roi_labels else 8
-        row_h = 9 if show_roi_labels else 9
-        fig, axes = plt.subplots(n_rows, 3, figsize=(col_w * 3, row_h * n_rows))
-        if n_rows == 1:
-            axes = axes[np.newaxis, :]  # ensure 2D
+    # Each contrast is a (Group A | Group B | Difference) triplet. Lay the
+    # triplets out two-to-a-row instead of one, so N contrasts form a roughly
+    # square grid rather than a single very tall column (the old n_rows x 3
+    # layout produced a ~24k-px ribbon for FORGE's 11 contrasts).
+    per_row = 1 if n_contrasts == 1 else 2
+    grid_rows = (n_contrasts + per_row - 1) // per_row
+    grid_cols = 3 * per_row
 
-        for row_idx, (mat_a, mat_b, row_label) in enumerate(contrast_data):
+    def _triplet_slot(idx):
+        """(grid row, first grid column) of contrast *idx*'s triplet."""
+        return idx // per_row, (idx % per_row) * 3
+
+    def _blank_unused(axes):
+        """Turn off any grid cell not backing a contrast triplet (odd N)."""
+        used = set()
+        for idx in range(n_contrasts):
+            r, c0 = _triplet_slot(idx)
+            used.update({(r, c0), (r, c0 + 1), (r, c0 + 2)})
+        for r in range(grid_rows):
+            for c in range(grid_cols):
+                if (r, c) not in used:
+                    axes[r, c].axis("off")
+
+    if plot_type == "circos":
+        col_w = 8
+        row_h = 9
+        fig, axes = plt.subplots(
+            grid_rows, grid_cols,
+            figsize=(col_w * grid_cols, row_h * grid_rows), squeeze=False,
+        )
+        _blank_unused(axes)
+
+        for idx, (mat_a, mat_b, row_label) in enumerate(contrast_data):
+            row_idx, col0 = _triplet_slot(idx)
             diff = mat_a - mat_b
 
             group_vmax = max(np.nanmax(np.abs(mat_a)), np.nanmax(np.abs(mat_b)))
@@ -722,7 +748,7 @@ def plot_connectivity_multicontrast(
             ]
 
             for col_idx, (mat, col_label, cm, lo, hi, thresh) in enumerate(panels):
-                ax = axes[row_idx, col_idx]
+                ax = axes[row_idx, col0 + col_idx]
                 plot_circos(
                     mat, roi_labels, region_names, region_sizes, ax,
                     cmap=cm, threshold=thresh, vmin=lo, vmax=hi,
@@ -730,20 +756,20 @@ def plot_connectivity_multicontrast(
                 )
                 ax.set_title(col_label, fontsize=16, fontweight="bold", pad=10)
 
-            # Row label on the left
-            axes[row_idx, 0].text(
+            # Contrast label on the left of this triplet
+            axes[row_idx, col0].text(
                 -1.55, 0, row_label,
                 fontsize=16, fontweight="bold",
                 ha="right", va="center", rotation=90,
             )
 
-            # Colorbars for this row
+            # Colorbars for this triplet
             sm_grp = ScalarMappable(
                 cmap="YlOrRd", norm=Normalize(vmin=group_vmin, vmax=group_vmax),
             )
             sm_grp.set_array([])
             cbar_grp = fig.colorbar(
-                sm_grp, ax=[axes[row_idx, 0], axes[row_idx, 1]],
+                sm_grp, ax=[axes[row_idx, col0], axes[row_idx, col0 + 1]],
                 orientation="horizontal",
                 fraction=0.035, pad=0.04, shrink=0.5,
             )
@@ -755,7 +781,7 @@ def plot_connectivity_multicontrast(
             )
             sm_diff.set_array([])
             cbar_diff = fig.colorbar(
-                sm_diff, ax=axes[row_idx, 2],
+                sm_diff, ax=axes[row_idx, col0 + 2],
                 orientation="horizontal",
                 fraction=0.035, pad=0.04, shrink=0.5,
             )
@@ -765,11 +791,16 @@ def plot_connectivity_multicontrast(
         plt.subplots_adjust(hspace=0.15, wspace=0.05)
 
     elif plot_type == "heatmap":
-        fig, axes = plt.subplots(n_rows, 3, figsize=(30, 9 * n_rows))
-        if n_rows == 1:
-            axes = axes[np.newaxis, :]
+        col_w = 10
+        row_h = 9
+        fig, axes = plt.subplots(
+            grid_rows, grid_cols,
+            figsize=(col_w * grid_cols, row_h * grid_rows), squeeze=False,
+        )
+        _blank_unused(axes)
 
-        for row_idx, (mat_a, mat_b, row_label) in enumerate(contrast_data):
+        for idx, (mat_a, mat_b, row_label) in enumerate(contrast_data):
+            row_idx, col0 = _triplet_slot(idx)
             diff = mat_a - mat_b
 
             group_vmax = max(np.nanmax(np.abs(mat_a)), np.nanmax(np.abs(mat_b)))
@@ -787,7 +818,7 @@ def plot_connectivity_multicontrast(
                 (mat_b, label_b, "YlOrRd", group_vmin, group_vmax),
                 (diff, f"{label_a} \u2212 {label_b}", "RdBu_r", -diff_vmax, diff_vmax),
             ]):
-                ax = axes[row_idx, col_idx]
+                ax = axes[row_idx, col0 + col_idx]
                 _, im = plot_connectivity_heatmap(
                     mat, roi_labels, region_names, region_sizes, ax,
                     cmap=cm, vmin=lo, vmax=hi, mask_diagonal=True,
@@ -795,8 +826,8 @@ def plot_connectivity_multicontrast(
                 ax.set_title(col_label, fontsize=12, fontweight="bold")
                 fig.colorbar(im, ax=ax, shrink=0.75)
 
-            # Row label
-            axes[row_idx, 0].set_ylabel(
+            # Contrast label on the left of this triplet
+            axes[row_idx, col0].set_ylabel(
                 row_label, fontsize=12, fontweight="bold", labelpad=10,
             )
 

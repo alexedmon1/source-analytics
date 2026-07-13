@@ -423,7 +423,21 @@ class ElectrodeConnectivityAnalysis(BaseAnalysis):
                 n_perms=self._n_permutations, threshold=self._cluster_threshold,
                 distance_mm=adj,
                 hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
+                node_labels=self._channel_region_labels(),
             )
+
+    def _channel_region_labels(self) -> list[str | None] | None:
+        """Per-channel electrode-region label (Left Frontal, Right Frontal, …)
+        aligned to ``self._ch_names``, from the study's ``electrode_categories``
+        grouping. Used to name which sensor region each cluster covers (the
+        montage has no brain atlas). None if no grouping is configured."""
+        categories = self.config.raw.get("electrode_categories") or {}
+        if not categories or not self._ch_names:
+            return None
+        ch_to_region = {
+            ch: region for region, chans in categories.items() for ch in chans
+        }
+        return [ch_to_region.get(ch) for ch in self._ch_names]
 
     def figures(self) -> None:
         """Sensor topomaps are rendered by the source-vs-sensor comparator

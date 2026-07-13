@@ -322,6 +322,7 @@ def write_module_hypotheses_perm(
     hypothesis: str | None = None,
     seed: int = 42,
     atlas_dir=None,
+    node_labels: list[str | None] | None = None,
 ):
     """Run every declared hypothesis over per-cell vertex maps; write <prefix>_hypotheses.csv.
 
@@ -329,7 +330,10 @@ def write_module_hypotheses_perm(
     ``atlas_dir`` (optional): when given, each cluster row gets a ``region``
     column naming its anatomical coverage (skip for non-source modules, e.g.
     scalp-electrode connectivity, whose coords are a montage, not brain mm).
-    Returns the rows DataFrame (or None if nothing declared).
+    ``node_labels`` (optional): an explicit per-node label list (one entry per
+    map element, ``None`` where unlabelled) used *instead* of atlas labeling —
+    e.g. scalp channels grouped into electrode regions (Left Frontal, …). Takes
+    precedence over ``atlas_dir``. Returns the rows DataFrame (or None).
     """
     import pandas as pd
     from pathlib import Path
@@ -339,9 +343,13 @@ def write_module_hypotheses_perm(
         logger.info("  No hypotheses/contrasts declared — skipping %s perm hypotheses.", prefix)
         return None
 
-    # Label vertices once (coords are shared across all hypotheses/cells).
+    # Label nodes once (shared across all hypotheses/cells). An explicit
+    # node_labels list wins (sensor montage); otherwise fall back to atlas
+    # labeling of the source coordinates.
     vertex_rois = None
-    if atlas_dir is not None:
+    if node_labels is not None:
+        vertex_rois = list(node_labels)
+    elif atlas_dir is not None:
         try:
             from ..atlas.atlas_utils import label_vertices_to_rois
             vertex_rois = label_vertices_to_rois(np.asarray(coords, dtype=float), atlas_dir)
