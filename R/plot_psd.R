@@ -36,6 +36,7 @@ theme_pub <- function(base_size = 14) {
 #' @param fmax maximum frequency to display
 plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
                                 group_labels, group_order, output_dir,
+                                group_linetypes = NULL,
                                 fmax = 80, notch_lo = 55, notch_hi = 65) {
 
   notch_width <- notch_hi - notch_lo
@@ -71,6 +72,16 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
 
   color_vals <- group_colors[group_order]
   names(color_vals) <- group_labels[group_order]
+
+  # Per-group line patterns (fall back to all solid). Kept simple so overlaid
+  # curves stay legible; the two primary groups are solid by config.
+  if (is.null(group_linetypes) || length(group_linetypes) == 0) {
+    linetype_vals <- setNames(rep("solid", length(group_order)), group_labels[group_order])
+  } else {
+    linetype_vals <- group_linetypes[group_order]
+    linetype_vals[is.na(linetype_vals)] <- "solid"
+    names(linetype_vals) <- group_labels[group_order]
+  }
 
   # Custom x-axis breaks and labels (show true Hz values)
   breaks_low <- seq(0, notch_lo, by = 10)
@@ -112,7 +123,8 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
     geom_ribbon(aes(ymin = mean_psd - sem_psd, ymax = mean_psd + sem_psd,
                     group = interaction(group_label, segment)),
                 alpha = 0.2, color = NA) +
-    geom_line(aes(group = interaction(group_label, segment)), linewidth = 0.8) +
+    geom_line(aes(group = interaction(group_label, segment), linetype = group_label),
+              linewidth = 0.8) +
     geom_vline(xintercept = break_x, linetype = "dashed", color = "grey50", linewidth = 0.4) +
     scale_x_continuous(breaks = all_breaks, labels = all_labels,
                        expand = expansion(mult = c(0.02, 0.02))) +
@@ -120,6 +132,7 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
                   expand = expansion(mult = c(0.05, 0.15))) +
     scale_color_manual(values = color_vals, name = NULL) +
     scale_fill_manual(values = color_vals, name = NULL) +
+    scale_linetype_manual(values = linetype_vals, name = NULL) +
     facet_wrap(~ category, scales = "free_y") +
     labs(x = "Frequency (Hz)", y = "PSD (log scale)",
          title = "Power Spectral Density by Region",
@@ -170,8 +183,8 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
     scale_color_manual(values = color_vals, name = NULL) +
     facet_wrap(~ band, scales = "free_y", nrow = 2) +
     labs(x = NULL,
-         y = if (power_type == "absolute") "Absolute Power (dB)" else paste0(tools::toTitleCase(power_type), " Power"),
-         title = if (power_type == "absolute") "Absolute Band Power (dB) by Group" else paste0("Band Power (", tools::toTitleCase(power_type), ") by Group")) +
+         y = if (power_type == "absolute") "Power density (dB/Hz)" else paste0(tools::toTitleCase(power_type), " Power"),
+         title = if (power_type == "absolute") "Band Power Density (dB/Hz) by Group" else paste0("Band Power (", tools::toTitleCase(power_type), ") by Group")) +
     theme_pub() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           legend.position = "none")
@@ -362,8 +375,11 @@ plot_region_significance_heatmap <- function(posthoc_region_df, output_dir) {
 
       p <- ggplot(pdata, aes(x = band, y = region, fill = effect_size)) +
         geom_tile(color = "white", linewidth = 0.5) +
-        geom_text(aes(label = sig_label), size = 7, color = "black", fontface = "bold") +
-        geom_text(aes(label = sprintf("%.2f", effect_size)), size = 5, vjust = -0.5) +
+        # One centered label per cell: Hedges' g with a trailing * when
+        # significant (the two separate layers + vjust=-0.5 shifted the text up).
+        geom_text(aes(label = paste0(sprintf("%.2f", effect_size), sig_label),
+                      fontface = ifelse(significant, "bold", "plain")),
+                  size = 5, color = "black") +
         scale_fill_gradient2(
           low = "#2166AC", mid = "white", high = "#B2182B",
           midpoint = 0, limits = c(-clim, clim),
@@ -422,7 +438,7 @@ plot_band_by_region <- function(band_df, roi_categories, group_colors,
   color_vals <- group_colors[group_order]
   names(color_vals) <- group_labels[group_order]
 
-  y_label <- if (power_type == "absolute") "Absolute Power (dB)" else "Relative Power"
+  y_label <- if (power_type == "absolute") "Power density (dB/Hz)" else "Relative Power"
   band_label <- gsub("_", " ", tools::toTitleCase(target_band))
 
   p <- ggplot(subj_region, aes(x = category, y = value, fill = group_label)) +

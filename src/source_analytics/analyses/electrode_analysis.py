@@ -19,7 +19,7 @@ from ..io.discovery import SubjectInfo
 from ..io.electrode_loader import load_eeglab_set
 from ..spectral.epoch_sampler import sample_epochs
 from ..spectral.psd import compute_psd
-from ..spectral.band_power import extract_band_power
+from ..spectral.band_power import extract_band_power, relative_power_kwargs
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -215,7 +215,9 @@ class ElectrodeAnalysis(BaseAnalysis):
                     freqs_out = freqs
                 ch_psd_accum.setdefault(ch_name, []).append(psd)
 
-                bp = extract_band_power(freqs, psd, self._selected_bands())
+                bp = extract_band_power(
+                    freqs, psd, self._selected_bands(),
+                    **relative_power_kwargs(self.config.raw.get("relative_power")))
                 for band_name, power_vals in bp.items():
                     key = (ch_name, band_name)
                     ch_bp_accum.setdefault(key, []).append(power_vals)

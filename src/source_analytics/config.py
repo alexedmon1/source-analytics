@@ -304,6 +304,7 @@ class StudyConfig:
     bands: dict[str, tuple[float, float]]
     roi_categories: dict[str, list[str]]
     discovery: dict[str, Any]
+    group_linetypes: dict[str, str] = field(default_factory=dict)
     vertex_filter: dict[str, Any] = field(default_factory=dict)
     vertex: dict[str, Any] = field(default_factory=dict)
     electrode: dict[str, Any] = field(default_factory=dict)
@@ -419,6 +420,7 @@ class StudyConfig:
             groups=data.get("groups", {}),
             group_order=data.get("group_order", list(data.get("groups", {}).keys())),
             group_colors=data.get("group_colors", {}),
+            group_linetypes=data.get("group_linetypes", {}),
             bands=bands,
             roi_categories=roi_categories,
             discovery=discovery,
@@ -498,6 +500,7 @@ class StudyConfig:
             groups=data.get("groups", {}),
             group_order=data.get("group_order", list(data.get("groups", {}).keys())),
             group_colors=data.get("group_colors", {}),
+            group_linetypes=data.get("group_linetypes", {}),
             bands=bands,
             roi_categories=data.get("roi_categories", {}),
             discovery=discovery,
@@ -564,6 +567,7 @@ class StudyConfig:
             groups=self.groups,
             group_order=self.group_order,
             group_colors=self.group_colors,
+            group_linetypes=self.group_linetypes,
             bands=self.bands,
             roi_categories=self.roi_categories,
             discovery=discovery,
@@ -658,6 +662,7 @@ class StudyConfig:
             groups=self.groups,
             group_order=self.group_order,
             group_colors=self.group_colors,
+            group_linetypes=self.group_linetypes,
             bands=self.bands,
             roi_categories=self.roi_categories,
             discovery=discovery,

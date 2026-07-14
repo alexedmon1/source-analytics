@@ -15,7 +15,7 @@ from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.psd import compute_psd_multiroi
-from ..spectral.band_power import extract_band_power_multiroi
+from ..spectral.band_power import extract_band_power_multiroi, relative_power_kwargs
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,9 @@ class ROIPsdAnalysis(BaseAnalysis):
                 freqs_out = freqs
                 all_psd_arrays.setdefault(roi_name, []).append(psd)
 
-            band_power = extract_band_power_multiroi(roi_psds, self._selected_bands())
+            band_power = extract_band_power_multiroi(
+                roi_psds, self._selected_bands(),
+                **relative_power_kwargs(self.config.raw.get("relative_power")))
             for roi_name, bp_dict in band_power.items():
                 for band_name, power_vals in bp_dict.items():
                     key = (roi_name, band_name)

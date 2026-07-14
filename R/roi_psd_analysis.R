@@ -92,6 +92,7 @@ if (has_psd_curves) {
 # --- Load config ---
 config <- read_yaml(config_path)
 group_colors <- unlist(config$group_colors)
+group_linetypes <- unlist(config$group_linetypes)
 group_labels <- unlist(config$groups)
 group_order <- config$group_order
 
@@ -276,7 +277,8 @@ if (length(config$roi_categories) > 0) {
 # PSD curves by region
 if (has_psd_curves && length(config$roi_categories) > 0) {
   plot_psd_by_region(psd_df, config$roi_categories, group_colors,
-                     group_labels, group_order, fig_dir)
+                     group_labels, group_order, fig_dir,
+                     group_linetypes = group_linetypes)
 }
 
 # Post-hoc figures (ROI-level and region-level significance heatmaps)
