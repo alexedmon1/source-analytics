@@ -21,7 +21,7 @@ from .analyses.electrode_connectivity_analysis import ElectrodeConnectivityAnaly
 from .analyses.fcd_comparison_analysis import FCDComparisonAnalysis
 from .analyses.vertex_connectivity_analysis import VertexConnectivityAnalysis
 from .analyses.vertex_specparam_analysis import VertexSpecparamAnalysis
-from .analyses.vertex_mvpa_analysis import VertexMVPAAnalysis
+from .analyses.vertex_signature_analysis import VertexSignatureAnalysis
 from .analyses.roi_network_analysis import (
     ROINetworkAnalysis,
     ROIGraphAnalysis,
@@ -57,7 +57,7 @@ ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "vertex_connectivity": VertexConnectivityAnalysis,
     "vertex_cross_freq": VertexCrossFreqAnalysis,
     "vertex_specparam": VertexSpecparamAnalysis,
-    "vertex_mvpa": VertexMVPAAnalysis,
+    "vertex_signature": VertexSignatureAnalysis,
     "roi_graph": ROIGraphAnalysis,
     "roi_nbs": ROINBSAnalysis,
     "vertex_graph": VertexGraphAnalysis,
@@ -81,7 +81,8 @@ _DEPRECATED_NAMES: dict[str, str] = {
     "wholebrain": "vertex_cluster",
     "spatial_lmm": "vertex_spatial",
     "specparam_vertex": "vertex_specparam",
-    "mvpa": "vertex_mvpa",
+    "mvpa": "vertex_signature",
+    "vertex_mvpa": "vertex_signature",
     "transfer_entropy": "roi_directed",
     "roi_transfer_entropy": "roi_directed",
     "evoked": "roi_evoked",
@@ -136,7 +137,7 @@ ANALYSIS_METADATA: dict[str, dict[str, str]] = {
                              "about": "Directional (who-drives-whom) connectivity between ROIs, in two flavors. Transfer entropy (TE, Schreiber 2000) is a model-free information-theoretic measure -- a binned lag-1 estimator of how much one ROI's past reduces uncertainty about another's future -- computed for every directed ROI pair (callosal tracts excluded); its net asymmetry (te - te-transpose) gives the dominant direction. The optional Directed Transfer Function (DTF, Kaminski & Blinowska 1991) derives directed influence from a multivariate autoregressive (MVAR) model fit with ridge regularization (order 8) -- a deviation from ordinary-least-squares DTF used to stabilize the fit against collinear channels. Groups are compared on TE three ways: a global per-pair Welch t-test (Hedges' g), a within-group one-sample test of net TE against zero (is the driving direction consistent within a group), and a region-pair linear mixed model (te ~ group * region_pair + (1|subject)). Read it as: which ROI pairs show a group difference in directed influence, and which region drives which (an up arrow means the first-listed group is higher). DTF, when selected, currently emits directed edges without the R group stats."},
     "vertex_directed":      {"category": "resting", "level": "vertex",     "domain": "Directed",        "description": "Vertex DTF outflow/inflow/netflow (ridge-MVAR, cluster-corrected)",
                              "about": "Whole-brain directed connectivity on the dorsal source surface via the Directed Transfer Function (DTF, Kaminski & Blinowska 1991) from a multivariate autoregressive model. Because source vertices are strongly collinear (mean inter-vertex |r| ~ 0.64), the MVAR is fit with ridge regularization (order 8) rather than ordinary least squares, and the fit's stability (spectral radius) is checked. The full all-to-all directed DTF matrix is reduced to three per-vertex maps: outflow (mean directed influence a vertex sends to all others), inflow (mean it receives), and netflow (outflow minus inflow -- net source vs sink). Group differences in each map are tested with a cluster-based permutation test (per-vertex t-statistics clustered by spatial adjacency, cluster-extent FWE from a permutation null; Maris & Oostenveld 2007), with per-vertex Hedges' g. Read it as: spatially-contiguous clusters where the groups differ in how strongly a region drives (outflow), is driven by (inflow), or net-drives (netflow) the rest of the brain -- a cluster with p_corrected < 0.05 marks a region of difference, the sign of its t-values gives direction."},
-    "vertex_mvpa":          {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "MVPA (SVM pattern classification)"},
+    "vertex_signature":     {"category": "resting", "level": "vertex",     "domain": "Multivariate",    "display_name": "Neural signature", "description": "Multivariate/ML neural signature (classification, decoding; PCA-reduced with back-projection)"},
     "vertex_cluster":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Vertex-level cluster permutation",
                              "about": "Whole-brain resting spectral maps on the dorsal source surface: per vertex it computes band power (absolute in dB and relative), the 1/f spectral slope, and the peak alpha frequency, then tests where the groups differ. Inference is a cluster-based permutation test -- per-vertex t-statistics are threshold-clustered over neighbouring vertices and each cluster's extent is compared to a permutation null, giving family-wise (FWE) control (Maris & Oostenveld 2007); a threshold-free TFCE variant (Smith & Nichols 2009) is available. Effect sizes are per-vertex Hedges' g. Read it as: spatially-contiguous clusters where the groups differ in a spectral measure -- a cluster with p_corrected < 0.05 marks a region of difference, and the sign of its t-values gives the direction. This is the whole-brain, unparcellated counterpart to the ROI spectral analyses."},
     "vertex_spatial":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Spatial GLS (vertex-level generalized least squares)"},

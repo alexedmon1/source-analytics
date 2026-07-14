@@ -43,10 +43,10 @@ def _find_r_script_dir() -> Path:
     raise FileNotFoundError("Cannot find R/ scripts directory")
 
 
-class VertexMVPAAnalysis(BaseAnalysis):
+class VertexSignatureAnalysis(BaseAnalysis):
     """Whole-brain vertex-level MVPA classification analysis."""
 
-    name = "vertex_mvpa"
+    name = "vertex_signature"
     SELECTABLE = {"band": "frequency band"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
@@ -59,7 +59,9 @@ class VertexMVPAAnalysis(BaseAnalysis):
         self._subject_order: list[str] = []
 
         # Config
-        mvpa_cfg = config.raw.get("vertex_mvpa", config.raw.get("mvpa", {}))
+        mvpa_cfg = config.raw.get(
+            "vertex_signature",
+            config.raw.get("vertex_mvpa", config.raw.get("mvpa", {})))
         self._classifier = mvpa_cfg.get("classifier", "svm_linear")
         self._cv_method = mvpa_cfg.get("cv_method", "loocv")
         self._n_permutations = int(mvpa_cfg.get("n_permutations", 1000))
@@ -138,8 +140,8 @@ class VertexMVPAAnalysis(BaseAnalysis):
         if feat_df.empty:
             logger.warning("No vertex MVPA feature data collected")
             return
-        feat_df.to_csv(data_dir / "vertex_mvpa_features.csv", index=False)
-        logger.info("Exported vertex_mvpa_features.csv (%d rows)", len(feat_df))
+        feat_df.to_csv(data_dir / "vertex_signature_features.csv", index=False)
+        logger.info("Exported vertex_signature_features.csv (%d rows)", len(feat_df))
 
         if self._source_coords is not None:
             coords_df = pd.DataFrame(self._source_coords, columns=["x", "y", "z"])
@@ -204,8 +206,8 @@ class VertexMVPAAnalysis(BaseAnalysis):
 
         if all_results:
             results_df = pd.DataFrame(all_results)
-            results_df.to_csv(tbl_dir / "vertex_mvpa_results.csv", index=False)
-            logger.info("Exported vertex_mvpa_results.csv")
+            results_df.to_csv(tbl_dir / "vertex_signature_results.csv", index=False)
+            logger.info("Exported vertex_signature_results.csv")
 
         # Save full results for --steps figures support
         if self._mvpa_results:
@@ -225,16 +227,16 @@ class VertexMVPAAnalysis(BaseAnalysis):
                     "accuracy_ci": result.accuracy_ci,
                     "n_permutations": result.n_permutations,
                 }
-            with open(data_dir / "vertex_mvpa_results.pkl", "wb") as f:
+            with open(data_dir / "vertex_signature_results.pkl", "wb") as f:
                 pickle.dump(pkl_data, f)
-            logger.info("Saved vertex_mvpa_results.pkl")
+            logger.info("Saved vertex_signature_results.pkl")
 
     def _load_state_from_disk(self) -> bool:
         """Load saved vertex MVPA state from pickle for --steps figures support."""
         from ..stats.mvpa import MVPAResult
 
         data_dir = self.output_dir / "data"
-        pkl_path = data_dir / "vertex_mvpa_results.pkl"
+        pkl_path = data_dir / "vertex_signature_results.pkl"
         if not pkl_path.exists():
             logger.warning("No saved vertex MVPA state at %s; skipping figures", pkl_path)
             return False
@@ -286,7 +288,7 @@ class VertexMVPAAnalysis(BaseAnalysis):
                 coords=coords,
                 values=result.feature_weights,
                 title=f"Feature Importance — {key}",
-                output_path=fig_dir / f"vertex_mvpa_importance_{safe_name}.png",
+                output_path=fig_dir / f"vertex_signature_importance_{safe_name}.png",
                 cmap="YlOrRd",
             )
 
@@ -301,7 +303,7 @@ class VertexMVPAAnalysis(BaseAnalysis):
             ax.set_title(f"Vertex MVPA Permutation Test — {key}")
             ax.legend()
             fig.tight_layout()
-            fig.savefig(fig_dir / f"vertex_mvpa_null_{safe_name}.png", dpi=150)
+            fig.savefig(fig_dir / f"vertex_signature_null_{safe_name}.png", dpi=150)
             plt.close(fig)
 
             # Confusion matrix
@@ -324,7 +326,7 @@ class VertexMVPAAnalysis(BaseAnalysis):
             ax.set_yticklabels(["True 0", "True 1"])
             ax.set_title(f"Confusion Matrix — {key}")
             fig.tight_layout()
-            fig.savefig(fig_dir / f"vertex_mvpa_confusion_{safe_name}.png", dpi=150)
+            fig.savefig(fig_dir / f"vertex_signature_confusion_{safe_name}.png", dpi=150)
             plt.close(fig)
 
     def summary(self) -> None:
@@ -339,7 +341,7 @@ class VertexMVPAAnalysis(BaseAnalysis):
 
         try:
             r_dir = _find_r_script_dir()
-            r_script = r_dir / "vertex_mvpa_analysis.R"
+            r_script = r_dir / "vertex_signature_analysis.R"
             if r_script.exists():
                 cmd = [
                     "Rscript", str(r_script),
@@ -387,7 +389,7 @@ class VertexMVPAAnalysis(BaseAnalysis):
             )
             lines.append("")
 
-        results_csv = tbl_dir / "vertex_mvpa_results.csv"
+        results_csv = tbl_dir / "vertex_signature_results.csv"
         if results_csv.exists():
             results_df = pd.read_csv(results_csv)
             lines.append("## Results")
@@ -409,11 +411,11 @@ class VertexMVPAAnalysis(BaseAnalysis):
         lines.extend([
             "## Output Files",
             "",
-            "- `data/vertex_mvpa_features.csv` — feature matrix (per-subject per-vertex band power)",
-            "- `tables/vertex_mvpa_results.csv` — classification results per band",
-            "- `figures/vertex_mvpa_importance_*.png` — feature importance glass brains",
-            "- `figures/vertex_mvpa_null_*.png` — permutation null distribution histograms",
-            "- `figures/vertex_mvpa_confusion_*.png` — confusion matrices",
+            "- `data/vertex_signature_features.csv` — feature matrix (per-subject per-vertex band power)",
+            "- `tables/vertex_signature_results.csv` — classification results per band",
+            "- `figures/vertex_signature_importance_*.png` — feature importance glass brains",
+            "- `figures/vertex_signature_null_*.png` — permutation null distribution histograms",
+            "- `figures/vertex_signature_confusion_*.png` — confusion matrices",
             "",
         ])
 

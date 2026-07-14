@@ -122,8 +122,8 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
         q_col="p",
         estimate_label="Hedges g",
     ),
-    "vertex_mvpa": TableSchema(
-        posthoc_file="vertex_mvpa_results.csv",
+    "vertex_signature": TableSchema(
+        posthoc_file="vertex_signature_results.csv",
         estimate_col="accuracy",
         label_col="band",
         band_col="band",
@@ -139,7 +139,8 @@ for _old, _new in [
     ("psd", "roi_psd"), ("aperiodic", "roi_aperiodic"), ("evoked", "roi_evoked"),
     ("pac", "roi_cross_freq"), ("roi_pac", "roi_cross_freq"),
     ("wholebrain", "vertex_cluster"), ("spatial_lmm", "vertex_spatial"),
-    ("specparam_vertex", "vertex_specparam"), ("mvpa", "vertex_mvpa"),
+    ("specparam_vertex", "vertex_specparam"),
+    ("mvpa", "vertex_signature"), ("vertex_mvpa", "vertex_signature"),
 ]:
     if _new in TABLE_SCHEMAS:
         TABLE_SCHEMAS[_old] = TABLE_SCHEMAS[_new]

@@ -12,7 +12,7 @@ from .electrode_comparison_analysis import ElectrodeComparisonAnalysis
 from .electrode_connectivity_analysis import ElectrodeConnectivityAnalysis
 from .vertex_connectivity_analysis import VertexConnectivityAnalysis
 from .vertex_specparam_analysis import VertexSpecparamAnalysis
-from .vertex_mvpa_analysis import VertexMVPAAnalysis
+from .vertex_signature_analysis import VertexSignatureAnalysis
 from .roi_network_analysis import ROINetworkAnalysis
 from .vertex_network_analysis import VertexNetworkAnalysis
 from .vertex_spatial_analysis import VertexSpatialAnalysis
@@ -27,7 +27,8 @@ AperiodicAnalysis = ROIAperiodicAnalysis
 ROIPacAnalysis = ROICrossFreqAnalysis  # renamed -> roi_cross_freq
 PACAnalysis = ROICrossFreqAnalysis
 WholebrainAnalysis = VertexClusterAnalysis
-MVPAAnalysis = VertexMVPAAnalysis
+MVPAAnalysis = VertexSignatureAnalysis
+VertexMVPAAnalysis = VertexSignatureAnalysis  # renamed -> vertex_signature
 SpecparamVertexAnalysis = VertexSpecparamAnalysis
 SpatialLMMAnalysis = VertexSpatialAnalysis
 EvokedAnalysis = ROIEvokedAnalysis
@@ -49,6 +50,7 @@ __all__ = [
     "ElectrodeConnectivityAnalysis",
     "VertexConnectivityAnalysis",
     "VertexSpecparamAnalysis",
+    "VertexSignatureAnalysis",
     "VertexMVPAAnalysis",
     "ROINetworkAnalysis",
     "VertexNetworkAnalysis",
