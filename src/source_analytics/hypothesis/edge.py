@@ -169,13 +169,21 @@ def _nbs_components(arrays: list[np.ndarray], stat_fn, threshold: float,
 def _component_rows(comps: list[tuple[np.ndarray, int]], masses: list[float],
                     peaks: list[float], pvals: list[float],
                     stat_type: str,
-                    vertex_rois: list[str | None] | None = None) -> list[dict[str, Any]]:
+                    vertex_rois: list[str | None] | None = None,
+                    stat_matrix: np.ndarray | None = None,
+                    threshold: float = 0.0) -> list[dict[str, Any]]:
     """Subnetwork contract → one row per component (or a no-component row).
 
     ``vertex_rois`` (one atlas-ROI name per node, optional) adds a ``region``
     column naming the regions of the nodes in each subnetwork.
+    ``stat_matrix`` (the signed per-edge statistic, ``t`` only) adds the edge
+    direction split — ``n_edges_increase``/``n_edges_decrease`` (group A > B vs
+    A < B), ``mean_stat``, and a ``direction`` label — since NBS thresholds |t|
+    and would otherwise hide whether a subnetwork is up- or down-regulated.
     """
     from ..atlas.atlas_utils import format_region_coverage
+
+    signed = stat_matrix is not None and stat_type == "t"
 
     if not comps:
         row = {
@@ -183,6 +191,9 @@ def _component_rows(comps: list[tuple[np.ndarray, int]], masses: list[float],
             "peak_stat": float("nan"), "component_p": float("nan"),
             "significant": False, "stat_type": stat_type,
         }
+        if signed:
+            row.update(n_edges_increase=0, n_edges_decrease=0,
+                       mean_stat=float("nan"), direction="")
         if vertex_rois is not None:
             row["region"] = ""
         return [row]
@@ -194,6 +205,17 @@ def _component_rows(comps: list[tuple[np.ndarray, int]], masses: list[float],
             "peak_stat": float(peak), "component_p": float(p),
             "significant": float(p) < 0.05, "stat_type": stat_type,
         }
+        if signed:
+            sub = stat_matrix[np.ix_(nodes, nodes)]
+            ev = sub[np.triu_indices(len(nodes), k=1)]
+            ev = ev[np.abs(ev) > threshold]
+            n_pos, n_neg = int((ev > 0).sum()), int((ev < 0).sum())
+            row.update(
+                n_edges_increase=n_pos, n_edges_decrease=n_neg,
+                mean_stat=float(ev.mean()) if ev.size else float("nan"),
+                direction=("increase" if n_pos and not n_neg else
+                           "decrease" if n_neg and not n_pos else "mixed"),
+            )
         if vertex_rois is not None:
             row["region"] = format_region_coverage(
                 [vertex_rois[int(v)] for v in nodes if int(v) < len(vertex_rois)])
@@ -268,13 +290,16 @@ def run_hypothesis_edge(
                 n_permutations=n_perms, seed=seed)
             comps = _components(np.abs(r.t_matrix) > nbs_threshold)
             masses, peaks = _mass_peak(r.t_matrix, comps, nbs_threshold)
-            return _component_rows(comps, masses, peaks, r.component_pvalues, "t", vertex_rois)
+            return _component_rows(comps, masses, peaks, r.component_pvalues, "t",
+                                   vertex_rois, stat_matrix=r.t_matrix,
+                                   threshold=nbs_threshold)
         # General weighted contrast.
         weights = [w[g] for g in groups]
-        _, comps, masses, peaks, pvals = _nbs_components(
+        obs, comps, masses, peaks, pvals = _nbs_components(
             arrays, lambda arr: _weighted_t_edges(arr, weights),
             nbs_threshold, n_perms, seed)
-        return _component_rows(comps, masses, peaks, pvals, "t", vertex_rois)
+        return _component_rows(comps, masses, peaks, pvals, "t", vertex_rois,
+                               stat_matrix=obs, threshold=nbs_threshold)
 
     if hyp.kind == "equivalence":
         # Per-edge TOST (sd margin) on the pairwise contrast; one summary row.

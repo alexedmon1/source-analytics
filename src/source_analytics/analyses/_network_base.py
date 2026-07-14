@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
 import pandas as pd
 
 from ..atlas.atlas_utils import format_region_coverage
@@ -133,8 +134,10 @@ class NetworkAnalysisBase(BaseAnalysis):
         vertex_rois = self._label_vertex_regions(getattr(self, "_source_coords", None))
 
         rows = []
+        thr = getattr(self, "_nbs_threshold", 0.0)
         for key, nbs in self._nbs_results.items():
             nodes_per_comp = getattr(nbs, "component_nodes", []) or []
+            tmat = getattr(nbs, "t_matrix", None)
             for i, (size, pval) in enumerate(
                 zip(nbs.component_sizes, nbs.component_pvalues)
             ):
@@ -142,9 +145,22 @@ class NetworkAnalysisBase(BaseAnalysis):
                     "key": key, "component": i + 1,
                     "n_edges": size, "p_corrected": pval,
                 }
-                if any(r is not None for r in vertex_rois) and i < len(nodes_per_comp):
-                    row["region"] = format_region_coverage(
-                        [vertex_rois[v] for v in nodes_per_comp[i] if v < len(vertex_rois)])
+                if i < len(nodes_per_comp):
+                    nodes = nodes_per_comp[i]
+                    # Edge-direction split (NBS thresholds |t|, so a subnetwork can
+                    # be up-, down-, or mixed-regulation; t>0 = group A > group B).
+                    if tmat is not None:
+                        sub = tmat[np.ix_(nodes, nodes)]
+                        ev = sub[np.triu_indices(len(nodes), k=1)]
+                        ev = ev[np.abs(ev) > thr]
+                        n_pos, n_neg = int((ev > 0).sum()), int((ev < 0).sum())
+                        row["n_edges_increase"] = n_pos
+                        row["n_edges_decrease"] = n_neg
+                        row["direction"] = ("increase" if n_pos and not n_neg else
+                                            "decrease" if n_neg and not n_pos else "mixed")
+                    if any(r is not None for r in vertex_rois):
+                        row["region"] = format_region_coverage(
+                            [vertex_rois[v] for v in nodes if v < len(vertex_rois)])
                 rows.append(row)
         if rows:
             out = self.tbl_dir / self._nbs_results_filename

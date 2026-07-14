@@ -38,7 +38,11 @@ from ..stats.graph_metrics import (
     compute_auc,
     auc_permutation_test,
 )
-from ..viz.glass_brain import plot_glass_brain_edges
+from ..viz.glass_brain import (
+    plot_glass_brain_edges,
+    plot_nbs_roi_bar,
+    plot_nbs_roi_circos,
+)
 from ._network_base import NetworkAnalysisBase
 from .base import find_r_script_dir
 
@@ -367,7 +371,10 @@ class _VertexNetworkBase(NetworkAnalysisBase):
         if self._source_coords is None:
             cc = self.output_dir / "data" / "source_coords.csv"
             if cc.exists():
-                self._source_coords = pd.read_csv(cc)[["x", "y", "z"]].to_numpy()
+                df = pd.read_csv(cc)
+                self._source_coords = df[["x", "y", "z"]].to_numpy()
+                if "label" in df.columns and not self._vertex_labels:
+                    self._vertex_labels = df["label"].astype(str).tolist()
         return True
 
     def _nbs_figures(self) -> None:
@@ -375,17 +382,47 @@ class _VertexNetworkBase(NetworkAnalysisBase):
             self._load_nbs_state()
         if self._source_coords is None:
             return
+        n_nodes = next(iter(self._nbs_results.values())).t_matrix.shape[0]
+        # Guard: the coords MUST align with the connectivity matrix (same vertex
+        # set/order). If a filter mismatch leaves them different lengths, node
+        # indices would map to the wrong coordinates — skip coord-based views
+        # rather than mislabel them.
+        if len(self._source_coords) != n_nodes:
+            logger.warning(
+                "  NBS coords (%d) != matrix nodes (%d) — skipping glass-brain/ROI "
+                "figures (check vertex_filter matches vertex_connectivity)",
+                len(self._source_coords), n_nodes)
+            return
+        # Allen ROI per vertex via the module's OWN atlas (self._atlas_dir, the
+        # configured allen32) — the same labeler + granularity the NBS table uses,
+        # so the figure legend matches the table/digest region coverage exactly.
+        roi_labels = self._label_vertex_regions(self._source_coords)
+        if roi_labels and not any(r for r in roi_labels):
+            roi_labels = self._vertex_labels or None   # atlas unavailable → fallback
         for key, nbs in self._nbs_results.items():
             if nbs.n_significant_components == 0:
                 continue
             sig_mask = np.abs(nbs.t_matrix) > self._nbs_threshold
             edge_pairs = np.argwhere(np.triu(sig_mask, k=1))
-            if len(edge_pairs) > 0:
-                edge_t = np.array([nbs.t_matrix[i, j] for i, j in edge_pairs])
-                plot_glass_brain_edges(
-                    coords=self._source_coords, edges=edge_pairs,
-                    output_path=self.fig_dir / f"vertex_nbs_edges_{key}.png",
-                    edge_values=np.abs(edge_t), title=f"NBS Edges — {key}")
+            if len(edge_pairs) == 0:
+                continue
+            # Signed t so direction (group_a>group_b vs <) is visible, not |t|.
+            edge_t = np.array([nbs.t_matrix[i, j] for i, j in edge_pairs])
+            plot_glass_brain_edges(
+                coords=self._source_coords, edges=edge_pairs,
+                output_path=self.fig_dir / f"vertex_nbs_edges_{key}.png",
+                edge_values=edge_t, signed=True, roi_labels=roi_labels,
+                title=f"NBS Edges — {key}")
+            # ROI-grouped views of the same subnetwork (topology + involvement).
+            if roi_labels is not None:
+                plot_nbs_roi_circos(
+                    edge_pairs, roi_labels,
+                    self.fig_dir / f"vertex_nbs_roicircos_{key}.png",
+                    edge_values=edge_t, signed=True, title=f"NBS ROI — {key}")
+                plot_nbs_roi_bar(
+                    edge_pairs, roi_labels,
+                    self.fig_dir / f"vertex_nbs_roibar_{key}.png",
+                    edge_values=edge_t, title=f"NBS ROI involvement — {key}")
 
     # --------------------------------------------------------- summaries --- #
     def _write_summary(self, graph: bool = True, nbs: bool = True) -> None:

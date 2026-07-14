@@ -848,18 +848,32 @@ def plot_anatomical_glass_brain(
     logger.info("Saved anatomical glass brain: %s", output_path)
 
 
+def _roi_palette(roi_names) -> dict:
+    """Stable ROI→color map (sorted by ROI name, so a study's ROIs get the same
+    colors across every figure). Cycles tab20/tab20b/tab20c (60 distinct hues)."""
+    import matplotlib.pyplot as plt
+    uniq = sorted({str(r) for r in roi_names if r not in (None, "", "nan")})
+    palette = []
+    for cm in (plt.cm.tab20, plt.cm.tab20b, plt.cm.tab20c):
+        palette.extend(cm(i) for i in range(cm.N))
+    return {name: palette[i % len(palette)] for i, name in enumerate(uniq)}
+
+
 def plot_glass_brain_edges(
     coords: np.ndarray,
     edges: np.ndarray,
     output_path: str | Path,
     *,
     edge_values: np.ndarray | None = None,
+    signed: bool = False,
+    roi_labels: list[str] | None = None,
     title: str = "NBS Edges",
     cmap: str = "hot_r",
-    node_size_base: float = 30,
-    node_size_scale: float = 150,
-    edge_alpha: float = 0.6,
-    edge_linewidth: float = 1.5,
+    node_size_base: float = 18,
+    node_size_scale: float = 34,
+    node_size_max: float = 460,
+    edge_alpha: float = 0.5,
+    edge_linewidth: float = 1.2,
     dpi: int = 150,
 ) -> None:
     """Plot NBS significant edges on a 3-view glass brain.
@@ -875,14 +889,21 @@ def plot_glass_brain_edges(
     edge_values : ndarray, shape (n_edges,), optional
         Values per edge for coloring (e.g., t-statistics). If None, all
         edges are drawn in a single color.
+    roi_labels : list of str, optional
+        One anatomical ROI name per vertex. When given, hub vertices are colored
+        by ROI (with a legend) instead of a single blue, so the reader can see
+        which regions carry the subnetwork rather than a uniform central blob.
     title : str
         Figure title.
     cmap : str
         Colormap for edge values.
     node_size_base : float
-        Base marker size for vertices with no NBS edges.
+        Marker size for a degree-1 hub.
     node_size_scale : float
-        Additional size per NBS edge (hub detection).
+        Hub marker grows as ``base + scale * sqrt(degree)`` (sub-linear so
+        high-degree hubs stay legible instead of merging into one blob).
+    node_size_max : float
+        Hard cap on hub marker size.
     edge_alpha : float
         Edge line transparency.
     edge_linewidth : float
@@ -907,7 +928,23 @@ def plot_glass_brain_edges(
             degree[i] += 1
             degree[j] += 1
 
-    node_sizes = node_size_base + degree * node_size_scale
+    # Sub-linear (sqrt) growth + a hard cap so a high-degree hub stays a legible
+    # marker instead of a giant disc that swallows its neighbours.
+    node_sizes = node_size_base + node_size_scale * np.sqrt(degree)
+    node_sizes = np.minimum(node_sizes, node_size_max)
+
+    # Per-hub ROI colors (stable across figures) + a legend of the ROIs present.
+    hub_idx = np.where(degree > 0)[0]
+    use_roi = roi_labels is not None and len(roi_labels) == n_vertices
+    if use_roi:
+        palette = _roi_palette(roi_labels)
+        hub_colors = [palette.get(str(roi_labels[v]), (0.27, 0.51, 0.71, 1.0))
+                      for v in hub_idx]
+        hub_rois_present = sorted({str(roi_labels[v]) for v in hub_idx
+                                   if str(roi_labels[v]) in palette})
+    else:
+        hub_colors = "steelblue"
+        hub_rois_present = []
 
     fig, axes_list = plt.subplots(1, 3, figsize=(18, 6))
     proj_pairs = [(0, 1), (0, 2), (1, 2)]
@@ -915,12 +952,16 @@ def plot_glass_brain_edges(
     xlabels = ["X (mm)", "X (mm)", "Y (mm)"]
     ylabels = ["Y (mm)", "Z (mm)", "Z (mm)"]
 
-    # Edge color setup
+    # Edge color setup. When *signed*, use a diverging map centered at 0 so the
+    # direction of each edge (group A > B vs A < B) reads off the color.
     if edge_values is not None and n_edges > 0:
-        enorm = Normalize(
-            vmin=np.min(edge_values), vmax=np.max(edge_values),
-        )
-        edge_cmap = plt.get_cmap(cmap)
+        if signed:
+            m = float(np.max(np.abs(edge_values))) or 1.0
+            enorm = Normalize(vmin=-m, vmax=m)
+            edge_cmap = plt.get_cmap("RdBu_r")
+        else:
+            enorm = Normalize(vmin=np.min(edge_values), vmax=np.max(edge_values))
+            edge_cmap = plt.get_cmap(cmap)
     else:
         enorm = None
         edge_cmap = None
@@ -937,13 +978,12 @@ def plot_glass_brain_edges(
                 edgecolors="gray", linewidths=0.3, zorder=1,
             )
 
-        # NBS hub vertices (degree > 0)
-        hub_mask = degree > 0
-        if hub_mask.any():
+        # NBS hub vertices (degree > 0), colored by ROI when available
+        if hub_idx.size:
             ax.scatter(
-                coords[hub_mask, xi], coords[hub_mask, yi],
-                s=node_sizes[hub_mask], c="steelblue", alpha=0.8,
-                edgecolors="black", linewidths=0.8, zorder=3,
+                coords[hub_idx, xi], coords[hub_idx, yi],
+                s=node_sizes[hub_idx], c=hub_colors, alpha=0.85,
+                edgecolors="black", linewidths=0.6, zorder=3,
             )
 
         # Draw edges
@@ -972,9 +1012,25 @@ def plot_glass_brain_edges(
 
     # Colorbar for edge values
     if edge_cmap is not None and enorm is not None:
-        sm = ScalarMappable(cmap=cmap, norm=enorm)
+        sm = ScalarMappable(cmap=edge_cmap, norm=enorm)
         sm.set_array([])
-        fig.colorbar(sm, ax=list(axes_list), shrink=0.8, label="Edge value")
+        cbar_label = ("Edge t  (blue: group A < B   red: group A > B)"
+                      if signed else "Edge value")
+        fig.colorbar(sm, ax=list(axes_list), shrink=0.8, label=cbar_label)
+
+    # ROI legend (which regions the hub vertices belong to)
+    if use_roi and hub_rois_present:
+        from matplotlib.lines import Line2D
+        handles = [
+            Line2D([0], [0], marker="o", linestyle="none", markersize=9,
+                   markerfacecolor=palette[r], markeredgecolor="black",
+                   markeredgewidth=0.5, label=r)
+            for r in hub_rois_present
+        ]
+        ncol = 1 if len(handles) <= 12 else 2
+        fig.legend(handles=handles, title="Hub ROI", loc="center left",
+                   bbox_to_anchor=(1.0, 0.5), fontsize=8, title_fontsize=9,
+                   ncol=ncol, frameon=False, borderaxespad=0.0)
 
     n_hubs = int((degree > 0).sum())
     fig.suptitle(
@@ -982,9 +1038,153 @@ def plot_glass_brain_edges(
         fontsize=14, fontweight="bold", y=1.02,
     )
 
-    fig.tight_layout()
+    # tight_layout is incompatible with the spanning colorbar/legend axes; the
+    # savefig bbox="tight" handles the crop, so silence the per-figure warning.
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fig.tight_layout()
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     logger.info("Saved glass brain edges: %s", output_path)
+
+
+def _nbs_hub_order(edges: np.ndarray, roi_labels: list[str]):
+    """Hub vertices (endpoints of the subnetwork) ordered by ROI, plus the
+    contiguous ROI grouping. Returns (hubs, roi_of, region_names, region_sizes)."""
+    hubs = sorted({int(v) for e in edges for v in e})
+    roi_of = {v: str(roi_labels[v]) if v < len(roi_labels) else "Unknown"
+              for v in hubs}
+    hubs = sorted(hubs, key=lambda v: (roi_of[v], v))
+    region_names: list[str] = []
+    region_sizes: list[int] = []
+    for v in hubs:
+        r = roi_of[v]
+        if region_names and region_names[-1] == r:
+            region_sizes[-1] += 1
+        else:
+            region_names.append(r)
+            region_sizes.append(1)
+    return hubs, roi_of, region_names, region_sizes
+
+
+def plot_nbs_roi_circos(
+    edges: np.ndarray,
+    roi_labels: list[str],
+    output_path: str | Path,
+    *,
+    edge_values: np.ndarray | None = None,
+    signed: bool = False,
+    title: str = "NBS subnetwork",
+    dpi: int = 150,
+) -> None:
+    """Circos of an NBS subnetwork with the hub vertices grouped and colored by
+    their Allen ROI. Each significant edge is a chord; each ROI is an arc. A
+    cleaner topological view than the glass brain for a dense central subnetwork.
+    When *signed*, chords are colored by a diverging map centered at 0 so edge
+    direction (group A > B vs A < B) reads off the color.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from .connectivity_plots import plot_circos
+
+    if edges is None or len(edges) == 0:
+        return
+    hubs, roi_of, region_names, region_sizes = _nbs_hub_order(edges, roi_labels)
+    pos = {v: i for i, v in enumerate(hubs)}
+    n = len(hubs)
+    mat = np.zeros((n, n), dtype=float)
+    if edge_values is None:
+        vals = np.ones(len(edges))
+    else:
+        vals = np.asarray(edge_values, dtype=float) if signed else np.abs(edge_values)
+    for (i, j), val in zip(edges, vals):
+        a, b = pos[int(i)], pos[int(j)]
+        mat[a, b] = mat[b, a] = float(val)
+    node_labels = [roi_of[v] for v in hubs]
+
+    if signed and edge_values is not None:
+        m = float(np.max(np.abs(vals))) or 1.0
+        chord_cmap, vlo, vhi = "RdBu_r", -m, m
+    else:
+        chord_cmap, vlo, vhi = "hot_r", float(np.min(vals)), float(np.max(vals))
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    plot_circos(
+        mat, node_labels, region_names, region_sizes, ax,
+        cmap=chord_cmap, threshold=0.0, vmin=vlo, vmax=vhi,
+        show_roi_labels=False,
+    )
+    ax.set_title(f"{title}\n{len(edges)} edges, {n} hub vertices, "
+                 f"{len(region_names)} ROIs", fontsize=13, fontweight="bold")
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    logger.info("Saved NBS ROI circos: %s", output_path)
+
+
+def plot_nbs_roi_bar(
+    edges: np.ndarray,
+    roi_labels: list[str],
+    output_path: str | Path,
+    *,
+    edge_values: np.ndarray | None = None,
+    title: str = "NBS subnetwork — ROI involvement",
+    dpi: int = 150,
+) -> None:
+    """Horizontal bar of each ROI's involvement in an NBS subnetwork: total
+    endpoint degree (edges touching the ROI) with the hub-vertex count annotated,
+    so the reader can see which regions carry the subnetwork numerically. When
+    *edge_values* (signed t) is given, each ROI is annotated with its edge
+    direction split (↑ group A > B, ↓ group A < B)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from collections import defaultdict
+
+    if edges is None or len(edges) == 0:
+        return
+    ev = np.asarray(edge_values, dtype=float) if edge_values is not None else None
+    roi_degree: dict[str, int] = defaultdict(int)
+    roi_hubs: dict[str, set] = defaultdict(set)
+    roi_up: dict[str, int] = defaultdict(int)
+    roi_down: dict[str, int] = defaultdict(int)
+    for ei, (i, j) in enumerate(edges):
+        for v in (int(i), int(j)):
+            r = str(roi_labels[v]) if v < len(roi_labels) else "Unknown"
+            roi_degree[r] += 1
+            roi_hubs[r].add(v)
+            if ev is not None:
+                if ev[ei] > 0:
+                    roi_up[r] += 1
+                elif ev[ei] < 0:
+                    roi_down[r] += 1
+    rois = sorted(roi_degree, key=lambda r: roi_degree[r])
+    palette = _roi_palette(rois)
+    degrees = [roi_degree[r] for r in rois]
+    colors = [palette.get(r, (0.4, 0.4, 0.4, 1.0)) for r in rois]
+
+    fig, ax = plt.subplots(figsize=(9.5, max(3.0, 0.42 * len(rois) + 1.0)))
+    ypos = np.arange(len(rois))
+    ax.barh(ypos, degrees, color=colors, edgecolor="black", linewidth=0.5)
+    ax.set_yticks(ypos)
+    ax.set_yticklabels(rois, fontsize=9)
+    ax.set_xlabel("Edge endpoints in subnetwork (ROI degree)", fontsize=10)
+    for y, r in zip(ypos, rois):
+        lab = f"  {len(roi_hubs[r])} hub{'s' if len(roi_hubs[r]) != 1 else ''}"
+        if ev is not None:
+            lab += f"  (↑{roi_up[r]} ↓{roi_down[r]})"
+        ax.text(roi_degree[r], y, lab, va="center", ha="left",
+                fontsize=8, color="dimgray")
+    ax.margins(x=0.12)
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    fig.tight_layout()
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    logger.info("Saved NBS ROI bar: %s", output_path)

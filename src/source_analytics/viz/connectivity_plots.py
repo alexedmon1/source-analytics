@@ -754,12 +754,12 @@ def plot_connectivity_multicontrast(
                     cmap=cm, threshold=thresh, vmin=lo, vmax=hi,
                     show_roi_labels=show_roi_labels,
                 )
-                ax.set_title(col_label, fontsize=16, fontweight="bold", pad=10)
+                ax.set_title(col_label, fontsize=22, fontweight="bold", pad=12)
 
             # Contrast label on the left of this triplet
             axes[row_idx, col0].text(
-                -1.55, 0, row_label,
-                fontsize=16, fontweight="bold",
+                -1.72, 0, row_label,
+                fontsize=25, fontweight="bold",
                 ha="right", va="center", rotation=90,
             )
 
@@ -773,8 +773,8 @@ def plot_connectivity_multicontrast(
                 orientation="horizontal",
                 fraction=0.035, pad=0.04, shrink=0.5,
             )
-            cbar_grp.set_label("Mean connectivity", fontsize=12)
-            cbar_grp.ax.tick_params(labelsize=10)
+            cbar_grp.set_label("Mean connectivity", fontsize=16)
+            cbar_grp.ax.tick_params(labelsize=13)
 
             sm_diff = ScalarMappable(
                 cmap="RdBu_r", norm=Normalize(vmin=-diff_vmax, vmax=diff_vmax),
@@ -785,10 +785,14 @@ def plot_connectivity_multicontrast(
                 orientation="horizontal",
                 fraction=0.035, pad=0.04, shrink=0.5,
             )
-            cbar_diff.set_label(f"{label_a} \u2212 {label_b}", fontsize=12)
-            cbar_diff.ax.tick_params(labelsize=10)
+            cbar_diff.set_label(f"{label_a} \u2212 {label_b}", fontsize=16)
+            cbar_diff.ax.tick_params(labelsize=13)
 
-        plt.subplots_adjust(hspace=0.15, wspace=0.05)
+        # Wide horizontal gap so the two triplets in a row (and the rotated
+        # contrast label of the right one) don't collide; tight top/side margins
+        # so the figure isn't mostly whitespace.
+        plt.subplots_adjust(hspace=0.18, wspace=0.32,
+                            top=0.955, bottom=0.02, left=0.05, right=0.99)
 
     elif plot_type == "heatmap":
         col_w = 10
@@ -836,8 +840,11 @@ def plot_connectivity_multicontrast(
         raise ValueError(f"Unknown plot_type: {plot_type!r}")
 
     if title:
-        suptitle_y = 1.02 if show_roi_labels else 1.0
-        fig.suptitle(title, fontsize=16, fontweight="bold", y=suptitle_y)
+        # Scale the title to the (large) canvas and sit it just above the top row
+        # so it reads and doesn't leave a wide empty band at the top.
+        title_fs = float(np.clip(fig.get_size_inches()[0] * 0.85, 26, 46))
+        suptitle_y = 1.01 if show_roi_labels else 0.99
+        fig.suptitle(title, fontsize=title_fs, fontweight="bold", y=suptitle_y)
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
