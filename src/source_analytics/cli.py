@@ -131,6 +131,39 @@ def cmd_run(args):
     """Run an analysis module."""
     config = StudyConfig.from_yaml(args.study)
 
+    # Apply the profile narrowing to the ROOT config, before any paradigm scoping,
+    # so the profile segment lands above the paradigm in both output trees and
+    # for_paradigm*() carries the narrowed bands/rois/hypotheses through.
+    profile = getattr(args, "profile", None)
+    if profile:
+        try:
+            config = config.for_profile(profile)
+        except ValueError as exc:
+            print(f"ERROR: {exc}")
+            sys.exit(1)
+        if (
+            args.analysis
+            and config.include_analyses is not None
+            and args.analysis not in config.include_analyses
+        ):
+            print(
+                f"ERROR: analysis '{args.analysis}' is not in profile "
+                f"'{profile}' (include_analyses: "
+                f"{', '.join(config.include_analyses)})."
+            )
+            sys.exit(1)
+        print(f"Profile: {profile}")
+        print(f"  bands:      {', '.join(config.bands)}")
+        if config.rois:
+            print(f"  ROIs:       {len(config.rois)} (FDR family size)")
+        if config.design_spec:
+            print(
+                f"  hypotheses: "
+                f"{', '.join(h.name for h in config.design_spec.hypotheses)}"
+            )
+        print(f"  results ->  {config.results_dir}")
+        print()
+
     # Parse --steps
     steps = None
     if args.steps:
@@ -572,6 +605,14 @@ def main():
     p_run.add_argument("--study", required=True, type=Path, help="Path to study YAML config")
     p_run.add_argument("--paradigm", help="Paradigm name (multi-paradigm configs)")
     p_run.add_argument("--analysis", choices=list(ANALYSIS_REGISTRY.keys()), help="Analysis to run")
+    p_run.add_argument(
+        "--profile", metavar="NAME",
+        help="Run under the top-level '<NAME>:' profile block, which narrows bands, "
+        "ROIs, hypotheses and the analysis set, and writes to a separate tree "
+        "(results/<NAME>/, analytics/<NAME>/). Omit for the default/exploratory "
+        "profile. NOTE: narrowing ROIs changes the FDR family, so a profile's "
+        "q-values are NOT comparable to the default profile's.",
+    )
     p_run.add_argument(
         "--steps",
         help="Comma-separated lifecycle steps to run (default: all). "

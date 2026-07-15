@@ -97,7 +97,7 @@ class ROICrossFreqAnalysis(BaseAnalysis):
     def process_subject(self, subject: SubjectInfo) -> None:
         loader = SubjectLoader(subject.data_dir)
         roi_ts = loader.load_or_extract_roi_timeseries(
-            signed=True, atlas_dir=self._atlas_dir,
+            signed=True, atlas_dir=self._atlas_dir, rois=self.config.rois,
         )
         sfreq = loader.load_sfreq()
         draws = self._equalize_roi_timeseries(roi_ts, sfreq)

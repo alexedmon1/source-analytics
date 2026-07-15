@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import pickle
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -199,12 +200,34 @@ class SubjectLoader:
         n_vertices = stc.shape[0]
         return stc.reshape(n_vertices, -1, epoch_samples)
 
+    @staticmethod
+    def _restrict_rois(
+        roi_ts: dict[str, np.ndarray], rois: Sequence[str] | None,
+    ) -> dict[str, np.ndarray]:
+        """Restrict ROI time series to ``rois`` (order-preserving); no-op if empty.
+
+        Raises on a requested ROI that isn't present rather than silently returning
+        a smaller set: the ROI set is the FDR correction family, so quietly dropping
+        one would shrink every family with nothing in the output to show for it.
+        """
+        if not rois:
+            return roi_ts
+        wanted = list(dict.fromkeys(rois))
+        missing = [r for r in wanted if r not in roi_ts]
+        if missing:
+            raise KeyError(
+                f"Requested ROI(s) not present in the data: {', '.join(missing)}. "
+                f"Available: {', '.join(sorted(roi_ts))}"
+            )
+        return {r: roi_ts[r] for r in wanted}
+
     def load_or_extract_roi_timeseries(
         self,
         signed: bool = True,
         atlas_dir: str | Path | None = None,
         method: str = "nearest",
         proximity_radius_mm: float = 2.0,
+        rois: Sequence[str] | None = None,
     ) -> dict[str, np.ndarray]:
         """Load ROI time series, extracting on-the-fly from step5 if needed.
 
@@ -223,6 +246,10 @@ class SubjectLoader:
             Source-to-ROI assignment: ``"nearest"`` or ``"proximity"``.
         proximity_radius_mm : float
             Radius for proximity method.
+        rois : sequence of str, optional
+            Restrict the result to these ROIs, in this order (a profile's
+            ``config.rois``). None/empty returns every ROI in the data — the
+            default, and byte-identical to the pre-profile behaviour.
 
         Returns
         -------
@@ -231,14 +258,16 @@ class SubjectLoader:
         """
         # 1. Try loading pre-extracted step6 files
         try:
-            return self.load_roi_timeseries(signed=signed)
+            return self._restrict_rois(self.load_roi_timeseries(signed=signed), rois)
         except FileNotFoundError:
             pass
 
         # 2. Fall back to on-the-fly extraction from step5 (cached)
+        # The cache always holds the FULL set — restrict on the way out, so a
+        # narrowed call can't poison it for a later unnarrowed one.
         cache_key = "signed" if signed else "magnitude"
         if cache_key in self._roi_cache:
-            return self._roi_cache[cache_key]
+            return self._restrict_rois(self._roi_cache[cache_key], rois)
 
         logger.info(
             "No step6 ROI files in %s — extracting on-the-fly from step5",

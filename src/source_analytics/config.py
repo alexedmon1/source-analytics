@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings as _warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -312,6 +312,16 @@ class StudyConfig:
     paradigms: dict[str, dict] = field(default_factory=dict, repr=False)
     paradigm_name: str | None = None
     design_spec: DesignSpec | None = None
+    # ---- Profile narrowing (set by for_profile(); see PROFILE_PROVENANCE_PLAN.md) ----
+    # rois: allowlist restricting which ROIs enter the analysis at all. Empty = all
+    # ROIs present in the data (today's behaviour). NOT merely cosmetic: the ROI set
+    # is the FDR family, so narrowing it changes every q-value.
+    rois: list[str] = field(default_factory=list)
+    # Analyses this profile is allowed to run (allowlist). None = all.
+    include_analyses: list[str] | None = None
+    # Profile id ("external", ...). None = the default/exploratory profile, whose
+    # output paths must stay byte-identical to a pre-profile run.
+    profile_name: str | None = None
     raw: dict = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -519,14 +529,137 @@ class StudyConfig:
         return bool(self.paradigms)
 
     def get_paradigm_analyses(self, name: str) -> list[str] | None:
-        """Return the analyses list for a paradigm, or None."""
+        """Return the analyses list for a paradigm, or None.
+
+        When a profile declares ``include_analyses`` (an allowlist), the result is
+        intersected with it — order follows the paradigm, and analyses the profile
+        doesn't name are simply absent.
+        """
         pdata = self.paradigms.get(name)
         if pdata is None:
             return None
         analyses = pdata.get("analyses")
         if isinstance(analyses, dict):
-            return list(analyses.keys())
-        return analyses
+            analyses = list(analyses.keys())
+        if analyses is None or self.include_analyses is None:
+            return analyses
+        allowed = set(self.include_analyses)
+        return [a for a in analyses if a in allowed]
+
+    def for_profile(self, name: str) -> StudyConfig:
+        """Return a config narrowed by the top-level ``<name>:`` profile block.
+
+        A profile only ever *narrows* — it never redefines shared study facts
+        (groups, colors, subjects, design). Apply it to the **root** config, before
+        paradigm scoping::
+
+            config.for_profile("external").for_paradigm_analysis(paradigm, analysis)
+
+        so that the profile segment lands above the paradigm in both output trees
+        (``results/<profile>/tables/<paradigm>/<module>``). ``for_paradigm*`` carry
+        the narrowed fields through.
+
+        Recognised keys (all optional):
+
+        ``bands``
+            Replaces the band set. Bands may redefine edges under the same name
+            (e.g. a report's ``Low Gamma: [30, 45]`` vs the study's ``[30, 55]``),
+            so this is a replacement, not a subset.
+        ``roi_categories``
+            Replaces the category→ROI map AND derives :attr:`rois` from it (the
+            flattened values), which is what actually restricts the analysis. ROIs
+            are the FDR family, so this changes every q-value — see
+            ``FORGE/treatment/REPORT_PLAN.md`` §10b.
+        ``include_hypotheses``
+            Allowlist of hypothesis names to keep from the design spec.
+        ``include_analyses``
+            Allowlist of analyses this profile runs (see ``get_paradigm_analyses``).
+
+        Keys consumed elsewhere (``title``, ``dvs``, ``connectivity_metrics``,
+        ``emphasis``, ``circos``, ``delta_reference``) are ignored here.
+        """
+        block = self.raw.get(name)
+        if not isinstance(block, dict):
+            raise ValueError(
+                f"No profile block '{name}:' in the study config "
+                f"(expected a top-level mapping)."
+            )
+
+        bands = self.bands
+        if "bands" in block:
+            bands = {
+                bname: tuple(limits) for bname, limits in block["bands"].items()
+            }
+            if not bands:
+                raise ValueError(f"Profile '{name}': bands: is empty.")
+
+        roi_categories = self.roi_categories
+        rois = self.rois
+        if "roi_categories" in block:
+            roi_categories = {
+                cat: list(members) for cat, members in block["roi_categories"].items()
+            }
+            rois = [r for members in roi_categories.values() for r in members]
+            if not rois:
+                raise ValueError(f"Profile '{name}': roi_categories: names no ROIs.")
+            dupes = sorted({r for r in rois if rois.count(r) > 1})
+            if dupes:
+                raise ValueError(
+                    f"Profile '{name}': ROI(s) in more than one category: "
+                    f"{', '.join(dupes)}"
+                )
+            # The parent map is the atlas partition when the study doesn't override
+            # it, so it's the authority on which ROI names exist.
+            known = {r for members in self.roi_categories.values() for r in members}
+            if known:
+                unknown = sorted(set(rois) - known)
+                if unknown:
+                    raise ValueError(
+                        f"Profile '{name}': unknown ROI(s) {', '.join(unknown)}. "
+                        f"Known: {', '.join(sorted(known))}"
+                    )
+
+        design_spec = self.design_spec
+        include_hyps = block.get("include_hypotheses")
+        if include_hyps is not None:
+            if design_spec is None:
+                raise ValueError(
+                    f"Profile '{name}': include_hypotheses set but the study "
+                    f"declares no design/hypotheses block."
+                )
+            defined = {h.name for h in design_spec.hypotheses}
+            unknown = sorted(set(include_hyps) - defined)
+            if unknown:
+                raise ValueError(
+                    f"Profile '{name}': unknown hypothesis/hypotheses "
+                    f"{', '.join(unknown)}. Defined: {', '.join(sorted(defined))}"
+                )
+            keep = set(include_hyps)
+            design_spec = replace(
+                design_spec,
+                hypotheses=[h for h in design_spec.hypotheses if h.name in keep],
+            )
+
+        include_analyses = block.get("include_analyses")
+        if include_analyses is not None:
+            include_analyses = list(include_analyses)
+            if not include_analyses:
+                raise ValueError(f"Profile '{name}': include_analyses: is empty.")
+
+        return replace(
+            self,
+            name=f"{self.name} — {name}",
+            # Profile segment sits above the paradigm in both trees. The default
+            # profile never calls this, so its paths are unchanged.
+            output_dir=self.output_dir / name,
+            results_dir=self.results_dir / name,
+            bands=bands,
+            roi_categories=roi_categories,
+            rois=rois,
+            include_analyses=include_analyses,
+            design_spec=design_spec,
+            profile_name=name,
+        )
 
     def for_paradigm(self, name: str) -> StudyConfig:
         """Return a paradigm-scoped config suitable for StudyAnalyzer.
@@ -577,6 +710,11 @@ class StudyConfig:
             evoked=pdata.get("evoked", self.evoked),
             paradigm_name=name,
             design_spec=self.design_spec,
+            # Carry profile narrowing through — for_profile() is applied to the root
+            # config, so these must survive paradigm scoping.
+            rois=self.rois,
+            include_analyses=self.include_analyses,
+            profile_name=self.profile_name,
             raw={**self.raw, **pdata},
         )
 
@@ -672,6 +810,10 @@ class StudyConfig:
             evoked=evoked if isinstance(evoked, dict) else {},
             paradigm_name=paradigm,
             design_spec=self.design_spec,
+            # Carry profile narrowing through (see for_paradigm).
+            rois=self.rois,
+            include_analyses=self.include_analyses,
+            profile_name=self.profile_name,
             raw=raw,
         )
 

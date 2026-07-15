@@ -469,20 +469,31 @@ def _find_coords(tbl_dir: Path, data_dir: Path | None, analysis: str) -> np.ndar
     search_paths = []
     if data_dir:
         search_paths.append(Path(data_dir) / "source_coords.csv")
-    # Try analytics dir parallel to tables
-    # tbl_dir is results/tables/<paradigm>/<analysis>
-    # data_dir would be analytics/<paradigm>/<analysis>/data/
-    results_root = tbl_dir
-    for _ in range(4):
-        results_root = results_root.parent
-        if results_root.name in ("results", ""):
-            break
-    analytics_root = results_root.parent / "analytics"
-    paradigm = tbl_dir.parent.name
-    search_paths.extend([
-        analytics_root / paradigm / analysis / "data" / "source_coords.csv",
-        analytics_root / paradigm / "vertex_cluster" / "data" / "source_coords.csv",
-    ])
+
+    # Mirror tbl_dir's position under results/ into the parallel analytics/ tree:
+    #   results/[<profile>/]tables/<paradigm>/<analysis>
+    #     -> analytics/[<profile>/]<paradigm>/<analysis>/data/
+    # Found by naming the `results` ancestor rather than counting levels, so an
+    # optional profile segment doesn't shift the walk. (The previous fixed 4-level
+    # walk reached `results` with zero slack and failed *silently* — returning None
+    # here just drops the glass brain with a warning.)
+    results_root = next(
+        (anc for anc in tbl_dir.parents if anc.name == "results"), None,
+    )
+    if results_root is not None:
+        analytics_root = results_root.parent / "analytics"
+        # ("tables", <paradigm>, <analysis>) or (<profile>, "tables", <paradigm>, <analysis>)
+        rel = [p for p in tbl_dir.relative_to(results_root).parts if p != "tables"]
+        if rel:
+            search_paths.append(
+                analytics_root.joinpath(*rel) / "data" / "source_coords.csv"
+            )
+            # vertex_cluster is the canonical producer of source_coords.csv, so fall
+            # back to it within the same profile+paradigm.
+            search_paths.append(
+                analytics_root.joinpath(*rel[:-1])
+                / "vertex_cluster" / "data" / "source_coords.csv"
+            )
 
     for p in search_paths:
         if p.exists():

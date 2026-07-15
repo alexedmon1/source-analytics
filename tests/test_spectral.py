@@ -1,5 +1,6 @@
 """Tests for spectral analysis modules."""
 
+import pytest
 import numpy as np
 
 from source_analytics.spectral.psd import compute_psd, compute_psd_multiroi
@@ -37,10 +38,20 @@ def test_extract_band_power():
 
     assert "Alpha" in result
     assert "Gamma" in result
-    assert result["Alpha"]["absolute"] > 0
+
+    # `absolute` is mean power DENSITY: 10*log10(band integral / bandwidth), in
+    # dB/Hz. A flat unit PSD therefore reads 0 dB/Hz in EVERY band, however wide
+    # — bandwidth no longer inflates wide bands. (This assertion previously read
+    # `Gamma > Alpha` "because Gamma is wider", pinning the very artifact the
+    # density change removed.)
+    assert result["Alpha"]["absolute"] == pytest.approx(0.0, abs=1e-9)
+    assert result["Gamma"]["absolute"] == pytest.approx(
+        result["Alpha"]["absolute"], abs=1e-9
+    )
+
+    # `relative` is still an integral ratio, so it does scale with bandwidth.
     assert 0 < result["Alpha"]["relative"] < 1
-    # Gamma band is wider, so should have more absolute power
-    assert result["Gamma"]["absolute"] > result["Alpha"]["absolute"]
+    assert result["Gamma"]["relative"] > result["Alpha"]["relative"]
 
 
 def test_extract_band_power_vertices_small_scale():
