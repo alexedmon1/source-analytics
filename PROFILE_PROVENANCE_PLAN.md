@@ -124,7 +124,31 @@ version. Same key ⇒ same number; different key ⇒ never compare.
   timestamp) instead of a per-row column. Gets 80% of the identification value at
   ~10% of the cost, and composes with the IRL `MANIFEST.sha256` freeze.
 
-### W4 — `--profile report` run mode · **S/M** · the gate for the report
+### W4 — `--profile NAME` run mode · ✅ **DONE (4971baa)** · was the gate
+
+Shipped as scoped **except** the ROI axis, where the scope below was **wrong**:
+
+> ⚠ **Correction.** "ROI narrowing is free because every module reads
+> `config.roi_categories`" — those reads are the **brain-mosaic** code (e.g.
+> `roi_psd_analysis.py:244`). `roi_categories` is **atlas-derived**
+> (`_load_atlas_roi_categories`) and never touched the analysis ROI list, which came
+> from `SubjectLoader.load_or_extract_roi_timeseries` **unfiltered**. Since the ROI
+> set IS the FDR family, narrowing had to reach the data or the family would never
+> shrink — i.e. the single most important part of the profile was the one part the
+> scope called free. Fixed by adding `rois` to the loader (applied at both return
+> paths; the on-the-fly cache stays unfiltered so a narrowed call can't poison a
+> later unnarrowed one; a missing ROI **raises** rather than silently shrinking the
+> family) and wiring `config.rois` into all 5 `roi_*` modules.
+> **Bands and hypotheses narrowing were free exactly as scoped.**
+
+Also fixed `viz/summary_figures.py::_find_coords` (trap #2 below) while it was cheap.
+Deferred: `connectivity_metrics` narrowing — it must compile down to the existing
+`--select` machinery, and per-module `SELECTABLE` validation makes a blanket inject
+unsafe (injecting `metric=` for `roi_psd`, which isn't metric-selectable, would fail).
+
+Original scope, for reference:
+
+### W4 (as scoped) — `--profile report` run mode · **S/M** · the gate for the report
 `StudyConfig.for_profile(name)`, sibling to `for_paradigm`:
 - filter `bands` (dict subset by key), `roi_categories` (dict subset),
   `design_spec.hypotheses` (filter by name → new `DesignSpec`). **Propagates to all
