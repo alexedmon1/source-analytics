@@ -412,6 +412,140 @@ DEFAULT_COMPACT_CORONAL = 145
 DEFAULT_COMPACT_AXIAL = 28
 DEFAULT_COMPACT_SAGITTAL = 25
 
+# Axis order used throughout the compact mosaic: 0 = X (sagittal),
+# 1 = Y (coronal), 2 = Z (axial).
+_AXIS_SAGITTAL, _AXIS_CORONAL, _AXIAL = 0, 1, 2
+
+
+def _slice_label_areas(
+    label_data: np.ndarray,
+    axis: int,
+    index_of: dict[int, int],
+) -> np.ndarray:
+    """Cross-sectional area of each target label in every slice along *axis*.
+
+    Returns an ``(n_slices, n_targets)`` array of voxel counts, so plane choice
+    can favour planes that show an ROI substantially rather than clipping its
+    edge into a one-voxel sliver.
+    """
+    n = label_data.shape[axis]
+    areas = np.zeros((n, len(index_of)), dtype=np.int64)
+    for i in range(n):
+        sl = np.take(label_data, i, axis=axis)
+        labs, counts = np.unique(sl, return_counts=True)
+        for lab, cnt in zip(labs, counts):
+            k = index_of.get(int(lab))
+            if k is not None:
+                areas[i, k] = int(cnt)
+    return areas
+
+
+def _pick_informative_slices(
+    label_data: np.ndarray,
+    target_labels: set[int],
+    *,
+    defaults: tuple[int, int, int] = (
+        DEFAULT_COMPACT_CORONAL,
+        DEFAULT_COMPACT_AXIAL,
+        DEFAULT_COMPACT_SAGITTAL,
+    ),
+    shortlist: int = 32,
+) -> tuple[int, int, int]:
+    """Choose (coronal, axial, sagittal) slices that show *target_labels*.
+
+    The historical fixed planes were chosen once and never adapted to the data,
+    so an ROI could be significant yet appear in none of the three panels.
+
+    Planes are scored by, in order: how many target ROIs the three panels cover
+    between them; then the *largest* cross-section the worst-served ROI gets in
+    any panel (maximin — this is what stops a deep ROI from being technically
+    present but clipped to a sliver); then total shown area; then closeness to
+    the historical planes, so figures whose ROIs are already well served stay
+    visually stable.
+
+    Falls back to *defaults* when *target_labels* is empty or absent from the
+    atlas volume.
+    """
+    targets = {int(t) for t in target_labels if int(t) != 0}
+    if not targets:
+        return defaults
+
+    present = targets & {int(v) for v in np.unique(label_data)}
+    if not present:
+        logger.warning(
+            "None of the requested ROIs exist in the atlas volume; "
+            "falling back to default mosaic slices."
+        )
+        return defaults
+
+    index_of = {lab: k for k, lab in enumerate(sorted(present))}
+    n_targets = len(index_of)
+
+    axis_defaults = {
+        _AXIS_CORONAL: defaults[0],
+        _AXIAL: defaults[1],
+        _AXIS_SAGITTAL: defaults[2],
+    }
+    areas: dict[int, np.ndarray] = {}
+    candidates: dict[int, list[int]] = {}
+    for axis in (_AXIS_CORONAL, _AXIAL, _AXIS_SAGITTAL):
+        axis_areas = _slice_label_areas(label_data, axis, index_of)
+        areas[axis] = axis_areas
+        ranked = sorted(
+            range(label_data.shape[axis]),
+            key=lambda i: (
+                -int(np.count_nonzero(axis_areas[i])),
+                -int(axis_areas[i].sum()),
+                abs(i - axis_defaults[axis]),
+            ),
+        )
+        candidates[axis] = ranked[:shortlist]
+
+    best: tuple[int, int, int] | None = None
+    best_key: tuple[int, int, int, int] | None = None
+    for yi in candidates[_AXIS_CORONAL]:
+        for zi in candidates[_AXIAL]:
+            for xi in candidates[_AXIS_SAGITTAL]:
+                # Per ROI, the best cross-section any of the three panels gives it.
+                shown = np.maximum.reduce([
+                    areas[_AXIS_CORONAL][yi],
+                    areas[_AXIAL][zi],
+                    areas[_AXIS_SAGITTAL][xi],
+                ])
+                key = (
+                    int(np.count_nonzero(shown)),
+                    int(shown.min()),
+                    int(shown.sum()),
+                    -(abs(yi - defaults[0])
+                      + abs(zi - defaults[1])
+                      + abs(xi - defaults[2])),
+                )
+                if best_key is None or key > best_key:
+                    best_key, best = key, (yi, zi, xi)
+
+    assert best is not None and best_key is not None
+    covered = best_key[0]
+    if covered < n_targets:
+        shown = np.maximum.reduce([
+            areas[_AXIS_CORONAL][best[0]],
+            areas[_AXIAL][best[1]],
+            areas[_AXIS_SAGITTAL][best[2]],
+        ])
+        missing = sorted(lab for lab, k in index_of.items() if shown[k] == 0)
+        logger.warning(
+            "Mosaic slices cover %d/%d requested ROIs; no three planes show "
+            "label(s) %s simultaneously.",
+            covered, n_targets, missing,
+        )
+    else:
+        logger.info(
+            "Mosaic slices cover all %d requested ROIs "
+            "(coronal=%d, axial=%d, sagittal=%d); smallest cross-section "
+            "shown = %d voxels.",
+            covered, best[0], best[1], best[2], best_key[1],
+        )
+    return best
+
 
 def _load_atlas_and_anat(
     atlas_name: str = "allen",
@@ -658,6 +792,7 @@ def plot_effect_size_mosaic(
     colorbar_label: str | None = None,
     atlas_name: str = "allen",
     roi_opacity: float = 0.85,
+    auto_slices: bool = True,
     dpi: int = 300,
 ) -> Path:
     """Plot an effect-size mosaic with diverging colormap.
@@ -703,6 +838,12 @@ def plot_effect_size_mosaic(
         ``"Hedges' g  (blue: KO < WT    red: KO > WT)"``.
     atlas_name : str
         Atlas to load (default ``"allen"``).
+    auto_slices : bool
+        When True (default), pick the three mosaic planes from the data so the
+        post-hoc survivors are actually visible, rather than using the fixed
+        historical planes (which could omit a significant ROI entirely — e.g.
+        a deep thalamic locus missing every panel). Set False to restore the
+        legacy fixed planes.
     """
     label_data, affine, roi_mapping, anat_norm = _load_atlas_and_anat(atlas_name)
 
@@ -733,11 +874,23 @@ def plot_effect_size_mosaic(
             (label_vals_sig, f"Hedges' g ({correction_label} q < {alpha}, n={n_sig})")
         )
 
+    slice_kwargs: dict[str, int] = {}
+    if auto_slices:
+        # Drive plane choice off the survivors when there are any: the bottom
+        # row is the panel a reader interrogates ROI-by-ROI, so it is the row
+        # that must not silently drop one. With no survivors there is only the
+        # all-ROI row, so cover that instead.
+        targets = set(label_vals_sig) if n_sig > 0 else set(label_vals_all)
+        coronal, axial, sagittal = _pick_informative_slices(label_data, targets)
+        slice_kwargs = dict(
+            coronal_slice=coronal, axial_slice=axial, sagittal_slice=sagittal,
+        )
+
     return _compact_mosaic(
         row_configs, title, label_data, anat_norm, affine,
         Path(output_path), cmap, norm, vmin, vmax,
         colorbar_label=colorbar_label or "Hedges' g  (blue: KO < WT    red: KO > WT)",
-        roi_opacity=roi_opacity, dpi=dpi,
+        roi_opacity=roi_opacity, dpi=dpi, **slice_kwargs,
     )
 
 
