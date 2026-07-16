@@ -170,7 +170,7 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
   names(color_vals) <- group_labels[group_order]
 
   # Preserve band order from data
-  band_order <- unique(band_df$band)
+  band_order <- order_bands(band_df$band)
   subj_means$band <- factor(subj_means$band, levels = band_order)
 
   show_jitter <- power_type == "absolute"
@@ -264,7 +264,7 @@ plot_regional_heatmap <- function(band_df, roi_categories, group_colors,
 
     # Preserve ordering
     gdata$category <- factor(gdata$category, levels = rev(names(roi_categories)))
-    band_order <- unique(band_df$band)
+    band_order <- order_bands(band_df$band)
     gdata$band <- factor(gdata$band, levels = band_order)
 
     label <- group_labels[grp]

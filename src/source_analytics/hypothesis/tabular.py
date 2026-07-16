@@ -35,6 +35,7 @@ import numpy as np
 from scipy import stats as st
 
 from ..config import DesignSpec, Hypothesis
+from ..viz.constants import order_bands
 from .permutation import _fit_groups
 
 logger = logging.getLogger(__name__)
@@ -243,7 +244,10 @@ def write_module_hypotheses_tabular(
     spatial_vals = (
         sorted(df[spatial_col].astype(str).unique()) if spatial_col else [None]
     )
-    bands = sorted(df[band_col].astype(str).unique()) if band_col in df.columns else [None]
+    bands = (
+        order_bands(df[band_col].astype(str).unique(), config)
+        if band_col in df.columns else [None]
+    )
 
     all_rows: list[dict] = []
     for hyp in hyps:

@@ -15,6 +15,24 @@ library(lmerTest)
 library(effectsize)
 library(emmeans)
 
+# Canonical low→high frequency band order for every plot, table, and summary.
+# Mirrors viz/constants.py::BAND_ORDER (Python) and app.js::BAND_ORDER (gallery).
+.BAND_ORDER <- c("Delta", "Theta", "Alpha", "Beta", "Low Gamma", "High Gamma", "Epsilon")
+
+#' Order the bands present in `x` into canonical low→high frequency order.
+#'
+#' @param x     vector of band names present in the data.
+#' @param ref   optional reference order; pass `names(config$bands)` to honor a
+#'              study's own declaration order. Defaults to `.BAND_ORDER`.
+#' Unknown bands (absent from `ref`) are appended in first-seen order so nothing
+#' is silently dropped.
+order_bands <- function(x, ref = NULL) {
+  present <- unique(as.character(x))
+  if (is.null(ref) || length(ref) == 0) ref <- .BAND_ORDER
+  ref <- as.character(ref)
+  c(ref[ref %in% present], present[!present %in% ref])
+}
+
 #' Run omnibus interaction LMM for each contrast x band
 #'
 #' Model: dv ~ group * roi + (1|subject)

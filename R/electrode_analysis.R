@@ -212,7 +212,7 @@ for (ptype in c("relative", "absolute")) {
   color_vals <- group_colors[group_order]
   names(color_vals) <- group_labels[group_order]
 
-  band_order <- unique(band_df$band)
+  band_order <- order_bands(band_df$band)
   subj_means$band <- factor(subj_means$band, levels = band_order)
 
   p <- ggplot(subj_means, aes(x = group_label, y = value, fill = group_label)) +

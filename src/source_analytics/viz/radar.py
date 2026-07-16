@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from .constants import order_bands
+
 logger = logging.getLogger(__name__)
 
 # Sensible defaults for the Autifony study
@@ -96,9 +98,10 @@ def plot_radar(
     if treatment_groups is None:
         treatment_groups = [g for g in all_groups if g != reference_group]
 
-    # Auto-detect bands
+    # Auto-detect bands (canonical low→high order; no config here, so the
+    # BAND_ORDER constant is the reference).
     if bands is None:
-        bands = sorted(region_df["band"].unique())
+        bands = order_bands(region_df["band"].unique())
 
     # Compute reference group means per region × band
     ref_means = (

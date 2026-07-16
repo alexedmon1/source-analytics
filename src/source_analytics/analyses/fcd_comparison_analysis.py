@@ -34,7 +34,7 @@ import pandas as pd
 
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
-from ..viz.constants import metric_display
+from ..viz.constants import metric_display, order_bands
 from .base import BaseAnalysis
 from .electrode_comparison_analysis import _hedges_g_ci
 
@@ -118,7 +118,7 @@ class FCDComparisonAnalysis(BaseAnalysis):
         metrics = self._select("metric", metrics)
         comp = comp[comp["metric"].isin(metrics)]
 
-        bands = self._select("band", sorted(comp["band"].unique()))
+        bands = self._select("band", order_bands(comp["band"].unique(), self.config))
         comp = comp[comp["band"].isin(bands)]
 
         self._comparison_df = comp.reset_index(drop=True)
@@ -194,7 +194,7 @@ class FCDComparisonAnalysis(BaseAnalysis):
         for metric, mdata in comp.groupby("metric", sort=False):
             # (1) concordance scatter: source vs sensor mean FCD, colored by band
             fig, ax = plt.subplots(figsize=(5, 5))
-            bands = sorted(mdata["band"].unique())
+            bands = order_bands(mdata["band"].unique(), self.config)
             cmap = plt.get_cmap("viridis", max(len(bands), 1))
             for i, band in enumerate(bands):
                 d = mdata[mdata["band"] == band][["sensor_mean", "source_mean"]].dropna()

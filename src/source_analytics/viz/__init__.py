@@ -2,6 +2,7 @@
 
 from .constants import (
     BAND_ORDER,
+    order_bands,
     BAND_FREQ_RANGES,
     BAND_COLORS,
     CC_ROIS,
@@ -50,6 +51,7 @@ from .figure_registry import (
 
 __all__ = [
     "BAND_ORDER",
+    "order_bands",
     "BAND_FREQ_RANGES",
     "BAND_COLORS",
     "CC_ROIS",

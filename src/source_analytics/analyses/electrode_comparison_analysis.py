@@ -16,11 +16,12 @@ import pandas as pd
 
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
-from ..viz.constants import BAND_ORDER as _BAND_ORDER_TITLE, CC_ROIS
+from ..viz.constants import BAND_ORDER as _BAND_ORDER_TITLE, CC_ROIS, order_bands
 
-# Build case-insensitive band order: lowercase + underscore versions
-# Include epsilon which some studies use
-BAND_ORDER = [b.lower().replace(" ", "_") for b in _BAND_ORDER_TITLE] + ["epsilon"]
+# Case-insensitive (lowercase + underscore) form of the canonical band order.
+# Epsilon is already part of _BAND_ORDER_TITLE, so no manual append (a duplicate
+# category would break the pd.Categorical below).
+BAND_ORDER = [b.lower().replace(" ", "_") for b in _BAND_ORDER_TITLE]
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -587,8 +588,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                 if pt_df.empty:
                     continue
 
-                bands = sorted(pt_df["band"].unique(), key=lambda b: list(self.config.bands.keys()).index(b)
-                               if b in self.config.bands else 999)
+                bands = order_bands(pt_df["band"].unique(), self.config)
                 regions = sorted(pt_df["region"].unique())
 
                 advantage = np.full((len(regions), len(bands)), np.nan)

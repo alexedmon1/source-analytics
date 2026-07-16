@@ -1,7 +1,34 @@
 """Shared visualization constants for consistent figures across all analyses."""
 
-# Frequency bands in ascending Hz order (standard for all plots)
-BAND_ORDER = ["Delta", "Theta", "Alpha", "Beta", "Low Gamma", "High Gamma"]
+from typing import Iterable
+
+# Frequency bands in ascending Hz order (standard for all plots, summaries, and
+# tables). This is the FALLBACK ordering; prefer `order_bands(bands, config)`,
+# which honors a study's own `bands:` declaration order when a config is on hand.
+BAND_ORDER = ["Delta", "Theta", "Alpha", "Beta", "Low Gamma", "High Gamma", "Epsilon"]
+
+
+def order_bands(bands: Iterable, config=None) -> list:
+    """Return `bands` sorted into canonical low→high frequency order.
+
+    Source of truth is the study's `bands:` declaration order
+    (`config.bands` is an insertion-ordered dict authored low→high); the module
+    constant `BAND_ORDER` is the fallback when no config is available. Bands not
+    found in either reference are appended, in stable input order, after the
+    known ones — so an unexpected band is never silently dropped.
+    """
+    ref = None
+    if config is not None:
+        cfg_bands = getattr(config, "bands", None)
+        if cfg_bands:
+            ref = list(cfg_bands)
+    if not ref:
+        ref = BAND_ORDER
+    index = {b: i for i, b in enumerate(ref)}
+    uniq = list(dict.fromkeys(bands))  # de-dup, preserve first-seen order
+    # Stable sort: known bands by reference index; unknowns tie at len(index) and
+    # keep their first-seen order.
+    return sorted(uniq, key=lambda b: index.get(str(b), len(index)))
 
 BAND_FREQ_RANGES = {
     "Delta": (1, 4),
