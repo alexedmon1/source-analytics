@@ -149,8 +149,16 @@ class ROIPsdAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Regenerate R figures from existing data/tables."""
+        """Regenerate R figures + brain effect-size mosaics from persisted tables.
+
+        base.run() clears fig_dir before this step; the brain mosaics must be
+        (re)rendered here, not only in summary(), or `--steps figures` alone
+        deletes them and regenerates nothing (feedback: figures must regenerate
+        from persisted data).
+        """
         self._call_r_figures_only("roi_psd_analysis.R", "band_power.csv")
+        if self._generate_figures:
+            self._render_brain_mosaics()
 
     def summary(self) -> None:
         """Call Rscript for statistics, figures, and summary."""
@@ -251,8 +259,12 @@ class ROIPsdAnalysis(BaseAnalysis):
             roi_cats,
             fig_dir,
             analysis_name="roi_psd",
-            effect_col="hedges_g",
-            roi_col="roi",
-            facet_cols=["contrast", "band", "power_type"],
+            effect_col="effect_size",
+            roi_col="spatial",
+            p_col="p_value",
+            q_col="q_value",
+            correction_label="FDR",
+            facet_cols=["hypothesis", "band", "dv"],
             colorbar_label="Hedges' g",
+            auto_slices=True,
         )

@@ -128,8 +128,14 @@ class ROIAperiodicAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Regenerate R figures from existing data/tables."""
+        """Regenerate R figures + brain effect-size mosaics from persisted tables.
+
+        base.run() clears fig_dir first, so the mosaics must render here, not
+        only in summary(), or `--steps figures` deletes them without redrawing.
+        """
         self._call_r_figures_only("roi_aperiodic_analysis.R", "aperiodic_params.csv")
+        if self._generate_figures:
+            self._render_brain_mosaics()
 
     def summary(self) -> None:
         """Call Rscript for statistics, figures, and summary."""
@@ -224,8 +230,12 @@ class ROIAperiodicAnalysis(BaseAnalysis):
             roi_cats,
             fig_dir,
             analysis_name="roi_aperiodic",
-            effect_col="hedges_g",
-            roi_col="roi",
-            facet_cols=["contrast", "dv"],
+            effect_col="effect_size",
+            roi_col="spatial",
+            p_col="p_value",
+            q_col="q_value",
+            correction_label="FDR",
+            facet_cols=["hypothesis", "dv"],
             colorbar_label="Hedges' g",
+            auto_slices=True,
         )

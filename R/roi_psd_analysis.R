@@ -268,11 +268,9 @@ for (ptype in c("relative", "absolute")) {
                       fig_dir, power_type = ptype, sig_df = ptype_sig)
 }
 
-# Regional heatmaps
-if (length(config$roi_categories) > 0) {
-  plot_regional_heatmap(band_df, config$roi_categories, group_colors,
-                        group_labels, group_order, fig_dir)
-}
+# Regional power heatmaps dropped (§6): the plain group x band x ROI grids are
+# superseded by the MS1-style effect-size brain mosaics rendered in Python
+# (_render_brain_mosaics -> plot_effect_size_mosaic, auto-sliced, study q_value).
 
 # PSD curves by region
 if (has_psd_curves && length(config$roi_categories) > 0) {

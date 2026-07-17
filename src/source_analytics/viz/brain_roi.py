@@ -931,9 +931,12 @@ def render_posthoc_mosaics(
     effect_col: str = "hedges_g",
     roi_col: str = "roi",
     p_col: str = "p_value",
+    q_col: str | None = None,
+    correction_label: str = "FDR",
     facet_cols: list[str] | None = None,
     colorbar_label: str = "Hedges' g",
     alpha: float = 0.05,
+    auto_slices: bool = True,
 ) -> list[Path]:
     """Render effect-size brain mosaics from a posthoc CSV.
 
@@ -956,12 +959,23 @@ def render_posthoc_mosaics(
         A leading ``"roi_"`` prefix is stripped for lookup.
     effect_col, roi_col, p_col : str
         Columns for effect size, ROI identifier, and uncorrected p-values.
+    q_col : str | None
+        Column of pre-corrected q-values (e.g. the study's ``q_value``). When
+        given, the thresholded second row uses ``q_col < alpha`` with
+        *correction_label*, so the mosaic's ``n=`` matches the study's survivor
+        count — instead of the viz layer's internal BH-FDR fallback on *p_col*.
+    correction_label : str
+        Legend/label for the correction behind *q_col* (e.g. "FDR", "Holm").
     facet_cols : list[str] | None
         Columns whose unique combinations define separate mosaics.
     colorbar_label : str
         Label for the mosaic colorbar.
     alpha : float
         FDR threshold used to build the second row.
+    auto_slices : bool
+        Pick the three mosaic planes from the data (coverage + maximin over the
+        survivors) so no significant ROI is clipped out (MS1 revision). When
+        False, fixed default planes are used.
 
     Returns
     -------
@@ -1032,9 +1046,12 @@ def render_posthoc_mosaics(
                 roi_col=plot_roi_col,
                 effect_col=effect_col,
                 p_col=p_col,
+                q_col=q_col if (q_col and q_col in group_df.columns) else None,
+                correction_label=correction_label,
                 alpha=alpha,
                 cmap_name=cmap_name,
                 colorbar_label=colorbar_label,
+                auto_slices=auto_slices,
             )
             saved.append(out_path)
         except Exception as exc:
