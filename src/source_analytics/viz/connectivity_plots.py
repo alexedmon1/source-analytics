@@ -89,12 +89,16 @@ def build_roi_matrix(
     if group is not None:
         edges_df = edges_df[edges_df["group"] == group]
 
-    # Build ordered ROI list: sort regions alphabetically, ROIs within each
-    region_names = sorted(roi_categories.keys())
+    # Build ordered ROI list. Preserve the config's category order (anatomical:
+    # Frontal→Motor→…→Hippocampal) and its within-category ROI order (L then R)
+    # rather than alphabetizing — so the connectivity heatmap is category-blocked
+    # in a meaningful sequence (R7), and the report's 20×20 wPLI matrix matches
+    # the REPORT_PLAN §7 block table exactly.
+    region_names = list(roi_categories.keys())
     roi_labels: list[str] = []
     region_sizes: list[int] = []
     for region in region_names:
-        rois = sorted(roi_categories[region])
+        rois = list(roi_categories[region])
         roi_labels.extend(rois)
         region_sizes.append(len(rois))
 
