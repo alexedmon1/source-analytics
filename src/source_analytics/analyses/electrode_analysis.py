@@ -268,8 +268,15 @@ class ElectrodeAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Delegated to R."""
-        pass
+        """Regenerate figures from persisted tables via R (--figures-only).
+
+        The full stats+figures pass runs in ``summary()`` (one Rscript call); this
+        step exists so ``--steps figures`` alone rebuilds the figures from the
+        persisted ``data/`` + ``tables/`` without recomputing LMMs, per the
+        figures-regenerable standard. base.run() clears fig_dir before this, so a
+        no-op here would silently delete the figures (it did).
+        """
+        self._call_r_figures_only("electrode_analysis.R", "electrode_band_power.csv")
 
     def summary(self) -> None:
         """Call Rscript for statistics, figures, and summary."""

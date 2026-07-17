@@ -46,12 +46,17 @@ parser$add_argument("--no-figures", action = "store_true", default = FALSE,
                     help = "Skip all figure generation (stats/tables only)")
 parser$add_argument("--hypothesis", default = NULL,
                     help = "Run only the named hypothesis(es) (comma-separated) from the design spec; default = all")
+parser$add_argument("--figures-only", action = "store_true", default = FALSE,
+                    help = "Regenerate figures from persisted tables; skip LMMs/stats/tables/summary")
+parser$add_argument("--roi-categories", default = NULL,
+                    help = "Accepted for CLI parity with the ROI scripts; unused here")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
 config_path <- args$config
 output_dir <- args$output_dir
 no_figures <- args$no_figures
+figures_only <- args$figures_only
 
 if (no_figures) {
   ggsave <- function(...) invisible(NULL)
@@ -85,6 +90,20 @@ message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 message("Bands: ", paste(names(config$bands), collapse = ", "))
 message("Channels: ", length(unique(band_df$roi)))
+
+if (figures_only) {
+  # Regenerate figures from persisted tables — no stats recompute (the
+  # figures-regenerable standard; --steps figures must not need in-memory state).
+  message("\n[figures-only] Loading persisted tables; skipping LMMs/stats/tables/summary.")
+  hyp_path <- file.path(tbl_dir, "electrode_psd_hypotheses.csv")
+  posthoc_df <- if (file.exists(hyp_path)) {
+    hp <- read_csv(hyp_path, show_col_types = FALSE)
+    hp[hp$kind == "contrast", , drop = FALSE]
+  } else {
+    message("  (no electrode_psd_hypotheses.csv — channel forest plots will be skipped)")
+    data.frame()
+  }
+} else {
 
 # --- Run LMMs for each power type ---
 power_types <- c("relative", "absolute")
@@ -194,6 +213,8 @@ if (nrow(posthoc_region_nested_df) > 0) {
   message("  Saved: tables/electrode_posthoc_region_nested.csv")
 }
 
+}  # end if (!figures_only) stats/tables block
+
 # --- Figures ---
 message("\nGenerating figures...")
 
@@ -270,6 +291,7 @@ if (nrow(posthoc_df) > 0) {
 }
 
 # --- Summary report ---
+if (!figures_only) {
 message("\nWriting summary...")
 
 n_subjects <- band_df %>%
@@ -283,5 +305,6 @@ write_summary(omnibus_df, posthoc_df, config, n_subjects, sfreq,
               fig_dir, file.path(output_dir, "ANALYSIS_SUMMARY.md"),
               omnibus_region_nested_df = omnibus_region_nested_df,
               posthoc_region_nested_df = posthoc_region_nested_df)
+}
 
 message("\nDone. Output: ", output_dir)
