@@ -143,29 +143,75 @@ contrasts_from_spec <- function(spec) {
 #' family per spatial cell; "none" = no correction (each row its own family,
 #' q = p). Aggressiveness is driven by FAMILY SIZE, not just the method.
 #' Sets q_value/significant/fdr_family on `df` (rows with NA p are left out).
-.apply_fdr <- function(df, method, scope) {
+.apply_fdr <- function(df, method, scope, hypothesis = NA_character_,
+                       dv = NA_character_, spatial_name = "spatial") {
   ok <- !is.na(df$p_value)
-  fam <- rep("all", nrow(df))
+  n <- nrow(df)
+  bandv <- if ("band" %in% names(df)) as.character(df$band) else rep(NA_character_, n)
+  spatv <- if ("spatial" %in% names(df)) as.character(df$spatial) else rep(NA_character_, n)
+
+  fam <- rep("all", n)
   if (scope == "band" && "band" %in% names(df)) {
-    fam <- as.character(df$band)
+    fam <- bandv
   } else if (scope == "spatial" && "spatial" %in% names(df)) {
-    fam <- as.character(df$spatial)
+    fam <- spatv
   } else if (scope == "none") {
-    fam <- as.character(seq_len(nrow(df)))   # every row alone -> q == p
+    fam <- as.character(seq_len(n))          # every row alone -> q == p
   }
   fam[is.na(fam)] <- "all"
 
   df$q_value <- NA_real_
+  df$fdr_family <- NA_character_
+  hyp_lbl <- if (length(hypothesis) >= 1 && !is.na(hypothesis[1])) hypothesis[1] else "NA"
+  dv_lbl  <- if (length(dv) >= 1 && !is.na(dv[1])) dv[1] else "NA"
   for (f in unique(fam[ok])) {
     idx <- which(ok & fam == f)
     df$q_value[idx] <- p.adjust(df$p_value[idx], method = method)
+    df$fdr_family[idx] <- .fdr_family_label(
+      method = method, scope = scope, family = f,
+      hypothesis = hyp_lbl, dv = dv_lbl,
+      bands = bandv[idx], spatial = spatv[idx], spatial_name = spatial_name)
   }
   df$significant <- !is.na(df$q_value) & df$q_value < 0.05
-  cnt <- as.integer(table(fam[ok])[fam]); cnt[is.na(cnt)] <- 0L
-  lbl <- if (scope == "none") sprintf("scope=none method=%s", method)
-         else sprintf("scope=%s method=%s family=%s n=%d", scope, method, fam, cnt)
-  df$fdr_family <- lbl
   df
+}
+
+#' Build the fully-qualified `fdr_family` label for one FDR family (W1).
+#'
+#' Encodes the family's fixed coordinates (`key` = the scope-fixed axis value,
+#' hypothesis, dv) AND the IDENTITY of the corrected member set (axis, count,
+#' and an 8-hex md5 over the sorted member strings). The hash means a 20-ROI
+#' family is never mistaken for a 32-ROI one even when scope/method/band match,
+#' so q-values from different profiles are provably non-comparable (REPORT_PLAN
+#' §10b). q-values themselves are unchanged — this is label-only.
+#'
+#' Kept byte-parity with Python `_fdr_family_label`: same member selection, same
+#' `sort(method="radix")` (C/codepoint order, matching Python `sorted`), same
+#' `md5(paste(members, collapse="|"))`.
+.fdr_family_label <- function(method, scope, family, hypothesis, dv,
+                              bands, spatial, spatial_name) {
+  # Normalize missing coords to the literal "NA" (matches Python str(None)->"NA")
+  bands   <- ifelse(is.na(bands), "NA", as.character(bands))
+  spatial <- ifelse(is.na(spatial), "NA", as.character(spatial))
+  if (length(family) >= 1 && is.na(family[1])) family <- "NA"
+  if (scope == "band") {
+    members <- sort(unique(spatial), method = "radix"); axis <- spatial_name
+    key <- paste(family, hypothesis, dv, sep = "|")
+  } else if (scope == "spatial") {
+    members <- sort(unique(bands), method = "radix"); axis <- "band"
+    key <- paste(family, hypothesis, dv, sep = "|")
+  } else if (scope == "none") {
+    members <- paste(bands, spatial, sep = ":"); axis <- "row"
+    key <- paste(bands[1], spatial[1], hypothesis, dv, sep = "|")
+  } else {                                    # "hypothesis": whole band x spatial grid
+    members <- sort(unique(paste(bands, spatial, sep = ":")), method = "radix"); axis <- "cell"
+    key <- paste("all", hypothesis, dv, sep = "|")
+  }
+  members <- members[!is.na(members) & members != "NA"]
+  h <- substr(digest::digest(paste(members, collapse = "|"),
+                             algo = "md5", serialize = FALSE), 1, 8)
+  sprintf("scope=%s method=%s key=%s members=%s[%d] hash=%s",
+          scope, method, key, axis, length(members), h)
 }
 
 # ---- Helpers ---------------------------------------------------------------
@@ -377,7 +423,8 @@ run_hypothesis <- function(data, hyp, spec,
   # Multiple-comparison correction within scope-defined families (declarative
   # fdr: spec; default = whole band x spatial grid, method BH).
   fdr <- .resolve_fdr(hyp, spec, default_method = fdr_method)
-  df <- .apply_fdr(df, fdr$method, fdr$scope)
+  df <- .apply_fdr(df, fdr$method, fdr$scope,
+                   hypothesis = hyp$name, dv = dv_col, spatial_name = spatial_col)
 
   front <- c("hypothesis", "kind", "role", "band", "spatial")
   df[, c(front, setdiff(names(df), front)), drop = FALSE]

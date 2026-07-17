@@ -128,6 +128,28 @@ ok(all(abs(q_none$q_value - fdf$p_value) < 1e-9), "scope=none leaves q == p (no 
 ok(grepl("scope=band", q_band$fdr_family[1]) && grepl("scope=hypothesis", q_hyp$fdr_family[1]),
    "fdr_family label records the scope + method used")
 
+# ---- 9b. W1: fully-qualified fdr_family label — byte-parity with Python ----
+# The two builders duplicate BH/`p.adjust`, so their labels must match to the
+# byte; these exact strings are also asserted in tests/test_tabular.py.
+lab_band <- .fdr_family_label("BH", "band", "Alpha", "disease_effect", "relative",
+                              c("Motor_L", "Auditory_L", "Auditory_R"),
+                              c("Motor_L", "Auditory_L", "Auditory_R"), "roi")
+ok(identical(lab_band,
+             "scope=band method=BH key=Alpha|disease_effect|relative members=roi[3] hash=7463bb9d"),
+   "W1 band-scope label byte-matches the Python builder (incl. member hash)")
+lab_hyp <- .fdr_family_label("BH", "hypothesis", NA, "hd_icv_rescue", "offset",
+                             c(NA, NA), c("Auditory_L", "Auditory_R"), "roi")
+ok(identical(lab_hyp,
+             "scope=hypothesis method=BH key=all|hd_icv_rescue|offset members=cell[2] hash=11f8cfba"),
+   "W1 band-less hypothesis-scope label byte-matches Python (NA band token)")
+# §10b property: 20-ROI vs 32-ROI family → different hash despite same band/hyp/dv
+r20 <- sprintf("R%02d", 0:19); r32 <- sprintf("R%02d", 0:31)
+h20 <- .fdr_family_label("BH", "band", "Alpha", "h", "rel", r20, r20, "roi")
+h32 <- .fdr_family_label("BH", "band", "Alpha", "h", "rel", r32, r32, "roi")
+ok(grepl("members=roi\\[20\\]", h20) && grepl("members=roi\\[32\\]", h32) &&
+     sub(".*hash=", "", h20) != sub(".*hash=", "", h32),
+   "W1 member-set hash distinguishes a 20-ROI family from a 32-ROI one (§10b)")
+
 # ---- 10. .resolve_fdr precedence: per-hyp > design > built-in default ----
 sp_fdr <- list(fdr = list(method = "BH", scope = "hypothesis"))
 r_over <- .resolve_fdr(list(fdr = list(scope = "band")), sp_fdr)

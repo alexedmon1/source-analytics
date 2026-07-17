@@ -23,6 +23,7 @@ from source_analytics.config import DesignSpec, Hypothesis
 from source_analytics.hypothesis.tabular import (
     _adapt_cell,
     _apply_fdr,
+    _fdr_family_label,
     write_module_hypotheses_tabular,
 )
 
@@ -184,3 +185,44 @@ def test_fdr_scope_family_size():
     none_rows = [dict(r) for r in rows]
     _apply_fdr(none_rows, "BH", "none")
     assert all(abs(r["q_value"] - r["p_value"]) < 1e-12 for r in none_rows)
+
+
+def test_fdr_family_label_qualified_and_member_hash():
+    """W1: fdr_family is fully qualified (scope/method/key/members/hash) and the
+    hash encodes member-set IDENTITY, so a 20-ROI family is never confused with a
+    32-ROI one even when scope/method/band match (REPORT_PLAN §10b).
+
+    These exact strings are also asserted, byte-for-byte, by the R side in
+    tests/test_hypothesis.R — the label builders must stay in lockstep.
+    """
+    lab = _fdr_family_label(
+        "BH", "band", "Alpha", "disease_effect", "relative",
+        ["Motor_L", "Auditory_L", "Auditory_R"],
+        ["Motor_L", "Auditory_L", "Auditory_R"], "roi",
+    )
+    assert lab == (
+        "scope=band method=BH key=Alpha|disease_effect|relative "
+        "members=roi[3] hash=7463bb9d"
+    )
+
+    # band-less (aperiodic) hypothesis-scope family: band coerces to the NA token
+    lab2 = _fdr_family_label(
+        "BH", "hypothesis", None, "hd_icv_rescue", "offset",
+        [None, None], ["Auditory_L", "Auditory_R"], "roi",
+    )
+    assert lab2 == (
+        "scope=hypothesis method=BH key=all|hd_icv_rescue|offset "
+        "members=cell[2] hash=11f8cfba"
+    )
+
+    # §10b property: same band/hyp/dv/scope, different ROI membership → different hash
+    rois20 = [f"R{i:02d}" for i in range(20)]
+    rois32 = [f"R{i:02d}" for i in range(32)]
+    h20 = _fdr_family_label("BH", "band", "Alpha", "h", "rel", rois20, rois20, "roi")
+    h32 = _fdr_family_label("BH", "band", "Alpha", "h", "rel", rois32, rois32, "roi")
+    assert "members=roi[20]" in h20 and "members=roi[32]" in h32
+    assert h20.rsplit("hash=", 1)[1] != h32.rsplit("hash=", 1)[1]
+
+    # membership identity is order-invariant (sorted before hashing)
+    shuffled = list(reversed(rois20))
+    assert _fdr_family_label("BH", "band", "Alpha", "h", "rel", shuffled, shuffled, "roi") == h20

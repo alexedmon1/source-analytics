@@ -27,6 +27,7 @@ Hedges g), ``equivalence`` (TOST, sd margin). ``regression`` is not supported he
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -94,11 +95,68 @@ def _resolve_fdr(hyp: Hypothesis, spec: DesignSpec | None) -> tuple[str, str]:
     return method, scope
 
 
-def _apply_fdr(rows: list[dict], method: str, scope: str) -> None:
+def _norm_coord(x) -> str:
+    """Missing-coordinate token, kept identical to R's ``ifelse(is.na(x),"NA",…)``."""
+    if x is None:
+        return "NA"
+    s = str(x)
+    return "NA" if s in ("None", "nan", "NA", "<NA>") else s
+
+
+def _fdr_family_label(
+    method: str,
+    scope: str,
+    family: str | None,
+    hypothesis: str,
+    dv: str,
+    bands: list[str],
+    spatials: list[str],
+    spatial_name: str,
+) -> str:
+    """Fully-qualified ``fdr_family`` label for one FDR family (W1).
+
+    Byte-parity with R ``.fdr_family_label``: same member selection, same
+    codepoint sort (Python ``sorted`` == R ``sort(method="radix")``), same
+    ``md5("|".join(members))``. Encodes member-set IDENTITY (hash) so a 20-ROI
+    family is never confused with a 32-ROI one (REPORT_PLAN §10b).
+    """
+    bands = [_norm_coord(b) for b in bands]
+    spatials = [_norm_coord(s) for s in spatials]
+    fam = _norm_coord(family)
+    if scope == "band":
+        members = sorted(set(spatials))
+        axis = spatial_name
+        key = f"{fam}|{hypothesis}|{dv}"
+    elif scope == "spatial":
+        members = sorted(set(bands))
+        axis = "band"
+        key = f"{fam}|{hypothesis}|{dv}"
+    elif scope == "none":
+        members = [f"{b}:{s}" for b, s in zip(bands, spatials)]
+        axis = "row"
+        key = f"{bands[0]}|{spatials[0]}|{hypothesis}|{dv}"
+    else:  # "hypothesis": one family across the whole band × spatial grid
+        members = sorted({f"{b}:{s}" for b, s in zip(bands, spatials)})
+        axis = "cell"
+        key = f"all|{hypothesis}|{dv}"
+    members = [m for m in members if m != "NA"]
+    h = hashlib.md5("|".join(members).encode()).hexdigest()[:8]
+    return f"scope={scope} method={method} key={key} members={axis}[{len(members)}] hash={h}"
+
+
+def _apply_fdr(
+    rows: list[dict],
+    method: str,
+    scope: str,
+    hypothesis: str = "NA",
+    dv: str = "NA",
+    spatial_name: str = "spatial",
+) -> None:
     """Set ``q_value`` / ``significant`` / ``fdr_family`` on rows in place.
 
     ``scope`` partitions the (band × spatial) rows into the families across which
     p-values are corrected (family SIZE drives aggressiveness, not just method).
+    ``fdr_family`` is the fully-qualified, member-set-hashed label (W1).
     """
     def fam_key(r: dict) -> str:
         if scope == "band":
@@ -112,17 +170,23 @@ def _apply_fdr(rows: list[dict], method: str, scope: str) -> None:
     families: dict[str, list[dict]] = {}
     for r in rows:
         families.setdefault(fam_key(r), []).append(r)
-    for key, fam in families.items():
+    for _key, fam in families.items():
         p = np.array([r["p_value"] for r in fam], dtype=float)
         q = _p_adjust(p, method)
-        n = int(np.sum(~np.isnan(p)))
+        bands = [r.get("band") for r in fam]
+        spatials = [r.get("spatial") for r in fam]
+        family_val = (
+            fam[0].get("band") if scope == "band"
+            else fam[0].get("spatial") if scope == "spatial"
+            else None
+        )
+        label = _fdr_family_label(
+            method, scope, family_val, hypothesis, dv, bands, spatials, spatial_name
+        )
         for r, qv in zip(fam, q):
             r["q_value"] = float(qv) if not np.isnan(qv) else float("nan")
             r["significant"] = bool(not np.isnan(qv) and qv < 0.05)
-            r["fdr_family"] = (
-                f"scope=none method={method}" if scope == "none"
-                else f"scope={scope} method={method} family={key} n={n}"
-            )
+            r["fdr_family"] = label
 
 
 # --------------------------------------------------------------------------- #
@@ -298,7 +362,13 @@ def write_module_hypotheses_tabular(
 
             if fam_rows:
                 method, scope = _resolve_fdr(hyp, spec)
-                _apply_fdr(fam_rows, method, scope)
+                facet_map = dict(zip(facet_cols, fkey))
+                _apply_fdr(
+                    fam_rows, method, scope,
+                    hypothesis=hyp.name,
+                    dv=str(facet_map.get("dv", "NA")),
+                    spatial_name=spatial_col or "spatial",
+                )
                 all_rows.extend(fam_rows)
 
     if not all_rows:
