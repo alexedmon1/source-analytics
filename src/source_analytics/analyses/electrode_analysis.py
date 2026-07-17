@@ -317,10 +317,9 @@ class ElectrodeAnalysis(BaseAnalysis):
         ]
         cmd.extend(self._r_no_figures_flags())
 
-        # Manual hypothesis selection (--hypothesis NAME[,NAME]) passed through to R.
-        wanted_hyp = self._selection.get("hypothesis")
-        if wanted_hyp:
-            cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
+        # Hypothesis selection → R; honors manual --hypothesis and a profile's
+        # include_hypotheses (see BaseAnalysis._r_hypothesis_flag).
+        cmd.extend(self._r_hypothesis_flag())
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:

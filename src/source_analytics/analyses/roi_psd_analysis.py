@@ -204,12 +204,10 @@ class ROIPsdAnalysis(BaseAnalysis):
         cmd.extend(self._r_no_figures_flags())
         cmd.extend(self._r_roi_categories_flags())
 
-        # Manual hypothesis selection: pass --hypothesis NAME[,NAME] through to R.
-        # Read directly from the active selection (not routed through _select,
-        # since the hypotheses are resolved R-side, not in Python).
-        wanted_hyp = self._selection.get("hypothesis")
-        if wanted_hyp:
-            cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
+        # Hypothesis selection (--hypothesis NAME[,NAME]) → R. Honors both a manual
+        # --hypothesis and a profile's include_hypotheses (R re-parses the raw
+        # config, so a narrowed profile must forward its names explicitly).
+        cmd.extend(self._r_hypothesis_flag())
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:

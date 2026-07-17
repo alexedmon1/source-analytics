@@ -447,6 +447,30 @@ class BaseAnalysis(ABC):
             return ["--no-figures"]
         return []
 
+    def _r_hypothesis_flag(self) -> list[str]:
+        """``--hypothesis NAME[,NAME]`` for R modules, honoring a profile.
+
+        ``for_profile()`` narrows ``design_spec.hypotheses`` (``include_hypotheses``),
+        but R-delegated modules serialize the *raw* config and re-parse every
+        hypothesis — so a narrowed profile must forward its hypothesis names
+        explicitly or R silently runs all of them. Intersect with any user
+        ``--hypothesis`` selection. Returns ``[]`` for the default profile with no
+        selection, so a non-profile run stays byte-identical (no flag passed).
+        """
+        selection = self._selection.get("hypothesis")  # frozenset[str] | None
+        profile_names: list[str] | None = None
+        if getattr(self.config, "profile_name", None) is not None and self.config.design_spec:
+            profile_names = [h.name for h in self.config.design_spec.hypotheses]
+        if selection and profile_names is not None:
+            names = [n for n in profile_names if n in selection]
+        elif selection:
+            names = sorted(selection)
+        elif profile_names is not None:
+            names = profile_names
+        else:
+            names = None
+        return ["--hypothesis", ",".join(names)] if names else []
+
     # ---- Anatomical labeling of vertex clusters --------------------------- #
     def _label_vertex_regions(self, coords_mm) -> list[str | None]:
         """One atlas-ROI name per vertex, for describing where clusters sit.
