@@ -63,6 +63,9 @@ run_omnibus_lmm <- function(band_df, contrasts, bands, power_type = "relative") 
       bdata$group <- factor(bdata$group, levels = c(ga, gb))
       bdata$roi <- factor(bdata$roi)
       bdata$dv <- bdata[[power_type]]
+      # Skip all-NA (band x dv) families — e.g. delta_ref on its excluded
+      # reference band, which is NA'd upstream. lmer on an all-NA response errors.
+      if (all(is.na(bdata$dv))) next
 
       group_F <- NA; group_p <- NA
       roi_F <- NA; roi_p <- NA

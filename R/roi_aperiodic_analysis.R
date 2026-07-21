@@ -106,6 +106,16 @@ group_order <- config$group_order
 diag_contrasts <- tryCatch(contrasts_from_spec(parse_design_spec(config)),
                            error = function(e) config$contrasts)
 
+# Under --profile external, narrow the DIAGNOSTIC omnibus to the same --hypothesis
+# set the declarative layer uses, or dropped contrasts (dose/route) leak back into
+# roi_aperiodic_omnibus*.csv even though the hypothesis tables are correctly narrowed.
+if (!is.null(args$hypothesis) && length(diag_contrasts) > 0) {
+  want <- trimws(strsplit(args$hypothesis, ",")[[1]])
+  diag_contrasts <- Filter(function(ct) ct$name %in% want, diag_contrasts)
+  message("Omnibus contrasts narrowed to --hypothesis set: ",
+          paste(vapply(diag_contrasts, function(ct) ct$name, character(1)), collapse = ", "))
+}
+
 message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 

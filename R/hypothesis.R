@@ -391,6 +391,9 @@ run_hypothesis <- function(data, hyp, spec,
   for (bn in band_vals) {
     bdata <- if (has_band) data[as.character(data[[band_col]]) == bn, , drop = FALSE] else data
     if (nrow(bdata) == 0) next
+    # Skip all-NA (band x dv) families (e.g. delta_ref on its excluded reference
+    # band). The fit would error; skipping keeps the log clean and emits no row.
+    if (dv_col %in% names(bdata) && all(is.na(bdata[[dv_col]]))) next
     groups <- intersect(.fit_groups(hyp, spec, fit_scope),
                         unique(as.character(bdata[[spec$factor]])))
     if (hyp$kind != "regression" && length(groups) < 2) next

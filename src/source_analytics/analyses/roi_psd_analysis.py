@@ -15,7 +15,11 @@ from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.psd import compute_psd_multiroi
-from ..spectral.band_power import extract_band_power_multiroi, relative_power_kwargs
+from ..spectral.band_power import (
+    delta_reference_kwargs,
+    extract_band_power_multiroi,
+    relative_power_kwargs,
+)
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -84,7 +88,12 @@ class ROIPsdAnalysis(BaseAnalysis):
         all_psd_arrays: dict[str, list[np.ndarray]] = {}
         all_band_abs: dict[tuple[str, str], list[float]] = {}
         all_band_rel: dict[tuple[str, str], list[float]] = {}
+        all_band_dref: dict[tuple[str, str], list[float]] = {}
         freqs_out: np.ndarray | None = None
+
+        # Delta-referenced power (R2) is computed only when the profile supplies a
+        # ``delta_reference`` window (external/report); absent → default DV set.
+        dref_kwargs = delta_reference_kwargs(self.config.raw.get("delta_reference"))
 
         for draw_ts in draws:
             roi_psds = compute_psd_multiroi(draw_ts, sfreq, fmax=fmax)
@@ -95,12 +104,15 @@ class ROIPsdAnalysis(BaseAnalysis):
 
             band_power = extract_band_power_multiroi(
                 roi_psds, self._selected_bands(),
-                **relative_power_kwargs(self.config.raw.get("relative_power")))
+                **relative_power_kwargs(self.config.raw.get("relative_power")),
+                **dref_kwargs)
             for roi_name, bp_dict in band_power.items():
                 for band_name, power_vals in bp_dict.items():
                     key = (roi_name, band_name)
                     all_band_abs.setdefault(key, []).append(power_vals["absolute"])
                     all_band_rel.setdefault(key, []).append(power_vals["relative"])
+                    if "delta_ref" in power_vals:
+                        all_band_dref.setdefault(key, []).append(power_vals["delta_ref"])
 
         # Average PSD curves across draws
         for roi_name, psd_list in all_psd_arrays.items():
@@ -116,14 +128,18 @@ class ROIPsdAnalysis(BaseAnalysis):
 
         # Average band power across draws
         for (roi_name, band_name), abs_list in all_band_abs.items():
-            self._subject_band_power.append({
+            row = {
                 "subject": uid,
                 "group": subject.group,
                 "roi": roi_name,
                 "band": band_name,
                 "absolute": float(np.mean(abs_list)),
                 "relative": float(np.mean(all_band_rel[(roi_name, band_name)])),
-            })
+            }
+            dref_list = all_band_dref.get((roi_name, band_name))
+            if dref_list:
+                row["delta_ref"] = float(np.mean(dref_list))
+            self._subject_band_power.append(row)
 
     def aggregate(self) -> None:
         """Export CSVs for R consumption."""

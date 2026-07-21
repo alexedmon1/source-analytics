@@ -102,6 +102,41 @@ group_order <- config$group_order
 diag_contrasts <- tryCatch(contrasts_from_spec(parse_design_spec(config)),
                            error = function(e) config$contrasts)
 
+# --- Profile-narrowed contrast set for the DIAGNOSTIC omnibus ---
+# The declarative hypothesis layer already honors --hypothesis, but the omnibus
+# builds diag_contrasts from the full design spec. Under --profile external the
+# omnibus must be narrowed to the same set, or dropped contrasts (dose/route)
+# leak back into roi_psd_omnibus*.csv. Filter by the same --hypothesis names.
+if (!is.null(args$hypothesis) && length(diag_contrasts) > 0) {
+  want <- trimws(strsplit(args$hypothesis, ",")[[1]])
+  diag_contrasts <- Filter(function(ct) ct$name %in% want, diag_contrasts)
+  message("Omnibus contrasts narrowed to --hypothesis set: ",
+          paste(vapply(diag_contrasts, function(ct) ct$name, character(1)), collapse = ", "))
+}
+
+# --- Dependent-variable (DV) set ---
+# `dvs:` in a profile block selects which power columns to analyse; default
+# (exploratory) is the built-in absolute/relative pair. delta_ref (R2) is present
+# only when the external profile promoted a `delta_reference` window into config.
+power_types <- if (!is.null(config$dvs)) as.character(unlist(config$dvs)) else c("relative", "absolute")
+missing_dv <- setdiff(power_types, names(band_df))
+if (length(missing_dv) > 0) {
+  message("  Requested DV(s) absent from band_power.csv, skipping: ",
+          paste(missing_dv, collapse = ", "))
+  power_types <- intersect(power_types, names(band_df))
+}
+
+# --- Delta-referenced power (R2): drop the reference band(s) from testing ---
+# In the delta-ref DV the anchor band (Delta) is ~constant by construction, so it
+# is excluded from delta_ref stats/plots. NA-out those cells (wide format: the DVs
+# share rows, so we can't drop rows) — the omnibus + hypothesis fits skip all-NA
+# (band x dv) families, and the boxplots filter NA before plotting.
+if ("delta_ref" %in% power_types && !is.null(config$delta_reference$exclude_bands)) {
+  excl <- as.character(unlist(config$delta_reference$exclude_bands))
+  band_df$delta_ref[band_df$band %in% excl] <- NA_real_
+  message("  delta_ref: excluded reference band(s) from testing: ", paste(excl, collapse = ", "))
+}
+
 # Load roi_categories from atlas file if provided
 if (!is.null(args$roi_categories) && file.exists(args$roi_categories)) {
   config$roi_categories <- read_yaml(args$roi_categories)
@@ -114,8 +149,8 @@ message("Groups: ", paste(group_order, collapse = ", "))
 message("Bands: ", paste(names(config$bands), collapse = ", "))
 
 if (!figures_only) {
-  # --- Run LMMs for each power type ---
-  power_types <- c("relative", "absolute")
+  # --- Run LMMs for each power type (power_types resolved from config$dvs above) ---
+  message("DVs: ", paste(power_types, collapse = ", "))
 
   all_omnibus <- list()
   all_omnibus_region <- list()
@@ -258,13 +293,18 @@ if (!figures_only) {
 # --- Figures ---
 message("\nGenerating figures...")
 
-# Band power boxplots (with significance brackets)
-for (ptype in c("relative", "absolute")) {
+# Band power boxplots (with significance brackets). power_types comes from
+# config$dvs (default relative/absolute; + delta_ref under the external profile).
+for (ptype in power_types) {
   ptype_sig <- if (nrow(global_posthoc_df) > 0) {
     global_posthoc_df %>% filter(dv == ptype)
   } else NULL
 
-  plot_band_power_box(band_df, group_colors, group_labels, group_order,
+  # delta_ref NA-outs the excluded reference band(s); drop those rows so the
+  # boxplot doesn't render an empty facet for them.
+  bdf_p <- band_df %>% filter(!is.na(.data[[ptype]]))
+
+  plot_band_power_box(bdf_p, group_colors, group_labels, group_order,
                       fig_dir, power_type = ptype, sig_df = ptype_sig)
 }
 
@@ -272,11 +312,21 @@ for (ptype in c("relative", "absolute")) {
 # superseded by the MS1-style effect-size brain mosaics rendered in Python
 # (_render_brain_mosaics -> plot_effect_size_mosaic, auto-sliced, study q_value).
 
-# PSD curves by region
+# PSD curves by region — the 1/f spectra. Rendered in BOTH absolute (raw log-PSD,
+# the broadband level) and delta-referenced (each spectrum ÷ its own 1–1.5 Hz
+# anchor, dB) views so a broadband/offset shift (curves translate in absolute,
+# collapse in delta-ref) is visually separable from a genuine spectral-shape change.
 if (has_psd_curves && length(config$roi_categories) > 0) {
   plot_psd_by_region(psd_df, config$roi_categories, group_colors,
                      group_labels, group_order, fig_dir,
-                     group_linetypes = group_linetypes)
+                     group_linetypes = group_linetypes, mode = "absolute")
+  dref <- config$delta_reference
+  if ("delta_ref" %in% power_types && !is.null(dref)) {
+    plot_psd_by_region(psd_df, config$roi_categories, group_colors,
+                       group_labels, group_order, fig_dir,
+                       group_linetypes = group_linetypes, mode = "delta_ref",
+                       dref_fmin = dref$fmin %||% 1.0, dref_fmax = dref$fmax %||% 1.5)
+  }
 }
 
 # Post-hoc figures (ROI-level and region-level significance heatmaps)

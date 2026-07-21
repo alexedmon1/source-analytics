@@ -575,8 +575,15 @@ class StudyConfig:
         ``include_analyses``
             Allowlist of analyses this profile runs (see ``get_paradigm_analyses``).
 
-        Keys consumed elsewhere (``title``, ``dvs``, ``connectivity_metrics``,
-        ``emphasis``, ``circos``, ``delta_reference``) are ignored here.
+        ``dvs``, ``delta_reference``
+            Promoted verbatim to the top level of the returned config's ``raw`` so
+            the Python modules and the R side both see them (``dvs`` selects the DV
+            columns to analyse; ``delta_reference`` is the R2 anchor window). The
+            default profile never calls this, so its ``raw`` is unchanged and R
+            falls back to the built-in ``absolute``/``relative`` DV set.
+
+        Keys consumed elsewhere (``title``, ``connectivity_metrics``, ``emphasis``,
+        ``circos``) are ignored here.
         """
         block = self.raw.get(name)
         if not isinstance(block, dict):
@@ -646,6 +653,16 @@ class StudyConfig:
             if not include_analyses:
                 raise ValueError(f"Profile '{name}': include_analyses: is empty.")
 
+        # Promote the "consumed elsewhere" keys to the top level of a fresh ``raw``
+        # so both the Python modules (``config.raw.get(...)``) and the R side (which
+        # is fed ``dict(config.raw)`` via study_config.yaml) see the profile's values
+        # without having to know the profile name. ``dvs`` selects which DV columns R
+        # runs stats/figures on; ``delta_reference`` supplies the R2 anchor window.
+        raw = self.raw
+        promoted = {k: block[k] for k in ("dvs", "delta_reference") if k in block}
+        if promoted:
+            raw = {**self.raw, **promoted}
+
         return replace(
             self,
             name=f"{self.name} — {name}",
@@ -659,6 +676,7 @@ class StudyConfig:
             include_analyses=include_analyses,
             design_spec=design_spec,
             profile_name=name,
+            raw=raw,
         )
 
     def for_paradigm(self, name: str) -> StudyConfig:

@@ -34,12 +34,19 @@ theme_pub <- function(base_size = 14) {
 #' @param group_order character vector of group IDs in plot order
 #' @param output_dir path to figures/ directory
 #' @param fmax maximum frequency to display
+#' @param mode "absolute" (raw PSD on a log axis — the 1/f level) or "delta_ref"
+#'   (each subject's spectrum divided by its own 1–1.5 Hz anchor, in dB re: delta,
+#'   normalizing out the broadband/offset level so residual spectral SHAPE shows).
+#' @param dref_fmin,dref_fmax delta-reference anchor window (mode == "delta_ref").
 plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
                                 group_labels, group_order, output_dir,
                                 group_linetypes = NULL,
-                                fmax = 80, notch_lo = 55, notch_hi = 65) {
+                                fmax = 80, notch_lo = 55, notch_hi = 65,
+                                mode = "absolute",
+                                dref_fmin = 1.0, dref_fmax = 1.5) {
 
   notch_width <- notch_hi - notch_lo
+  is_dref <- mode == "delta_ref"
 
   # Map ROIs to categories
   roi_to_cat <- data.frame(
@@ -48,16 +55,34 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
     stringsAsFactors = FALSE
   )
 
-  plot_data <- psd_df %>%
+  # Subject × category spectra (average ROIs within a category per subject).
+  subj_spec <- psd_df %>%
     inner_join(roi_to_cat, by = "roi") %>%
     filter(freq_hz <= fmax, group %in% group_order,
            !(freq_hz >= notch_lo & freq_hz <= notch_hi)) %>%
     group_by(subject, group, category, freq_hz) %>%
-    summarise(psd = mean(psd, na.rm = TRUE), .groups = "drop") %>%
+    summarise(psd = mean(psd, na.rm = TRUE), .groups = "drop")
+
+  if (is_dref) {
+    # Per-subject × category anchor = mean PSD over [dref_fmin, dref_fmax], then
+    # normalize the whole spectrum to it in dB (0 dB = equal to the delta anchor).
+    # Delta is kept in the curve (it sits ~0 dB by construction and anchors the eye).
+    anchors <- subj_spec %>%
+      filter(freq_hz >= dref_fmin, freq_hz <= dref_fmax) %>%
+      group_by(subject, category) %>%
+      summarise(anchor = mean(psd, na.rm = TRUE), .groups = "drop")
+    subj_spec <- subj_spec %>%
+      inner_join(anchors, by = c("subject", "category")) %>%
+      mutate(value = ifelse(anchor > 0 & psd > 0, 10 * log10(psd / anchor), NA_real_))
+  } else {
+    subj_spec <- subj_spec %>% mutate(value = psd)
+  }
+
+  plot_data <- subj_spec %>%
     group_by(group, category, freq_hz) %>%
     summarise(
-      mean_psd = mean(psd, na.rm = TRUE),
-      sem_psd = sd(psd, na.rm = TRUE) / sqrt(n()),
+      mean_psd = mean(value, na.rm = TRUE),
+      sem_psd = sd(value, na.rm = TRUE) / sqrt(n()),
       .groups = "drop"
     ) %>%
     mutate(
@@ -125,24 +150,35 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
                 alpha = 0.2, color = NA) +
     geom_line(aes(group = interaction(group_label, segment), linetype = group_label),
               linewidth = 0.8) +
-    geom_vline(xintercept = break_x, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_vline(xintercept = break_x, linetype = "dashed", color = "grey50", linewidth = 0.4)
+
+  # delta_ref: a 0 dB reference line marks equality with the delta anchor.
+  if (is_dref) p <- p + geom_hline(yintercept = 0, linetype = "dotted",
+                                   color = "grey50", linewidth = 0.4)
+
+  p <- p +
     scale_x_continuous(breaks = all_breaks, labels = all_labels,
                        expand = expansion(mult = c(0.02, 0.02))) +
-    scale_y_log10(labels = label_scientific(),
-                  expand = expansion(mult = c(0.05, 0.15))) +
+    (if (is_dref) scale_y_continuous(expand = expansion(mult = c(0.05, 0.15)))
+     else scale_y_log10(labels = label_scientific(),
+                        expand = expansion(mult = c(0.05, 0.15)))) +
     scale_color_manual(values = color_vals, name = NULL) +
     scale_fill_manual(values = color_vals, name = NULL) +
     scale_linetype_manual(values = linetype_vals, name = NULL) +
     facet_wrap(~ category, scales = "free_y") +
-    labs(x = "Frequency (Hz)", y = "PSD (log scale)",
-         title = "Power Spectral Density by Region",
-         caption = "Dashed line: 55\u201365 Hz notch excluded") +
+    labs(x = "Frequency (Hz)",
+         y = if (is_dref) "Power re: 1\u20131.5 Hz (dB)" else "PSD (log scale)",
+         title = if (is_dref) "Delta-Referenced Spectrum by Region"
+                 else "Power Spectral Density by Region",
+         caption = if (is_dref)
+           "0 dB = equal to the 1\u20131.5 Hz anchor; dashed line: 55\u201365 Hz notch excluded"
+         else "Dashed line: 55\u201365 Hz notch excluded") +
     theme_pub() +
     theme(plot.caption = element_text(hjust = 0.5, size = 10, color = "grey40"))
 
-  ggsave(file.path(output_dir, "psd_by_region.png"), p,
-         width = 12, height = 8, dpi = 300)
-  message("  Saved: psd_by_region.png")
+  fname <- if (is_dref) "psd_by_region_delta_ref.png" else "psd_by_region_absolute.png"
+  ggsave(file.path(output_dir, fname), p, width = 12, height = 8, dpi = 300)
+  message("  Saved: ", fname)
 }
 
 
@@ -173,7 +209,17 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
   band_order <- order_bands(band_df$band)
   subj_means$band <- factor(subj_means$band, levels = band_order)
 
-  show_jitter <- power_type == "absolute"
+  # delta_ref (R2) is a dB log-ratio like "absolute"; give it dB axes + jitter.
+  y_lab <- switch(power_type,
+    absolute  = "Power density (dB/Hz)",
+    delta_ref = "Power re: delta (dB)",
+    paste0(tools::toTitleCase(power_type), " Power"))
+  ttl <- switch(power_type,
+    absolute  = "Band Power Density (dB/Hz) by Group",
+    delta_ref = "Delta-Referenced Power (dB) by Group",
+    paste0("Band Power (", tools::toTitleCase(power_type), ") by Group"))
+
+  show_jitter <- power_type %in% c("absolute", "delta_ref")
   p <- ggplot(subj_means, aes(x = group_label, y = value, fill = group_label)) +
     geom_boxplot(width = 0.5, outlier.shape = if (show_jitter) NA else 16,
                  alpha = 0.7) +
@@ -182,9 +228,7 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
     scale_fill_manual(values = color_vals, name = NULL) +
     scale_color_manual(values = color_vals, name = NULL) +
     facet_wrap(~ band, scales = "free_y", nrow = 2) +
-    labs(x = NULL,
-         y = if (power_type == "absolute") "Power density (dB/Hz)" else paste0(tools::toTitleCase(power_type), " Power"),
-         title = if (power_type == "absolute") "Band Power Density (dB/Hz) by Group" else paste0("Band Power (", tools::toTitleCase(power_type), ") by Group")) +
+    labs(x = NULL, y = y_lab, title = ttl) +
     theme_pub() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           legend.position = "none")
@@ -438,7 +482,10 @@ plot_band_by_region <- function(band_df, roi_categories, group_colors,
   color_vals <- group_colors[group_order]
   names(color_vals) <- group_labels[group_order]
 
-  y_label <- if (power_type == "absolute") "Power density (dB/Hz)" else "Relative Power"
+  y_label <- switch(power_type,
+    absolute  = "Power density (dB/Hz)",
+    delta_ref = "Power re: delta (dB)",
+    "Relative Power")
   band_label <- gsub("_", " ", tools::toTitleCase(target_band))
 
   p <- ggplot(subj_region, aes(x = category, y = value, fill = group_label)) +
