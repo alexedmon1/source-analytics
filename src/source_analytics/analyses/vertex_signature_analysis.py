@@ -1,8 +1,10 @@
-"""Vertex MVPA (Multivariate Pattern Analysis) whole-brain analysis.
+"""Vertex neural-signature (whole-brain classification) analysis.
 
-Uses linear SVM + LOOCV to classify groups based on whole-brain spatial
-patterns of band power. Provides a single omnibus test per band: can the
-spatial pattern of activity distinguish KO from WT?
+Classifies groups from whole-brain spatial patterns of band power with LOOCV +
+permutation testing, across one or more classifiers (the interpretable linear
+trio svm_linear/logistic/lda give feature-importance maps; svm_rbf is
+accuracy-only). Provides an omnibus test per band × classifier: can the spatial
+pattern of activity distinguish KO from WT?
 """
 
 from __future__ import annotations
@@ -25,7 +27,12 @@ from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.vertex import compute_psd_vertices, extract_band_power_vertices
 from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
-from ..stats.mvpa import run_mvpa
+from ..stats.signature import (
+    SignatureResult,
+    classifier_label,
+    normalize_classifier,
+    run_signature,
+)
 from ..viz.glass_brain import plot_glass_brain
 from .base import BaseAnalysis
 
@@ -44,7 +51,7 @@ def _find_r_script_dir() -> Path:
 
 
 class VertexSignatureAnalysis(BaseAnalysis):
-    """Whole-brain vertex-level MVPA classification analysis."""
+    """Whole-brain vertex-level neural-signature (classification) analysis."""
 
     name = "vertex_signature"
     SELECTABLE = {"band": "frequency band"}
@@ -58,13 +65,22 @@ class VertexSignatureAnalysis(BaseAnalysis):
         self._subject_groups: dict[str, str] = {}
         self._subject_order: list[str] = []
 
-        # Config
-        mvpa_cfg = config.raw.get(
+        # Config. `classifiers:` (list) drives the multi-model run; `classifier:`
+        # (scalar) is the single-model fallback. Names are normalised/deduped in
+        # config order. (vertex_mvpa/mvpa keys kept as back-compat aliases.)
+        sig_cfg = config.raw.get(
             "vertex_signature",
             config.raw.get("vertex_mvpa", config.raw.get("mvpa", {})))
-        self._classifier = mvpa_cfg.get("classifier", "svm_linear")
-        self._cv_method = mvpa_cfg.get("cv_method", "loocv")
-        self._n_permutations = int(mvpa_cfg.get("n_permutations", 1000))
+        raw_clfs = sig_cfg.get("classifiers") or [sig_cfg.get("classifier", "svm_linear")]
+        seen: set[str] = set()
+        self._classifiers: list[str] = []
+        for c in raw_clfs:
+            key = normalize_classifier(c)
+            if key not in seen:
+                seen.add(key)
+                self._classifiers.append(key)
+        self._cv_method = sig_cfg.get("cv_method", "loocv")
+        self._n_permutations = int(sig_cfg.get("n_permutations", 1000))
 
         wb_cfg = config.vertex
         self._noise_exclude = wb_cfg.get("noise_exclude_hz")
@@ -72,7 +88,7 @@ class VertexSignatureAnalysis(BaseAnalysis):
             self._noise_exclude = tuple(self._noise_exclude)
 
         self._epoch_config = get_epoch_config(wb_cfg)
-        self._mvpa_results: dict[str, object] = {}
+        self._signature_results: dict[str, object] = {}
 
     def setup(self) -> None:
         self._feature_rows.clear()
@@ -80,7 +96,7 @@ class VertexSignatureAnalysis(BaseAnalysis):
         self._subject_groups.clear()
         self._subject_order.clear()
         self._source_coords = None
-        self._mvpa_results.clear()
+        self._signature_results.clear()
 
     def process_subject(self, subject: SubjectInfo) -> None:
         loader = SubjectLoader(subject.data_dir)
@@ -138,7 +154,7 @@ class VertexSignatureAnalysis(BaseAnalysis):
 
         feat_df = pd.DataFrame(self._feature_rows)
         if feat_df.empty:
-            logger.warning("No vertex MVPA feature data collected")
+            logger.warning("No signature feature data collected")
             return
         feat_df.to_csv(data_dir / "vertex_signature_features.csv", index=False)
         logger.info("Exported vertex_signature_features.csv (%d rows)", len(feat_df))
@@ -150,7 +166,7 @@ class VertexSignatureAnalysis(BaseAnalysis):
 
     def statistics(self) -> None:
         if not self._subject_data:
-            logger.error("No subject data for vertex MVPA")
+            logger.error("No subject data for signature analysis")
             return
 
         tbl_dir = self.tbl_dir
@@ -181,28 +197,32 @@ class VertexSignatureAnalysis(BaseAnalysis):
                     for uid in ordered_uids
                 ])
 
-                result = run_mvpa(
-                    features, labels,
-                    classifier=self._classifier,
-                    cv_method=self._cv_method,
-                    n_permutations=self._n_permutations,
-                    seed=42,
-                )
+                for clf in self._classifiers:
+                    result = run_signature(
+                        features, labels,
+                        classifier=clf,
+                        cv_method=self._cv_method,
+                        n_permutations=self._n_permutations,
+                        seed=42,
+                    )
 
-                self._mvpa_results[f"{contrast.name}_{band_name}"] = result
+                    key = f"{contrast.name}_{band_name}_{clf}"
+                    self._signature_results[key] = result
 
-                all_results.append({
-                    "contrast": contrast.name,
-                    "band": band_name,
-                    "accuracy": result.accuracy,
-                    "p_value": result.p_value,
-                    "sensitivity": result.sensitivity,
-                    "specificity": result.specificity,
-                    "auc": result.auc,
-                    "ci_lower": result.accuracy_ci[0],
-                    "ci_upper": result.accuracy_ci[1],
-                    "n_permutations": result.n_permutations,
-                })
+                    all_results.append({
+                        "contrast": contrast.name,
+                        "band": band_name,
+                        "classifier": clf,
+                        "model": classifier_label(clf),
+                        "accuracy": result.accuracy,
+                        "p_value": result.p_value,
+                        "sensitivity": result.sensitivity,
+                        "specificity": result.specificity,
+                        "auc": result.auc,
+                        "ci_lower": result.accuracy_ci[0],
+                        "ci_upper": result.accuracy_ci[1],
+                        "n_permutations": result.n_permutations,
+                    })
 
         if all_results:
             results_df = pd.DataFrame(all_results)
@@ -210,10 +230,10 @@ class VertexSignatureAnalysis(BaseAnalysis):
             logger.info("Exported vertex_signature_results.csv")
 
         # Save full results for --steps figures support
-        if self._mvpa_results:
+        if self._signature_results:
             data_dir = self.output_dir / "data"
             pkl_data = {}
-            for key, result in self._mvpa_results.items():
+            for key, result in self._signature_results.items():
                 pkl_data[key] = {
                     "feature_weights": result.feature_weights,
                     "null_distribution": result.null_distribution,
@@ -226,26 +246,26 @@ class VertexSignatureAnalysis(BaseAnalysis):
                     "auc": result.auc,
                     "accuracy_ci": result.accuracy_ci,
                     "n_permutations": result.n_permutations,
+                    "classifier": result.classifier,
+                    "has_weights": result.has_weights,
                 }
             with open(data_dir / "vertex_signature_results.pkl", "wb") as f:
                 pickle.dump(pkl_data, f)
             logger.info("Saved vertex_signature_results.pkl")
 
     def _load_state_from_disk(self) -> bool:
-        """Load saved vertex MVPA state from pickle for --steps figures support."""
-        from ..stats.mvpa import MVPAResult
-
+        """Load saved signature state from pickle for --steps figures support."""
         data_dir = self.output_dir / "data"
         pkl_path = data_dir / "vertex_signature_results.pkl"
         if not pkl_path.exists():
-            logger.warning("No saved vertex MVPA state at %s; skipping figures", pkl_path)
+            logger.warning("No saved signature state at %s; skipping figures", pkl_path)
             return False
 
         with open(pkl_path, "rb") as f:
             saved = pickle.load(f)
 
         for key, d in saved.items():
-            self._mvpa_results[key] = MVPAResult(
+            self._signature_results[key] = SignatureResult(
                 accuracy=d["accuracy"],
                 p_value=d["p_value"],
                 sensitivity=d["sensitivity"],
@@ -257,6 +277,8 @@ class VertexSignatureAnalysis(BaseAnalysis):
                 predictions=d["predictions"],
                 true_labels=d["true_labels"],
                 n_permutations=d["n_permutations"],
+                classifier=d.get("classifier", "svm_linear"),
+                has_weights=d.get("has_weights", True),
             )
 
         # Load source coords
@@ -265,12 +287,12 @@ class VertexSignatureAnalysis(BaseAnalysis):
             coords_df = pd.read_csv(coords_csv)
             self._source_coords = coords_df[["x", "y", "z"]].values
 
-        logger.info("Loaded vertex MVPA state from %s", pkl_path)
+        logger.info("Loaded signature state from %s", pkl_path)
         return True
 
     def figures(self) -> None:
         # Load from disk if in-memory state is missing (--steps support)
-        if not self._mvpa_results or self._source_coords is None:
+        if not self._signature_results or self._source_coords is None:
             if not self._load_state_from_disk():
                 return
 
@@ -280,17 +302,19 @@ class VertexSignatureAnalysis(BaseAnalysis):
         coords = self._source_coords
         fig_dir = self.fig_dir
 
-        for key, result in self._mvpa_results.items():
+        for key, result in self._signature_results.items():
             safe_name = key.lower().replace(" ", "_")
 
-            # Feature importance glass brain
-            plot_glass_brain(
-                coords=coords,
-                values=result.feature_weights,
-                title=f"Feature Importance — {key}",
-                output_path=fig_dir / f"vertex_signature_importance_{safe_name}.png",
-                cmap="YlOrRd",
-            )
+            # Feature importance glass brain — only for linear models that expose
+            # coef_ (non-linear e.g. svm_rbf has no per-vertex weight map).
+            if getattr(result, "has_weights", True) and not np.all(np.isnan(result.feature_weights)):
+                plot_glass_brain(
+                    coords=coords,
+                    values=result.feature_weights,
+                    title=f"Feature Importance — {key}",
+                    output_path=fig_dir / f"vertex_signature_importance_{safe_name}.png",
+                    cmap="YlOrRd",
+                )
 
             # Null distribution histogram
             fig, ax = plt.subplots(figsize=(8, 5))
@@ -300,7 +324,7 @@ class VertexSignatureAnalysis(BaseAnalysis):
                        linestyle="--", label=f"Observed: {result.accuracy:.1%}")
             ax.set_xlabel("Accuracy")
             ax.set_ylabel("Count")
-            ax.set_title(f"Vertex MVPA Permutation Test — {key}")
+            ax.set_title(f"Signature Permutation Test — {key}")
             ax.legend()
             fig.tight_layout()
             fig.savefig(fig_dir / f"vertex_signature_null_{safe_name}.png", dpi=150)
@@ -363,22 +387,24 @@ class VertexSignatureAnalysis(BaseAnalysis):
     def _write_python_summary(self) -> None:
         tbl_dir = self.tbl_dir
 
+        models = ", ".join(classifier_label(c) for c in self._classifiers)
         lines = [
-            "# Vertex MVPA Analysis Summary",
+            "# Neural Signature Analysis Summary",
             "",
             f"**Study**: {self.config.name}",
-            "**Analysis**: Vertex-level Multivariate Pattern Analysis (MVPA)",
-            f"**Classifier**: {self._classifier}",
+            "**Analysis**: Whole-brain vertex-level neural signature (classification)",
+            f"**Classifiers**: {models}",
             f"**CV method**: {self._cv_method}",
             f"**Permutations**: {self._n_permutations}",
             "",
             "## Methods",
             "",
-            "Linear SVM with Leave-One-Out Cross-Validation (LOOCV) was used to classify "
-            "groups based on the spatial pattern of vertex-level relative band power. "
-            "Statistical significance was assessed via permutation testing: group labels "
-            "were shuffled and LOOCV accuracy recomputed to build a null distribution. "
-            "Feature importance was derived from SVM coefficients averaged across folds.",
+            "Each classifier, with Leave-One-Out Cross-Validation (LOOCV), was trained to "
+            "distinguish groups from the spatial pattern of vertex-level relative band "
+            "power. Significance was assessed by permutation testing: group labels were "
+            "shuffled and LOOCV accuracy recomputed to build a null distribution. For "
+            "linear models (SVM/logistic/LDA), feature importance is the mean |coefficient| "
+            "across folds; non-linear models (RBF SVM) report accuracy only.",
             "",
         ]
 
@@ -392,17 +418,19 @@ class VertexSignatureAnalysis(BaseAnalysis):
         results_csv = tbl_dir / "vertex_signature_results.csv"
         if results_csv.exists():
             results_df = pd.read_csv(results_csv)
+            has_model = "model" in results_df.columns
             lines.append("## Results")
             lines.append("")
             lines.append(
-                "| Band | Accuracy | p-value | Sensitivity | Specificity | AUC | 95% CI |"
+                "| Model | Band | Accuracy | p-value | Sensitivity | Specificity | AUC | 95% CI |"
             )
             lines.append(
-                "|------|----------|---------|-------------|-------------|-----|--------|"
+                "|-------|------|----------|---------|-------------|-------------|-----|--------|"
             )
             for _, row in results_df.iterrows():
+                model = row["model"] if has_model else "—"
                 lines.append(
-                    f"| {row['band']} | {row['accuracy']:.1%} | {row['p_value']:.4f} | "
+                    f"| {model} | {row['band']} | {row['accuracy']:.1%} | {row['p_value']:.4f} | "
                     f"{row['sensitivity']:.1%} | {row['specificity']:.1%} | "
                     f"{row['auc']:.3f} | [{row['ci_lower']:.1%}, {row['ci_upper']:.1%}] |"
                 )

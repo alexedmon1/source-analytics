@@ -9,7 +9,14 @@ from .cluster_permutation import (
     find_clusters,
 )
 from .tfce import TFCEResult, compute_tfce_scores, tfce_permutation_test
-from .mvpa import MVPAResult, run_mvpa
+from .signature import (
+    CLASSIFIERS,
+    SignatureResult,
+    classifier_label,
+    make_classifier,
+    normalize_classifier,
+    run_signature,
+)
 from .graph_metrics import (
     GlobalMetrics,
     GraphMetrics,
@@ -34,8 +41,12 @@ __all__ = [
     "TFCEResult",
     "compute_tfce_scores",
     "tfce_permutation_test",
-    "MVPAResult",
-    "run_mvpa",
+    "CLASSIFIERS",
+    "SignatureResult",
+    "classifier_label",
+    "make_classifier",
+    "normalize_classifier",
+    "run_signature",
     "GlobalMetrics",
     "GraphMetrics",
     "ROIGraphMetrics",
