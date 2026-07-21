@@ -390,15 +390,24 @@ class BaseAnalysis(ABC):
             logger.error("R script not found: %s", r_script)
             return False
 
-        # Ensure study config YAML exists in data dir
+        # (Re)write the study config YAML the R side reads. ALWAYS refresh it from
+        # the current config — the config can change between runs (e.g. a new
+        # top-level `dvs`/`delta_reference`), and a stale cached copy would silently
+        # feed R the old config (delta_ref never computed, etc.). sfreq is carried
+        # over from a prior write when this run has no process step (figures-only).
+        import yaml
         config_path = data_dir / "study_config.yaml"
-        if not config_path.exists():
-            import yaml
-            config_data = dict(self.config.raw)
-            if hasattr(self, "_sfreq") and self._sfreq is not None:
-                config_data["sfreq"] = self._sfreq
-            with open(config_path, "w") as f:
-                yaml.dump(config_data, f, default_flow_style=False)
+        config_data = dict(self.config.raw)
+        sfreq = getattr(self, "_sfreq", None)
+        if sfreq is None and config_path.exists():
+            try:
+                sfreq = (yaml.safe_load(config_path.read_text()) or {}).get("sfreq")
+            except Exception:
+                sfreq = None
+        if sfreq is not None:
+            config_data["sfreq"] = sfreq
+        with open(config_path, "w") as f:
+            yaml.dump(config_data, f, default_flow_style=False)
 
         cmd = [
             "Rscript", str(r_script),
