@@ -30,6 +30,13 @@ implemented here, and any deviation from the canonical form.
    A document that explains *why the code does what it does* belongs in Methods
    and is maintained.
 
+## Publishing
+
+This site is **not published yet** — deployment is gated off while the package is
+under active development. See [Publishing this site](PUBLISHING.md) for the
+two-step enable and for why versioned docs (`mike`) should be decided at the same
+time.
+
 ## Local preview
 
 ```bash
@@ -37,5 +44,6 @@ uv run --no-project --with "mkdocs-material>=9.5,<10" mkdocs serve   # http://12
 uv run --no-project --with "mkdocs-material>=9.5,<10" mkdocs build   # render to site/
 ```
 
-Pushes to `main` publish automatically via GitHub Actions
-(`.github/workflows/docs.yml`).
+CI builds this site `--strict` on every push and PR (a broken link fails the
+build). Publishing to GitHub Pages is gated off — see
+[Publishing this site](PUBLISHING.md).

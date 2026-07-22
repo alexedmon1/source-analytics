@@ -33,6 +33,7 @@ markdown_extensions:
 # is the mechanism that stops reference material getting lost among working notes.
 nav:
   - Home: index.md
+  - Publishing this site: PUBLISHING.md
   - Methods:
       - Aperiodic fit window: methods/APERIODIC_FIT_WINDOW.md
       - Connectivity metrics: methods/CONNECTIVITY_METHODS.md

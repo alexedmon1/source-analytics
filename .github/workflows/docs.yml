@@ -1,9 +1,23 @@
 name: docs
 
-# Build the MkDocs site on every push to main and publish it to GitHub Pages.
-# Pull requests build only (no deploy) so a broken nav/link fails before merge.
+# Build the MkDocs site, and publish to GitHub Pages ONCE PUBLISHING IS TURNED ON.
 #
-# One-time setup in the repo: Settings -> Pages -> Source = "GitHub Actions".
+# The build job always runs (on pushes and PRs): --strict fails on a broken link
+# or an unlisted page, which is worth having even while unpublished.
+#
+# The deploy job is DELIBERATELY GATED OFF until the packages settle. Without the
+# gate it would fail red on every push to main until Pages is configured, which is
+# noise during active development.
+#
+# TO PUBLISH (two steps, both required):
+#   1. Settings -> Pages -> Source = "GitHub Actions"
+#   2. Settings -> Secrets and variables -> Actions -> Variables ->
+#      New variable: PUBLISH_DOCS = true
+# Site then goes live at https://alexedmon1.github.io/<repo>/ on the next push
+# to main. To pause publishing again, set PUBLISH_DOCS to anything but "true".
+#
+# Before turning this on, consider adding `mike` for versioned docs, so the
+# release a manuscript pins keeps its own permanent docs URL.
 on:
   push:
     branches: [main]
@@ -33,7 +47,8 @@ jobs:
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # Gated: set the PUBLISH_DOCS repo variable to "true" to go live (see header).
+    if: vars.PUBLISH_DOCS == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
