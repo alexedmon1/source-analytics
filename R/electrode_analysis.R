@@ -91,6 +91,29 @@ message("Groups: ", paste(group_order, collapse = ", "))
 message("Bands: ", paste(names(config$bands), collapse = ", "))
 message("Channels: ", length(unique(band_df$roi)))
 
+# --- Dependent-variable (DV) set --- (mirrors roi_psd_analysis.R)
+# `dvs:` selects which power columns to analyse; default is the built-in
+# absolute/relative pair. delta_ref (R2) is present only when the config supplies
+# a `delta_reference` window. Resolved BEFORE the figures_only branch so both the
+# stats path and the figures-only path share one DV list.
+power_types <- if (!is.null(config$dvs)) as.character(unlist(config$dvs)) else c("relative", "absolute")
+missing_dv <- setdiff(power_types, names(band_df))
+if (length(missing_dv) > 0) {
+  message("  Requested DV(s) absent from electrode_band_power.csv, skipping: ",
+          paste(missing_dv, collapse = ", "))
+  power_types <- intersect(power_types, names(band_df))
+}
+
+# --- Delta-referenced power (R2): drop the reference band(s) from testing ---
+# The anchor band (Delta) is ~constant by construction in the delta-ref DV, so it
+# is excluded. NA-out those cells (wide format: DVs share rows) — the omnibus +
+# hypothesis fits skip all-NA (band x dv) families, boxplots filter NA.
+if ("delta_ref" %in% power_types && !is.null(config$delta_reference$exclude_bands)) {
+  excl <- as.character(unlist(config$delta_reference$exclude_bands))
+  band_df$delta_ref[band_df$band %in% excl] <- NA_real_
+  message("  delta_ref: excluded reference band(s) from testing: ", paste(excl, collapse = ", "))
+}
+
 if (figures_only) {
   # Regenerate figures from persisted tables — no stats recompute (the
   # figures-regenerable standard; --steps figures must not need in-memory state).
@@ -105,8 +128,8 @@ if (figures_only) {
   }
 } else {
 
-# --- Run LMMs for each power type ---
-power_types <- c("relative", "absolute")
+# --- Run LMMs for each power type (power_types resolved from config$dvs above) ---
+message("DVs: ", paste(power_types, collapse = ", "))
 
 all_omnibus <- list()
 all_omnibus_region_nested <- list()
@@ -219,10 +242,12 @@ if (nrow(posthoc_region_nested_df) > 0) {
 message("\nGenerating figures...")
 
 # Band power boxplots (electrode-level means per subject)
-for (ptype in c("relative", "absolute")) {
-  # Subject-level means (average across channels)
+for (ptype in power_types) {
+  # Subject-level means (average across channels). Drop rows where THIS DV is NA
+  # (delta_ref NA-outs the anchor band; relative drops Epsilon upstream) so the
+  # facet levels below are derived from what actually plots — no empty facets.
   subj_means <- band_df %>%
-    dplyr::filter(group %in% group_order) %>%
+    dplyr::filter(group %in% group_order, !is.na(.data[[ptype]])) %>%
     dplyr::group_by(subject, group, band) %>%
     dplyr::summarise(value = mean(.data[[ptype]], na.rm = TRUE), .groups = "drop") %>%
     dplyr::mutate(
@@ -233,8 +258,14 @@ for (ptype in c("relative", "absolute")) {
   color_vals <- group_colors[group_order]
   names(color_vals) <- group_labels[group_order]
 
-  band_order <- order_bands(band_df$band)
+  band_order <- order_bands(unique(subj_means$band))
   subj_means$band <- factor(subj_means$band, levels = band_order)
+
+  # delta_ref is a log ratio vs the 1-1.5 Hz anchor; label its axis in dB.
+  y_lab <- if (ptype == "delta_ref") "Delta-Referenced Power (dB)" else
+    paste0(tools::toTitleCase(ptype), " Power")
+  ttl <- if (ptype == "delta_ref") "Electrode Band Power (Delta-Referenced, dB) by Group" else
+    paste0("Electrode Band Power (", tools::toTitleCase(ptype), ") by Group")
 
   p <- ggplot(subj_means, aes(x = group_label, y = value, fill = group_label)) +
     geom_boxplot(width = 0.5, outlier.shape = NA, alpha = 0.7) +
@@ -243,8 +274,7 @@ for (ptype in c("relative", "absolute")) {
     scale_fill_manual(values = color_vals, name = NULL) +
     scale_color_manual(values = color_vals, name = NULL) +
     facet_wrap(~ band, scales = "free_y", nrow = 1) +
-    labs(x = NULL, y = paste0(tools::toTitleCase(ptype), " Power"),
-         title = paste0("Electrode Band Power (", tools::toTitleCase(ptype), ") by Group")) +
+    labs(x = NULL, y = y_lab, title = ttl) +
     theme_pub() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           legend.position = "none")

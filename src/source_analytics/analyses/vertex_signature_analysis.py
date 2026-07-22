@@ -216,11 +216,15 @@ class VertexSignatureAnalysis(BaseAnalysis):
                         "model": classifier_label(clf),
                         "accuracy": result.accuracy,
                         "p_value": result.p_value,
+                        "balanced_accuracy": result.balanced_accuracy,
+                        "balanced_p_value": result.balanced_p_value,
                         "sensitivity": result.sensitivity,
                         "specificity": result.specificity,
                         "auc": result.auc,
                         "ci_lower": result.accuracy_ci[0],
                         "ci_upper": result.accuracy_ci[1],
+                        "balanced_ci_lower": result.balanced_accuracy_ci[0],
+                        "balanced_ci_upper": result.balanced_accuracy_ci[1],
                         "n_permutations": result.n_permutations,
                     })
 
@@ -245,6 +249,9 @@ class VertexSignatureAnalysis(BaseAnalysis):
                     "specificity": result.specificity,
                     "auc": result.auc,
                     "accuracy_ci": result.accuracy_ci,
+                    "balanced_accuracy": result.balanced_accuracy,
+                    "balanced_p_value": result.balanced_p_value,
+                    "balanced_accuracy_ci": result.balanced_accuracy_ci,
                     "n_permutations": result.n_permutations,
                     "classifier": result.classifier,
                     "has_weights": result.has_weights,
@@ -279,6 +286,11 @@ class VertexSignatureAnalysis(BaseAnalysis):
                 n_permutations=d["n_permutations"],
                 classifier=d.get("classifier", "svm_linear"),
                 has_weights=d.get("has_weights", True),
+                # .get() so a pkl written before the balanced-metric change still loads.
+                balanced_accuracy=d.get("balanced_accuracy", float("nan")),
+                balanced_p_value=d.get("balanced_p_value", float("nan")),
+                balanced_accuracy_ci=tuple(
+                    d.get("balanced_accuracy_ci", (float("nan"), float("nan")))),
             )
 
         # Load source coords

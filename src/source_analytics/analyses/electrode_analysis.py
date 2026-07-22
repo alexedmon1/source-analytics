@@ -19,7 +19,11 @@ from ..io.discovery import SubjectInfo
 from ..io.electrode_loader import load_eeglab_set
 from ..spectral.epoch_sampler import sample_epochs
 from ..spectral.psd import compute_psd
-from ..spectral.band_power import extract_band_power, relative_power_kwargs
+from ..spectral.band_power import (
+    delta_reference_kwargs,
+    extract_band_power,
+    relative_power_kwargs,
+)
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -203,6 +207,10 @@ class ElectrodeAnalysis(BaseAnalysis):
         ch_bp_accum: dict[tuple[str, str], list[dict]] = {}
         freqs_out: np.ndarray | None = None
 
+        # Delta-referenced power (R2) mirrors roi_psd: computed only when the
+        # config supplies a ``delta_reference`` window; absent → default DV set.
+        dref_kwargs = delta_reference_kwargs(self.config.raw.get("delta_reference"))
+
         for draw_data in draws:
             for ch_idx, ch_name in enumerate(ch_names):
                 ch_data = draw_data[ch_idx, :]
@@ -217,7 +225,8 @@ class ElectrodeAnalysis(BaseAnalysis):
 
                 bp = extract_band_power(
                     freqs, psd, self._selected_bands(),
-                    **relative_power_kwargs(self.config.raw.get("relative_power")))
+                    **relative_power_kwargs(self.config.raw.get("relative_power")),
+                    **dref_kwargs)
                 for band_name, power_vals in bp.items():
                     key = (ch_name, band_name)
                     ch_bp_accum.setdefault(key, []).append(power_vals)
@@ -237,14 +246,18 @@ class ElectrodeAnalysis(BaseAnalysis):
         # Average band power across draws
         for (ch_name, band_name), bp_list in ch_bp_accum.items():
             n = len(bp_list)
-            self._subject_band_power.append({
+            row = {
                 "subject": uid,
                 "group": subject.group,
                 "channel": ch_name,
                 "band": band_name,
                 "absolute": sum(p["absolute"] for p in bp_list) / n,
                 "relative": sum(p["relative"] for p in bp_list) / n,
-            })
+            }
+            dref_vals = [p["delta_ref"] for p in bp_list if "delta_ref" in p]
+            if dref_vals:
+                row["delta_ref"] = sum(dref_vals) / len(dref_vals)
+            self._subject_band_power.append(row)
 
     def aggregate(self) -> None:
         """Export CSVs for R consumption."""

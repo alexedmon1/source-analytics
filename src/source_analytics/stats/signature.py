@@ -98,6 +98,12 @@ class SignatureResult:
     n_permutations: int
     classifier: str = "svm_linear"  # normalised classifier key
     has_weights: bool = True  # False for non-linear models (feature_weights all-NaN)
+    # Balanced accuracy = (sensitivity + specificity)/2. This is the honest
+    # primary metric for the unequal-n contrasts (treated groups are n=8-9 vs
+    # n=17-18 vehicle), where raw accuracy is inflated by the majority class.
+    balanced_accuracy: float = float("nan")
+    balanced_p_value: float = float("nan")
+    balanced_accuracy_ci: tuple[float, float] = (float("nan"), float("nan"))
 
 
 def run_signature(
@@ -139,11 +145,29 @@ def run_signature(
     rng = np.random.default_rng(seed)
     n_subjects, n_features = features.shape
 
+    def _decision_score(clf, X_test) -> float:
+        """Continuous score for the held-out subject, oriented so that larger =
+        more class-1. Needed for a real ROC AUC; hard 0/1 labels collapse the ROC
+        to a single operating point (AUC then just re-states balanced accuracy)."""
+        if hasattr(clf, "decision_function"):
+            return float(np.ravel(clf.decision_function(X_test))[0])
+        if hasattr(clf, "predict_proba"):
+            return float(clf.predict_proba(X_test)[0, 1])
+        return float(np.ravel(clf.predict(X_test))[0])
+
+    def _balanced(preds, labs) -> float:
+        pos, neg = labs == 1, labs == 0
+        sens = float(np.mean(preds[pos] == 1)) if pos.sum() else 0.0
+        spec = float(np.mean(preds[neg] == 0)) if neg.sum() else 0.0
+        return (sens + spec) / 2.0
+
     def _run_loocv(feats, labs):
-        """Run LOOCV; return accuracy, predictions, and mean |feature weights|
-        (all-NaN for a non-linear classifier that exposes no coef_)."""
+        """Run LOOCV; return accuracy, balanced accuracy, predictions, continuous
+        decision scores, and mean |feature weights| (all-NaN for a non-linear
+        classifier that exposes no coef_)."""
         loo = LeaveOneOut()
         preds = np.zeros(n_subjects, dtype=int)
+        scores = np.zeros(n_subjects, dtype=float)
         all_weights = np.zeros(n_features)
         weights_ok = True
         n_folds = 0
@@ -156,6 +180,7 @@ def run_signature(
             clf = make_classifier(clf_key)
             clf.fit(X_train, labs[train_idx])
             preds[test_idx] = clf.predict(X_test)
+            scores[test_idx] = _decision_score(clf, X_test)
 
             w = _linear_weights(clf)
             if w is None:
@@ -166,10 +191,11 @@ def run_signature(
 
         acc = float(np.mean(preds == labs))
         weights = (all_weights / n_folds) if weights_ok else np.full(n_features, np.nan)
-        return acc, preds, weights
+        return acc, _balanced(preds, labs), preds, scores, weights
 
     # Observed classification
-    accuracy, predictions, feature_weights = _run_loocv(features, labels)
+    (accuracy, balanced_accuracy, predictions,
+     decision_scores, feature_weights) = _run_loocv(features, labels)
 
     # Sensitivity and specificity
     pos_mask = labels == 1
@@ -177,9 +203,9 @@ def run_signature(
     sensitivity = float(np.mean(predictions[pos_mask] == 1)) if pos_mask.sum() > 0 else 0.0
     specificity = float(np.mean(predictions[neg_mask] == 0)) if neg_mask.sum() > 0 else 0.0
 
-    # AUC (if both classes present in predictions)
+    # AUC from the CONTINUOUS cross-validated decision scores (not hard labels).
     try:
-        auc = float(roc_auc_score(labels, predictions))
+        auc = float(roc_auc_score(labels, decision_scores))
     except ValueError:
         auc = 0.5
 
@@ -189,20 +215,31 @@ def run_signature(
         clf_key, accuracy * 100, n_permutations,
     )
     null_accuracies = np.zeros(n_permutations)
+    null_balanced = np.zeros(n_permutations)
     for i in range(n_permutations):
         perm_labels = rng.permutation(labels)
-        null_acc, _, _ = _run_loocv(features, perm_labels)
+        null_acc, null_bal, _, _, _ = _run_loocv(features, perm_labels)
         null_accuracies[i] = null_acc
+        null_balanced[i] = null_bal
 
-    p_value = float(np.mean(null_accuracies >= accuracy))
+    # Add-one (Phipson & Smyth 2010) — the observed labelling is one of the
+    # permutations, so an exact 0 is not attainable and `mean(null >= obs)` is
+    # anti-conservative. p is now bounded below by 1/(n_perm+1).
+    p_value = float((1 + np.sum(null_accuracies >= accuracy)) / (n_permutations + 1))
+    balanced_p_value = float(
+        (1 + np.sum(null_balanced >= balanced_accuracy)) / (n_permutations + 1))
 
     # 95% CI from null distribution
     ci_lower = float(np.percentile(null_accuracies, 2.5))
     ci_upper = float(np.percentile(null_accuracies, 97.5))
+    bal_ci = (float(np.percentile(null_balanced, 2.5)),
+              float(np.percentile(null_balanced, 97.5)))
 
     logger.info(
-        "Signature [%s]: accuracy=%.1f%%, p=%.4f, sensitivity=%.1f%%, specificity=%.1f%%",
-        clf_key, accuracy * 100, p_value, sensitivity * 100, specificity * 100,
+        "Signature [%s]: accuracy=%.1f%% (balanced %.1f%%, p=%.4f), auc=%.3f, "
+        "p=%.4f, sensitivity=%.1f%%, specificity=%.1f%%",
+        clf_key, accuracy * 100, balanced_accuracy * 100, balanced_p_value,
+        auc, p_value, sensitivity * 100, specificity * 100,
     )
 
     return SignatureResult(
@@ -219,4 +256,7 @@ def run_signature(
         n_permutations=n_permutations,
         classifier=clf_key,
         has_weights=bool(not np.all(np.isnan(feature_weights))),
+        balanced_accuracy=balanced_accuracy,
+        balanced_p_value=balanced_p_value,
+        balanced_accuracy_ci=bal_ci,
     )

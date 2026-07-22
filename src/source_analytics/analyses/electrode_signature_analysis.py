@@ -259,10 +259,14 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
                         "contrast": contrast.name, "band": band_name,
                         "classifier": clf, "model": classifier_label(clf),
                         "accuracy": result.accuracy, "p_value": result.p_value,
+                        "balanced_accuracy": result.balanced_accuracy,
+                        "balanced_p_value": result.balanced_p_value,
                         "sensitivity": result.sensitivity,
                         "specificity": result.specificity, "auc": result.auc,
                         "ci_lower": result.accuracy_ci[0],
                         "ci_upper": result.accuracy_ci[1],
+                        "balanced_ci_lower": result.balanced_accuracy_ci[0],
+                        "balanced_ci_upper": result.balanced_accuracy_ci[1],
                         "n_permutations": result.n_permutations,
                     })
 
@@ -282,6 +286,9 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
                     "accuracy": r.accuracy, "p_value": r.p_value,
                     "sensitivity": r.sensitivity, "specificity": r.specificity,
                     "auc": r.auc, "accuracy_ci": r.accuracy_ci,
+                    "balanced_accuracy": r.balanced_accuracy,
+                    "balanced_p_value": r.balanced_p_value,
+                    "balanced_accuracy_ci": r.balanced_accuracy_ci,
                     "n_permutations": r.n_permutations,
                     "classifier": r.classifier, "has_weights": r.has_weights,
                 }
@@ -306,7 +313,12 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
                 predictions=d["predictions"], true_labels=d["true_labels"],
                 n_permutations=d["n_permutations"],
                 classifier=d.get("classifier", "svm_linear"),
-                has_weights=d.get("has_weights", True))
+                has_weights=d.get("has_weights", True),
+                # .get() so a pkl written before the balanced-metric change still loads.
+                balanced_accuracy=d.get("balanced_accuracy", float("nan")),
+                balanced_p_value=d.get("balanced_p_value", float("nan")),
+                balanced_accuracy_ci=tuple(
+                    d.get("balanced_accuracy_ci", (float("nan"), float("nan")))))
         layout_csv = data_dir / "electrode_layout.csv"
         if layout_csv.exists():
             lay = pd.read_csv(layout_csv)
@@ -407,20 +419,50 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
         if merged.empty:
             return
         merged["accuracy_gain"] = merged["accuracy_source"] - merged["accuracy_sensor"]
+        for m in ("balanced_accuracy", "auc"):
+            cols = (f"{m}_source", f"{m}_sensor")
+            if all(c in merged.columns for c in cols):
+                merged[f"{m}_gain"] = merged[cols[0]] - merged[cols[1]]
+        # A cell is only INFORMATIVE about the two modalities if at least one of
+        # them actually decodes; contrasts where both sit at chance contribute
+        # noise, and averaging them into a headline gain hides real differences.
+        if {"p_value_source", "p_value_sensor"} <= set(merged.columns):
+            merged["either_significant"] = (
+                (merged["p_value_source"] < 0.05) | (merged["p_value_sensor"] < 0.05))
         merged.to_csv(self.tbl_dir / "signature_source_vs_sensor.csv", index=False)
 
-        # One panel per classifier: source vs sensor accuracy across bands, all
-        # contrasts overlaid (points), with the identity line.
+        # Per-contrast breakdown — the global mean is dominated by underpowered
+        # treated-vs-treated contrasts, so report the split explicitly.
+        gain_cols = [c for c in merged.columns if c.endswith("_gain")]
+        by_contrast = merged.groupby("contrast")[gain_cols].mean().round(4)
+        by_contrast.to_csv(self.tbl_dir / "signature_source_vs_sensor_by_contrast.csv")
+
+        # One panel per classifier. Plot BALANCED accuracy when available (the
+        # unequal-n contrasts inflate raw accuracy), and mark the cells where at
+        # least one modality reached significance.
+        metric = ("balanced_accuracy"
+                  if "balanced_accuracy_source" in merged.columns else "accuracy")
+        mlabel = "Balanced accuracy" if metric == "balanced_accuracy" else "Accuracy"
         for clf in sorted(merged["classifier"].unique()):
             sub = merged[merged["classifier"] == clf]
             fig, ax = plt.subplots(figsize=(6, 6))
-            ax.scatter(sub["accuracy_sensor"], sub["accuracy_source"],
-                       c="#8E44AD", s=60, alpha=0.8, edgecolors="white")
+            sig = sub.get("either_significant")
+            if sig is not None:
+                ax.scatter(sub.loc[~sig, f"{metric}_sensor"], sub.loc[~sig, f"{metric}_source"],
+                           c="#BDC3C7", s=45, alpha=0.7, edgecolors="white",
+                           label="neither significant")
+                ax.scatter(sub.loc[sig, f"{metric}_sensor"], sub.loc[sig, f"{metric}_source"],
+                           c="#8E44AD", s=70, alpha=0.9, edgecolors="white",
+                           label="≥1 significant")
+                ax.legend(fontsize=8, loc="lower right", frameon=False)
+            else:
+                ax.scatter(sub[f"{metric}_sensor"], sub[f"{metric}_source"],
+                           c="#8E44AD", s=60, alpha=0.8, edgecolors="white")
             lo, hi = 0.3, 1.0
             ax.plot([lo, hi], [lo, hi], "--", color="grey", linewidth=1)
             ax.set_xlim(lo, hi); ax.set_ylim(lo, hi); ax.set_aspect("equal")
-            ax.set_xlabel("Sensor accuracy (electrode)")
-            ax.set_ylabel("Source accuracy (vertex)")
+            ax.set_xlabel(f"Sensor {mlabel.lower()} (electrode)")
+            ax.set_ylabel(f"Source {mlabel.lower()} (vertex)")
             ax.set_title(f"Source vs Sensor decoding — {classifier_label(clf)}\n"
                          "(above line = source localization gains predictability)")
             fig.tight_layout()
