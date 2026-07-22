@@ -141,9 +141,15 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 "vertex_idx": vi,
                 "exponent": float(params["exponent"][vi]),
                 "offset": float(params["offset"][vi]),
+                # Offset at the fit-window centre — the one to report alongside
+                # exponent (the 1 Hz-referenced offset is mechanically coupled to
+                # the slope). Matches roi_aperiodic/electrode_aperiodic.
+                "offset_centered": float(params["offset_centered"][vi]),
                 "r_squared": float(params["r_squared"][vi]),
                 "n_peaks": int(params["n_peaks"][vi]),
                 "method": params["method"][vi],
+                "fit_fmin": float(self._freq_range[0]),
+                "fit_fmax": float(self._freq_range[1]),
             }
             for key in self._band_keys.values():
                 row[f"has_{key}_peak"] = bool(params[f"has_{key}_peak"][vi])
