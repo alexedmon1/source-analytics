@@ -12,7 +12,7 @@ import logging
 
 import numpy as np
 
-from .aperiodic import fit_aperiodic
+from .aperiodic import DEFAULT_FREQ_RANGE, fit_aperiodic
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def _safe_band_key(band_name: str) -> str:
 def fit_aperiodic_vertices(
     freqs: np.ndarray,
     psd: np.ndarray,
-    freq_range: tuple[float, float] = (1, 100),
+    freq_range: tuple[float, float] = DEFAULT_FREQ_RANGE,
     max_n_peaks: int = 6,
     peak_width_limits: tuple[float, float] = (1.0, 12.0),
     bands: dict[str, tuple[float, float]] | None = None,
@@ -63,6 +63,7 @@ def fit_aperiodic_vertices(
 
     exponents = np.zeros(n_vertices)
     offsets = np.zeros(n_vertices)
+    offsets_centered = np.zeros(n_vertices)
     r_squareds = np.zeros(n_vertices)
     n_peaks_arr = np.zeros(n_vertices, dtype=int)
     methods: list[str] = []
@@ -81,6 +82,7 @@ def fit_aperiodic_vertices(
 
             exponents[vi] = result["exponent"]
             offsets[vi] = result["offset"]
+            offsets_centered[vi] = result["offset_centered"]
             r_squareds[vi] = result["r_squared"]
             n_peaks_arr[vi] = result.get("n_peaks", 0)
             methods.append(result.get("method", "unknown"))
@@ -114,6 +116,7 @@ def fit_aperiodic_vertices(
     result_dict: dict[str, np.ndarray | list[str]] = {
         "exponent": exponents,
         "offset": offsets,
+        "offset_centered": offsets_centered,
         "r_squared": r_squareds,
         "n_peaks": n_peaks_arr,
         "method": methods,

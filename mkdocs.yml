@@ -1,0 +1,48 @@
+site_name: source-analytics
+site_description: Analysis modules for EEG source-localized ROI, vertex and electrode data
+repo_url: https://github.com/alexedmon1/source-analytics
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.sections     # show the section groupings in the sidebar
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle: { icon: material/brightness-7, name: Switch to dark mode }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle: { icon: material/brightness-4, name: Switch to light mode }
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: { permalink: true }
+  - pymdownx.highlight: { anchor_linenums: true }
+  - pymdownx.superfences
+  - pymdownx.details
+
+# The nav IS the curation. A doc not listed here is not part of the site — which
+# is the mechanism that stops reference material getting lost among working notes.
+nav:
+  - Home: index.md
+  - Methods:
+      - Aperiodic fit window: methods/APERIODIC_FIT_WINDOW.md
+      - Connectivity metrics: methods/CONNECTIVITY_METHODS.md
+      - Hypothesis layer (usage): methods/HYPOTHESIS.md
+      - Hypothesis layer (design): methods/DESIGN_SPEC.md
+  - Archive (historical plans):
+      - About the archive: archive/README.md
+      - Profile provenance: archive/PROFILE_PROVENANCE_PLAN.md
+      - Native schema migration: archive/NATIVE_SCHEMA_MIGRATION.md
+      - Hypothesis contrasts: archive/HYPOTHESIS_CONTRASTS_PLAN.md
+      - MS2 connectivity build-out: archive/MS2_CONNECTIVITY_PLAN.md
+      - Analysis grouping: archive/ANALYSIS_GROUPING_PLAN.md
+      - Project status (Feb 2026): archive/PROJECT_STATUS.md

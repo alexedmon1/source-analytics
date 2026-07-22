@@ -10,6 +10,13 @@ source-localization  ──►  source-analytics  ──►  source-lightbox
 
 [`source-localization`](../source-localization) turns raw EEG into per-subject
 source reconstructions (ROI timeseries, whole-brain source estimates).
+
+> **📖 Methods documentation:** [`docs/`](docs/index.md) — the decisions behind
+> the numbers, with primary-literature citations. Start with the
+> [aperiodic fit window](docs/methods/APERIODIC_FIT_WINDOW.md) and
+> [connectivity metrics](docs/methods/CONNECTIVITY_METHODS.md).
+> Build the site locally with
+> `uv run --no-project --with "mkdocs-material>=9.5,<10" mkdocs serve`.
 **source-analytics** reads those reconstructions, runs group-level analyses
 (spectral, connectivity, cross-frequency, directed, …), and writes
 publication-quality statistics tables and figures. [`source-lightbox`](../source-lightbox)
@@ -372,7 +379,7 @@ Grouped by **domain** (what they measure). Levels: ROI / vertex (vtx) /
 electrode (elec). *Supplementary* analyses are indented under their primary and
 must run after it. Method provenance for the connectivity / cross-frequency /
 directed families is tracked, equation-checked, in
-[`CONNECTIVITY_METHODS.md`](CONNECTIVITY_METHODS.md).
+[`docs/methods/CONNECTIVITY_METHODS.md`](docs/methods/CONNECTIVITY_METHODS.md).
 
 ### Spectral
 
@@ -443,7 +450,7 @@ directed families is tracked, equation-checked, in
 The `hypothesis` layer is a shared inference engine (peer to `R/stats_utils.R` and
 `src/source_analytics/stats/`, **not** a registry module) that turns the declarative
 `design:`/`hypotheses:` blocks into tests. Full reference:
-[`HYPOTHESIS.md`](HYPOTHESIS.md); design rationale: [`DESIGN_SPEC.md`](DESIGN_SPEC.md).
+[`docs/methods/HYPOTHESIS.md`](docs/methods/HYPOTHESIS.md); design rationale: [`docs/methods/DESIGN_SPEC.md`](docs/methods/DESIGN_SPEC.md).
 
 **Four kinds.** A hypothesis carries a `kind` and the payload it needs:
 
@@ -627,11 +634,13 @@ Python and use R only for the report.
 
 | Doc | What it covers |
 |---|---|
-| [`HYPOTHESIS.md`](HYPOTHESIS.md) | the hypothesis layer — kinds, adapters, usage |
-| [`DESIGN_SPEC.md`](DESIGN_SPEC.md) | design rationale for `design:`/`hypotheses:` + FDR scope |
-| [`CONNECTIVITY_METHODS.md`](CONNECTIVITY_METHODS.md) | equation-checked provenance for every connectivity / coupling / directed metric |
+| [`docs/`](docs/index.md) | **methods documentation site** (MkDocs) — start here |
+| [`docs/methods/APERIODIC_FIT_WINDOW.md`](docs/methods/APERIODIC_FIT_WINDOW.md) | why the 1/f fit range is 12–45 Hz; overriding it; `offset_centered` |
+| [`docs/methods/HYPOTHESIS.md`](docs/methods/HYPOTHESIS.md) | the hypothesis layer — kinds, adapters, usage |
+| [`docs/methods/DESIGN_SPEC.md`](docs/methods/DESIGN_SPEC.md) | design rationale for `design:`/`hypotheses:` + FDR scope |
+| [`docs/methods/CONNECTIVITY_METHODS.md`](docs/methods/CONNECTIVITY_METHODS.md) | equation-checked provenance for every connectivity / coupling / directed metric |
 | [`CHANGELOG.md`](CHANGELOG.md) | version history |
-| [`PROJECT_STATUS.md`](PROJECT_STATUS.md) | current work / migration status |
+| [`docs/archive/`](docs/archive/README.md) | completed/superseded planning docs — **not current** |
 
 ## License
 

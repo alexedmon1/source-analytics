@@ -38,7 +38,13 @@ if (!file.exists(param_path)) {
 params <- read.csv(param_path, stringsAsFactors = FALSE)
 
 sp_cfg <- config$vertex_specparam %||% list()
-freq_range <- sp_cfg$freq_range %||% c(1, 100)
+# Keep in step with spectral/aperiodic.py::DEFAULT_FREQ_RANGE (12-45 Hz); see
+# docs/APERIODIC_FIT_WINDOW.md for why. This is only the label fallback — the
+# actual fit happens in Python, which stamps fit_fmin/fit_fmax into the params.
+freq_range <- sp_cfg$freq_range %||% c(12, 45)
+if (all(c("fit_fmin", "fit_fmax") %in% names(params))) {
+  freq_range <- c(params$fit_fmin[1], params$fit_fmax[1])  # authoritative
+}
 max_peaks  <- sp_cfg$max_n_peaks %||% 6
 
 # --- Summaries ----------------------------------------------------------------

@@ -93,10 +93,16 @@ class ROIAperiodicAnalysis(BaseAnalysis):
                 "roi": roi_name,
                 "exponent": sum(p["exponent"] for p in params_list) / n,
                 "offset": sum(p["offset"] for p in params_list) / n,
+                # Offset at the fit-window centre — report this one alongside
+                # exponent; the 1 Hz-referenced offset is mechanically coupled
+                # to the slope (see spectral.aperiodic.centered_offset).
+                "offset_centered": sum(p["offset_centered"] for p in params_list) / n,
                 "r_squared": sum(p["r_squared"] for p in params_list) / n,
                 "n_peaks": sum(p["n_peaks"] for p in params_list) / n,
                 "error": sum(p["error"] for p in params_list) / n,
                 "method": params_list[0]["method"],
+                "fit_fmin": params_list[0]["fit_fmin"],
+                "fit_fmax": params_list[0]["fit_fmax"],
             })
 
     def aggregate(self) -> None:

@@ -1,0 +1,43 @@
+name: docs
+
+# Build the MkDocs site on every push to main and publish it to GitHub Pages.
+# Pull requests build only (no deploy) so a broken nav/link fails before merge.
+#
+# One-time setup in the repo: Settings -> Pages -> Source = "GitHub Actions".
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build site (strict — fails on a bad link or an unlisted page)
+        run: uv run --no-project --with "mkdocs-material>=9.5,<10" mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

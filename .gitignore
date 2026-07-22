@@ -9,3 +9,4 @@ build/
 
 # stray run logs at repo root
 *.log
+site/

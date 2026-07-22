@@ -166,10 +166,12 @@ def test_aperiodic_default_freq_range_avoids_notch():
         resolve_freq_range,
     )
 
-    assert DEFAULT_FREQ_RANGE[1] <= 55.0, (
+    assert DEFAULT_FREQ_RANGE[1] <= 50.0, (
         "Default aperiodic fmax must stay below the 57-63 Hz line-noise notch"
     )
-    assert DEFAULT_FREQ_RANGE[0] >= 1.0
+    # Lower border must clear the high-pass roll-off AND the theta/alpha peak
+    # (Gerster et al. 2022: borders must not cross oscillatory peaks).
+    assert DEFAULT_FREQ_RANGE[0] >= 12.0
 
     # Empty/None config falls back to the safe default.
     assert resolve_freq_range(None) == DEFAULT_FREQ_RANGE
@@ -206,3 +208,62 @@ def test_aperiodic_fit_degrades_when_range_spans_notch():
     assert abs(good["exponent"] - true_exp) < abs(bad["exponent"] - true_exp), (
         "The clean range must recover the true exponent more closely"
     )
+
+
+def test_centered_offset_removes_mechanical_slope_coupling():
+    """offset_centered must decouple offset from exponent.
+
+    specparam's offset is the intercept at 1 Hz, far below a 12-45 Hz window, so
+    a steeper slope mechanically forces a higher intercept. Simulate spectra that
+    share a common power level at the window centre but differ in slope: their
+    1 Hz offsets must correlate with exponent, and the centred offsets must not.
+    """
+    from source_analytics.spectral.aperiodic import centered_offset
+
+    rng_win = (12.0, 45.0)
+    f_c = np.sqrt(rng_win[0] * rng_win[1])
+    exponents = np.linspace(0.5, 2.0, 25)
+    level_at_centre = -20.0  # identical broadband level for every spectrum
+    offsets = level_at_centre + exponents * np.log10(f_c)
+
+    r_raw = np.corrcoef(offsets, exponents)[0, 1]
+    centred = np.array([
+        centered_offset(o, e, rng_win) for o, e in zip(offsets, exponents)])
+
+    assert r_raw > 0.99, "raw 1 Hz offset should track exponent mechanically"
+    assert np.allclose(centred, level_at_centre), (
+        "centred offset must recover the true common level, independent of slope"
+    )
+
+
+def test_resolve_freq_range_rejects_and_warns(caplog):
+    """Invalid ranges raise; risky-but-legal ranges warn rather than fail."""
+    from source_analytics.spectral.aperiodic import resolve_freq_range
+
+    for bad in ([50, 10], [0, 40], [10, 10]):
+        with pytest.raises(ValueError):
+            resolve_freq_range({"freq_range": bad})
+
+    with caplog.at_level("WARNING"):
+        resolve_freq_range({"freq_range": [2, 50]})
+    assert any("high-pass roll-off" in r.getMessage() for r in caplog.records), (
+        "a 2 Hz lower border must warn about the roll-off / peak-crossing"
+    )
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        resolve_freq_range({"freq_range": [12, 80]})
+    assert any("mains" in r.getMessage() for r in caplog.records)
+
+
+def test_fit_aperiodic_carries_window_provenance():
+    """Every fit records the window it used, so tables are self-documenting."""
+    from source_analytics.spectral.aperiodic import fit_aperiodic
+
+    freqs = np.arange(1.0, 100.0, 0.5)
+    psd = 10.0 ** (-1.5 * np.log10(freqs))
+    out = fit_aperiodic(freqs, psd, freq_range=(12, 45))
+
+    assert out["fit_fmin"] == 12.0 and out["fit_fmax"] == 45.0
+    assert "offset_centered" in out
+    assert np.isfinite(out["offset_centered"])

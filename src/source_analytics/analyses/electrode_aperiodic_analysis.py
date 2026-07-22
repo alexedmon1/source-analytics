@@ -197,10 +197,14 @@ class ElectrodeAperiodicAnalysis(BaseAnalysis):
                 "channel": ch_name,
                 "exponent": sum(p["exponent"] for p in params_list) / n,
                 "offset": sum(p["offset"] for p in params_list) / n,
+                # See roi_aperiodic: report offset_centered with the exponent.
+                "offset_centered": sum(p["offset_centered"] for p in params_list) / n,
                 "r_squared": sum(p["r_squared"] for p in params_list) / n,
                 "n_peaks": sum(p["n_peaks"] for p in params_list) / n,
                 "error": sum(p["error"] for p in params_list) / n,
                 "method": params_list[0]["method"],
+                "fit_fmin": params_list[0]["fit_fmin"],
+                "fit_fmax": params_list[0]["fit_fmax"],
             })
 
     def aggregate(self) -> None:
