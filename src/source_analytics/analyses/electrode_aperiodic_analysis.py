@@ -19,7 +19,7 @@ from ..io.discovery import SubjectInfo
 from ..io.electrode_loader import load_eeglab_set
 from ..spectral.epoch_sampler import sample_epochs
 from ..spectral.psd import compute_psd
-from ..spectral.aperiodic import fit_aperiodic
+from ..spectral.aperiodic import fit_aperiodic, resolve_freq_range
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,7 @@ class ElectrodeAperiodicAnalysis(BaseAnalysis):
         self._subject_groups: dict[str, str] = {}
         self._sfreq: float | None = None
         self._roster: pd.DataFrame | None = None
+        self._freq_range = resolve_freq_range(config.raw.get("electrode_aperiodic"))
 
     def setup(self) -> None:
         self._subject_aperiodic.clear()
@@ -184,7 +185,7 @@ class ElectrodeAperiodicAnalysis(BaseAnalysis):
                     continue
 
                 freqs, psd = compute_psd(ch_data, sfreq, fmin=1.0, fmax=100.0)
-                params = fit_aperiodic(freqs, psd, freq_range=(2, 50))
+                params = fit_aperiodic(freqs, psd, freq_range=self._freq_range)
                 ch_params_accum.setdefault(ch_name, []).append(params)
 
         # Average across draws

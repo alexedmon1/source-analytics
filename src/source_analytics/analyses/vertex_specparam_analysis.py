@@ -22,6 +22,7 @@ from scipy import stats as sp_stats
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
+from ..spectral.aperiodic import resolve_freq_range
 from ..spectral.vertex import compute_psd_vertices
 from ..spectral.vertex_aperiodic import fit_aperiodic_vertices
 from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
@@ -63,7 +64,10 @@ class VertexSpecparamAnalysis(BaseAnalysis):
 
         # Config
         sp_cfg = config.raw.get("vertex_specparam", {})
-        self._freq_range = tuple(sp_cfg.get("freq_range", [1, 100]))
+        # Shared package default (2-50 Hz). The previous default here was
+        # 1-100 Hz, which spans the 57-63 Hz notch and the >80 Hz roll-off and
+        # collapsed the vertex fits to r^2~0.16 / exponent~0.04 (flat).
+        self._freq_range = resolve_freq_range(sp_cfg)
         self._peak_width_limits = tuple(sp_cfg.get("peak_width_limits", [1.0, 12.0]))
         self._max_n_peaks = int(sp_cfg.get("max_n_peaks", 6))
 

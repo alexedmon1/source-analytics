@@ -21,10 +21,38 @@ except ImportError:
     _HAS_SPECPARAM = False
 
 
+# The one aperiodic fit range for the whole package. 2-50 Hz deliberately stops
+# short of the 57-63 Hz line-noise notch and of the >80 Hz filter roll-off: the
+# aperiodic component is a straight line in log-log space, so a notch or a cliff
+# inside the fit window drags the slope flat and destroys the fit. Widening this
+# to 1-100 Hz collapses r^2 from ~0.89 to ~0.27 and pulls the exponent to ~0 on
+# the very same spectra (measured on FORGE ROI PSDs, 2026-07-22) — which is what
+# a mis-set vertex_specparam.freq_range did to the vertex 1/f maps.
+DEFAULT_FREQ_RANGE: tuple[float, float] = (2.0, 50.0)
+
+
+def resolve_freq_range(cfg: dict | None, key: str = "freq_range") -> tuple[float, float]:
+    """Resolve an aperiodic fit range from a config block, defaulting to
+    :data:`DEFAULT_FREQ_RANGE`. Warns when the requested range reaches into the
+    line-noise/roll-off region, since that silently ruins the fit."""
+    rng = tuple((cfg or {}).get(key) or DEFAULT_FREQ_RANGE)
+    if len(rng) != 2:
+        raise ValueError(f"{key} must be [fmin, fmax], got {rng!r}")
+    fmin, fmax = float(rng[0]), float(rng[1])
+    if fmax > 55.0:
+        logger.warning(
+            "Aperiodic fit range %.4g-%.4g Hz extends past 55 Hz, into the "
+            "57-63 Hz notch and/or the high-frequency roll-off. This flattens "
+            "the exponent and collapses r^2 — see DEFAULT_FREQ_RANGE %s.",
+            fmin, fmax, DEFAULT_FREQ_RANGE,
+        )
+    return (fmin, fmax)
+
+
 def fit_aperiodic(
     freqs: np.ndarray,
     psd: np.ndarray,
-    freq_range: tuple[float, float] = (2, 50),
+    freq_range: tuple[float, float] = DEFAULT_FREQ_RANGE,
     max_n_peaks: int = 6,
 ) -> dict:
     """Fit aperiodic parameters to a single PSD.

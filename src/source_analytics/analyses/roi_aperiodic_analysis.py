@@ -13,7 +13,7 @@ from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.psd import compute_psd_multiroi
-from ..spectral.aperiodic import fit_aperiodic_multiroi
+from ..spectral.aperiodic import fit_aperiodic_multiroi, resolve_freq_range
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,9 @@ class ROIAperiodicAnalysis(BaseAnalysis):
 
         for draw_ts in draws:
             roi_psds = compute_psd_multiroi(draw_ts, sfreq, fmin=1.0, fmax=100.0)
-            aperiodic_params = fit_aperiodic_multiroi(roi_psds, freq_range=(2, 50))
+            aperiodic_params = fit_aperiodic_multiroi(
+                roi_psds, freq_range=resolve_freq_range(
+                    self.config.raw.get("roi_aperiodic")))
             for roi_name, params in aperiodic_params.items():
                 roi_params_accum.setdefault(roi_name, []).append(params)
 

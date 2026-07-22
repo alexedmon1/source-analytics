@@ -151,3 +151,58 @@ def test_hedges_g_small_scale():
     assert np.all(np.abs(g) > 50), (
         f"Hedges g should be large for small-scale large-effect data; got {g}"
     )
+
+
+def test_aperiodic_default_freq_range_avoids_notch():
+    """The package-wide aperiodic fit range must stop below the 57-63 Hz notch.
+
+    Regression guard: vertex_specparam previously defaulted to 1-100 Hz, which
+    drags the log-log line fit through the notch and the >80 Hz roll-off. On
+    FORGE ROI spectra that collapsed r^2 from ~0.89 to ~0.27 and pulled the
+    exponent to ~0, silently invalidating every vertex 1/f map.
+    """
+    from source_analytics.spectral.aperiodic import (
+        DEFAULT_FREQ_RANGE,
+        resolve_freq_range,
+    )
+
+    assert DEFAULT_FREQ_RANGE[1] <= 55.0, (
+        "Default aperiodic fmax must stay below the 57-63 Hz line-noise notch"
+    )
+    assert DEFAULT_FREQ_RANGE[0] >= 1.0
+
+    # Empty/None config falls back to the safe default.
+    assert resolve_freq_range(None) == DEFAULT_FREQ_RANGE
+    assert resolve_freq_range({}) == DEFAULT_FREQ_RANGE
+    # An explicit range is honoured (so a study can still override deliberately).
+    assert resolve_freq_range({"freq_range": [3, 40]}) == (3.0, 40.0)
+    # Malformed ranges are rejected rather than silently reinterpreted.
+    with pytest.raises(ValueError):
+        resolve_freq_range({"freq_range": [1, 2, 3]})
+
+
+def test_aperiodic_fit_degrades_when_range_spans_notch():
+    """Widening the fit range past the notch must measurably hurt the fit.
+
+    Synthesises a 1/f spectrum with a notch at 57-63 Hz and a roll-off above
+    80 Hz (the FORGE preprocessing shape) and checks that the default range
+    recovers the exponent while the 1-100 Hz range does not.
+    """
+    from source_analytics.spectral.aperiodic import fit_aperiodic
+
+    freqs = np.arange(1.0, 100.0, 0.5)
+    true_exp = 1.5
+    psd = 10.0 ** (-true_exp * np.log10(freqs))
+    psd[(freqs >= 57) & (freqs <= 63)] *= 1e-3   # notch
+    psd[freqs > 80] *= 10.0 ** (-3 * np.log10(freqs[freqs > 80] / 80.0))  # roll-off
+
+    good = fit_aperiodic(freqs, psd, freq_range=(2, 50))
+    bad = fit_aperiodic(freqs, psd, freq_range=(1, 100))
+
+    assert good["r_squared"] > bad["r_squared"], (
+        f"Notch-spanning range should fit worse; got good={good['r_squared']:.3f} "
+        f"bad={bad['r_squared']:.3f}"
+    )
+    assert abs(good["exponent"] - true_exp) < abs(bad["exponent"] - true_exp), (
+        "The clean range must recover the true exponent more closely"
+    )
