@@ -267,3 +267,103 @@ def test_fit_aperiodic_carries_window_provenance():
     assert out["fit_fmin"] == 12.0 and out["fit_fmax"] == 45.0
     assert "offset_centered" in out
     assert np.isfinite(out["offset_centered"])
+
+
+# --- Two-fit peak detection / fit-window justification -----------------------
+
+def _synthetic_psd(freqs, peaks=((6.0, 0.9, 1.5), (22.0, 0.5, 3.0)), exponent=1.0):
+    """1/f spectrum with Gaussian peaks; one below 12 Hz, one inside 12-45."""
+    psd = 10 ** (1.2 - exponent * np.log10(freqs))
+    for cf, pw, sd in peaks:
+        psd += 10 ** pw * np.exp(-((freqs - cf) ** 2) / (2 * sd ** 2)) * 1e-1
+    return psd
+
+
+BANDS = {
+    "Delta": (1, 4), "Theta": (4, 10), "Alpha": (10, 13), "Beta": (13, 30),
+    "Low Gamma": (30, 55), "High Gamma": (65, 80), "Epsilon": (80, 150),
+}
+
+
+def test_band_reachability_marks_unreachable_and_censored():
+    from source_analytics.spectral.aperiodic import band_peak_reachability
+
+    reach = band_peak_reachability(BANDS, (12, 45))
+
+    # Wholly outside the window -> peaks are structurally impossible
+    for band in ("Delta", "Theta", "High Gamma", "Epsilon"):
+        assert not reach[band]["reachable"], f"{band} cannot be reachable at 12-45"
+    # Fully inside -> reachable and complete
+    assert reach["Beta"]["reachable"] and not reach["Beta"]["censored"]
+    assert reach["Beta"]["frac_visible"] == 1.0
+    # Partial overlap -> reachable but censored (rates are a lower bound)
+    assert reach["Low Gamma"]["reachable"] and reach["Low Gamma"]["censored"]
+    assert 0.0 < reach["Low Gamma"]["frac_visible"] < 1.0
+
+
+def test_unreachable_bands_emit_no_peak_columns():
+    """A band the window cannot see must be ABSENT, never a False.
+
+    Emitting has_delta_peak=False for a window that starts at 12 Hz fabricates
+    a measured null: downstream chi-squared tests then report p=1.0 at every
+    vertex for a comparison the data never had power to make.
+    """
+    from source_analytics.spectral.vertex_aperiodic import fit_aperiodic_vertices
+
+    freqs = np.arange(1, 101, 0.5)
+    psd = np.array([_synthetic_psd(freqs) for _ in range(3)])
+
+    out = fit_aperiodic_vertices(freqs, psd, freq_range=(12, 45), bands=BANDS)
+
+    for band in ("delta", "theta", "high_gamma", "epsilon"):
+        assert f"has_{band}_peak" not in out
+    assert "has_beta_peak" in out
+
+
+def test_two_fit_recovers_peaks_the_aperiodic_window_cannot_see():
+    """The wide peak fit finds the 6 Hz peak; the narrow fit still sets exponent."""
+    from source_analytics.spectral.vertex_aperiodic import fit_aperiodic_vertices
+
+    freqs = np.arange(1, 101, 0.5)
+    psd = np.array([_synthetic_psd(freqs) for _ in range(3)])
+
+    narrow = fit_aperiodic_vertices(freqs, psd, freq_range=(12, 45), bands=BANDS)
+    two = fit_aperiodic_vertices(
+        freqs, psd, freq_range=(12, 45), bands=BANDS, peak_freq_range=(2, 50),
+    )
+
+    # Theta is now measurable, and the 6 Hz peak is actually found
+    assert "has_theta_peak" not in narrow
+    assert "has_theta_peak" in two
+    assert two["has_theta_peak"].all()
+    assert np.allclose(two["theta_peak_freq"], 6.0, atol=1.0)
+
+    # Aperiodic estimates still come from the NARROW window, unchanged
+    assert np.allclose(two["exponent"], narrow["exponent"])
+    assert two["aperiodic_window"] == (12, 45)
+    assert two["peak_window"] == (2, 50)
+    # n_peaks stays the narrow fit's QC count; the inventory is n_peaks_wide
+    assert (two["n_peaks_wide"] > two["n_peaks"]).all()
+
+
+def test_peak_inventory_supports_border_crossing_check():
+    """peaks_all carries the bandwidth needed to test Gerster's border rule."""
+    from source_analytics.spectral.vertex_aperiodic import fit_aperiodic_vertices
+
+    freqs = np.arange(1, 101, 0.5)
+    psd = np.array([_synthetic_psd(freqs) for _ in range(2)])
+
+    out = fit_aperiodic_vertices(
+        freqs, psd, freq_range=(12, 45), bands=BANDS, peak_freq_range=(2, 50),
+    )
+
+    peaks = out["peaks_all"][0]
+    assert len(peaks) >= 2
+    for pk in peaks:
+        assert {"center_frequency", "power", "bandwidth"} <= set(pk)
+        assert np.isfinite(pk["bandwidth"])
+    # The 6 Hz peak sits well clear of the 12 Hz border on this synthetic data
+    cf = np.array([p["center_frequency"] for p in peaks])
+    bw = np.array([p["bandwidth"] for p in peaks])
+    crossing = ((cf - bw / 2 < 12) & (cf + bw / 2 > 12))
+    assert not crossing.any()

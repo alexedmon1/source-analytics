@@ -104,6 +104,44 @@ def resolve_freq_range(cfg: dict | None, key: str = "freq_range") -> tuple[float
     return (fmin, fmax)
 
 
+def band_peak_reachability(
+    bands: dict[str, tuple[float, float]],
+    peak_window: tuple[float, float],
+) -> dict[str, dict]:
+    """Classify each band by whether a peak-detection window can see it.
+
+    specparam only returns peaks whose centre frequency lies INSIDE the fitted
+    window, so a band that does not overlap the window can never receive a peak.
+    That is a structural impossibility, not a measured absence: emitting
+    ``has_<band>_peak = False`` for such a band manufactures a null. Callers use
+    this to decide which per-band peak columns may legitimately be emitted at all.
+
+    Returns one entry per band with:
+        reachable   — the band overlaps the window; peaks are possible
+        visible_lo/visible_hi — the sub-interval of the band the window covers
+        frac_visible — fraction of the band's width that is covered
+        censored    — part of the band lies outside the window, so detection
+                      rates are a LOWER bound and peak frequencies are truncated
+    """
+    wlo, whi = float(peak_window[0]), float(peak_window[1])
+    out: dict[str, dict] = {}
+    for name, (flo, fhi) in bands.items():
+        flo, fhi = float(flo), float(fhi)
+        lo, hi = max(flo, wlo), min(fhi, whi)
+        reachable = hi > lo
+        width = fhi - flo
+        out[name] = {
+            "band_lo": flo,
+            "band_hi": fhi,
+            "reachable": bool(reachable),
+            "visible_lo": float(lo) if reachable else float("nan"),
+            "visible_hi": float(hi) if reachable else float("nan"),
+            "frac_visible": float((hi - lo) / width) if reachable and width > 0 else 0.0,
+            "censored": bool(reachable and (flo < wlo or fhi > whi)),
+        }
+    return out
+
+
 def centered_offset(offset: float, exponent: float,
                     freq_range: tuple[float, float]) -> float:
     """Offset re-referenced to the geometric centre of the fit window.

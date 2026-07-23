@@ -22,7 +22,7 @@ from scipy import stats as sp_stats
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
-from ..spectral.aperiodic import resolve_freq_range
+from ..spectral.aperiodic import band_peak_reachability, resolve_freq_range
 from ..spectral.vertex import compute_psd_vertices
 from ..spectral.vertex_aperiodic import fit_aperiodic_vertices
 from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
@@ -57,6 +57,7 @@ class VertexSpecparamAnalysis(BaseAnalysis):
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
         self._param_rows: list[dict] = []
+        self._peak_rows: list[dict] = []
         self._source_coords: np.ndarray | None = None
         self._sfreq: float | None = None
         self._subject_data: dict[str, dict] = {}
@@ -70,11 +71,27 @@ class VertexSpecparamAnalysis(BaseAnalysis):
         self._freq_range = resolve_freq_range(sp_cfg)
         self._peak_width_limits = tuple(sp_cfg.get("peak_width_limits", [1.0, 12.0]))
         self._max_n_peaks = int(sp_cfg.get("max_n_peaks", 6))
+        # Separate, wider window for PEAK detection. The narrow aperiodic window
+        # makes every band outside it structurally undetectable, which would turn
+        # the fit-window choice into an unfalsifiable assertion: the borders are
+        # justified by where the peaks are, so the peaks must be measured over a
+        # window that does not presuppose the answer. Unset => single fit.
+        self._peak_freq_range = (
+            resolve_freq_range(sp_cfg, key="peak_freq_range")
+            if sp_cfg.get("peak_freq_range") else self._freq_range
+        )
 
         # Frequency bands for peak detection
         self._bands = dict(config.bands)
+        # Only bands the PEAK window can reach get peak columns — an unreachable
+        # band's absence is structural, and emitting False for it fabricates a
+        # measured null (see spectral.aperiodic.band_peak_reachability).
+        self._band_reach = band_peak_reachability(self._bands, self._peak_freq_range)
+        self._peak_bands = {
+            n: b for n, b in self._bands.items() if self._band_reach[n]["reachable"]
+        }
         self._band_keys = {
-            name: name.lower().replace(" ", "_") for name in self._bands
+            name: name.lower().replace(" ", "_") for name in self._peak_bands
         }
 
         wb_cfg = config.vertex
@@ -90,6 +107,7 @@ class VertexSpecparamAnalysis(BaseAnalysis):
 
     def setup(self) -> None:
         self._param_rows.clear()
+        self._peak_rows.clear()
         self._subject_data.clear()
         self._subject_groups.clear()
         self._source_coords = None
@@ -104,8 +122,8 @@ class VertexSpecparamAnalysis(BaseAnalysis):
         sfreq = loader.load_sfreq()
         coords = loader.load_source_coords()
 
-        # Compute PSD
-        fmax = self._freq_range[1] + 10
+        # Compute PSD — must span the WIDER of the two windows
+        fmax = max(self._freq_range[1], self._peak_freq_range[1]) + 10
         if self._epoch_config is not None:
             epochs = sample_epochs(
                 stc_data, sfreq,
@@ -130,6 +148,7 @@ class VertexSpecparamAnalysis(BaseAnalysis):
             max_n_peaks=self._max_n_peaks,
             peak_width_limits=self._peak_width_limits,
             bands=self._bands,
+            peak_freq_range=self._peak_freq_range,
         )
 
         param_rows: list[dict] = []
@@ -147,9 +166,12 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 "offset_centered": float(params["offset_centered"][vi]),
                 "r_squared": float(params["r_squared"][vi]),
                 "n_peaks": int(params["n_peaks"][vi]),
+                "n_peaks_wide": int(params["n_peaks_wide"][vi]),
                 "method": params["method"][vi],
                 "fit_fmin": float(self._freq_range[0]),
                 "fit_fmax": float(self._freq_range[1]),
+                "peak_fmin": float(self._peak_freq_range[0]),
+                "peak_fmax": float(self._peak_freq_range[1]),
             }
             for key in self._band_keys.values():
                 row[f"has_{key}_peak"] = bool(params[f"has_{key}_peak"][vi])
@@ -157,9 +179,18 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 row[f"{key}_peak_power"] = float(params[f"{key}_peak_power"][vi])
             param_rows.append(row)
 
+        # Long-format inventory of every peak found by the peak-window fit.
+        # This is the raw material for the fit-window diagnostic: where the
+        # oscillations actually are, independent of any band definition.
+        peak_rows = [
+            {"subject": uid, "group": subject.group, **pk}
+            for vertex_peaks in params["peaks_all"] for pk in vertex_peaks
+        ]
+
         return {
             "uid": uid, "group": subject.group, "sfreq": float(sfreq),
             "source_coords": coords, "params": params, "param_rows": param_rows,
+            "peak_rows": peak_rows,
         }
 
     def _merge_subject(self, payload) -> None:
@@ -171,6 +202,7 @@ class VertexSpecparamAnalysis(BaseAnalysis):
         self._subject_groups[uid] = payload["group"]
         self._subject_data[uid] = payload["params"]
         self._param_rows.extend(payload["param_rows"])
+        self._peak_rows.extend(payload.get("peak_rows", []))
 
     def aggregate(self) -> None:
         data_dir = self.output_dir / "data"
@@ -182,10 +214,92 @@ class VertexSpecparamAnalysis(BaseAnalysis):
         param_df.to_csv(data_dir / "vertex_specparam.csv", index=False)
         logger.info("Exported vertex_specparam.csv (%d rows)", len(param_df))
 
+        if self._peak_rows:
+            peak_df = pd.DataFrame(self._peak_rows)
+            peak_df.to_csv(data_dir / "peak_inventory.csv", index=False)
+            logger.info("Exported peak_inventory.csv (%d peaks)", len(peak_df))
+            self._write_fit_window_diagnostic(peak_df)
+
         if self._source_coords is not None:
             coords_df = pd.DataFrame(self._source_coords, columns=["x", "y", "z"])
             coords_df.index.name = "vertex_idx"
             coords_df.to_csv(data_dir / "source_coords.csv")
+
+    def _write_fit_window_diagnostic(self, peak_df: pd.DataFrame) -> None:
+        """Check the aperiodic fit window against where the oscillations are.
+
+        Gerster et al. 2022: "Oscillations crossing the fitting range borders
+        must be avoided for all investigated power spectra" — a peak sitting on
+        a border produces large exponent error. That rule is testable, and this
+        table tests it on the study's own spectra instead of asserting it.
+
+        A peak is treated as crossing a border when its support (centre
+        frequency +/- half the specparam bandwidth, i.e. +/-1 SD of the fitted
+        Gaussian) straddles that border. This catches both a peak centred inside
+        the window whose tail leaks out, and one centred outside whose tail
+        leaks in.
+        """
+        fmin, fmax = self._freq_range
+        n_fits = len(self._param_rows) or 1
+
+        cf = peak_df["center_frequency"].to_numpy(dtype=float)
+        bw = peak_df["bandwidth"].to_numpy(dtype=float)
+        half = np.where(np.isfinite(bw), bw / 2.0, 0.0)
+        lo_edge, hi_edge = cf - half, cf + half
+        cross_lo = (lo_edge < fmin) & (hi_edge > fmin)
+        cross_hi = (lo_edge < fmax) & (hi_edge > fmax)
+
+        def _row(name, blo, bhi, mask, reach):
+            sub_cf = cf[mask]
+            n = int(mask.sum())
+            return {
+                "band": name,
+                "band_lo": blo,
+                "band_hi": bhi,
+                "aperiodic_fmin": float(fmin),
+                "aperiodic_fmax": float(fmax),
+                "peak_fmin": float(self._peak_freq_range[0]),
+                "peak_fmax": float(self._peak_freq_range[1]),
+                "reachable": reach.get("reachable", True),
+                "censored": reach.get("censored", False),
+                "frac_visible": reach.get("frac_visible", 1.0),
+                "n_peaks": n,
+                "peaks_per_fit": float(n / n_fits),
+                "cf_median": float(np.median(sub_cf)) if n else float("nan"),
+                "cf_p5": float(np.percentile(sub_cf, 5)) if n else float("nan"),
+                "cf_p95": float(np.percentile(sub_cf, 95)) if n else float("nan"),
+                "n_cross_fmin": int((cross_lo & mask).sum()),
+                "n_cross_fmax": int((cross_hi & mask).sum()),
+                "frac_crossing": float(
+                    ((cross_lo | cross_hi) & mask).sum() / n) if n else 0.0,
+            }
+
+        rows = [_row(
+            "ALL", float(self._peak_freq_range[0]), float(self._peak_freq_range[1]),
+            np.ones(len(cf), dtype=bool), {},
+        )]
+        for name, (blo, bhi) in self._bands.items():
+            reach = self._band_reach[name]
+            in_band = (cf >= blo) & (cf <= bhi)
+            rows.append(_row(name, float(blo), float(bhi), in_band, reach))
+
+        # Peaks the aperiodic window deliberately excludes — context for the
+        # crossing counts: a window that excludes a lot of oscillatory activity
+        # is only defensible if that activity is clear of the borders.
+        outside = (cf < fmin) | (cf > fmax)
+        diag = pd.DataFrame(rows)
+        diag.to_csv(self.tbl_dir / "fit_window_diagnostic.csv", index=False)
+
+        n_total = len(cf)
+        n_cross = int((cross_lo | cross_hi).sum())
+        logger.info(
+            "Fit-window diagnostic: %d peaks over %.4g-%.4g Hz; %d (%.1f%%) "
+            "cross the aperiodic borders %.4g/%.4g Hz; %d (%.1f%%) lie outside "
+            "the aperiodic window entirely.",
+            n_total, self._peak_freq_range[0], self._peak_freq_range[1],
+            n_cross, 100.0 * n_cross / max(n_total, 1), fmin, fmax,
+            int(outside.sum()), 100.0 * outside.sum() / max(n_total, 1),
+        )
 
     def statistics(self) -> None:
         if self._source_coords is None:
@@ -259,7 +373,10 @@ class VertexSpecparamAnalysis(BaseAnalysis):
             n_a, n_b = len(group_a_uids), len(group_b_uids)
             all_chi2_stats: list[dict] = []
 
-            for band_name in self._bands:
+            # Detectable bands only. A band the peak window cannot reach has no
+            # column to test, and testing it would emit p=1.0 at every vertex —
+            # a null the data never had the power to reject.
+            for band_name in self._peak_bands:
                 key = self._band_keys[band_name]
                 col = f"has_{key}_peak"
 
@@ -482,6 +599,8 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 output_path=fig_dir / f"specparam_{safe}.png",
             )
 
+        self._plot_fit_window_diagnostic()
+
         # Per-band peak presence maps
         band_keys = self._band_keys if self._band_keys else {}
         # Detect band keys from CSV if in-memory state is empty
@@ -528,6 +647,54 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 vlim=(0, 1),
             )
 
+    def _plot_fit_window_diagnostic(self) -> None:
+        """The fit-window justification figure: peaks vs the aperiodic borders.
+
+        Regenerated from ``data/peak_inventory.csv`` so ``--steps figures``
+        alone reproduces it (no in-memory state).
+        """
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        csv_path = self.output_dir / "data" / "peak_inventory.csv"
+        if not csv_path.exists():
+            return
+        peaks = pd.read_csv(csv_path)
+        if peaks.empty:
+            return
+
+        fmin, fmax = self._freq_range
+        pmin, pmax = self._peak_freq_range
+        cf = peaks["center_frequency"].to_numpy(dtype=float)
+        bw = peaks["bandwidth"].to_numpy(dtype=float)
+        half = np.where(np.isfinite(bw), bw / 2.0, 0.0)
+        crossing = ((cf - half < fmin) & (cf + half > fmin)) | \
+                   ((cf - half < fmax) & (cf + half > fmax))
+
+        fig, ax = plt.subplots(figsize=(9, 4.5))
+        bins = np.linspace(pmin, pmax, 80)
+        ax.hist(cf[~crossing], bins=bins, color="#4C78A8",
+                label=f"clear of borders (n={int((~crossing).sum())})")
+        ax.hist(cf[crossing], bins=bins, color="#E45756",
+                label=f"support crosses a border (n={int(crossing.sum())})")
+
+        ax.axvspan(pmin, fmin, color="0.85", zorder=0)
+        ax.axvspan(fmax, pmax, color="0.85", zorder=0)
+        for border in (fmin, fmax):
+            ax.axvline(border, color="k", ls="--", lw=1.5)
+        ax.set_xlim(pmin, pmax)
+        ax.set_xlabel("Peak centre frequency (Hz)")
+        ax.set_ylabel("Peaks detected")
+        ax.set_title(
+            f"Fit-window check — peaks detected over {pmin:g}-{pmax:g} Hz "
+            f"vs aperiodic window {fmin:g}-{fmax:g} Hz (dashed)"
+        )
+        ax.legend(frameon=False, fontsize=9)
+        fig.tight_layout()
+        fig.savefig(self.fig_dir / "fit_window_diagnostic.png", dpi=150)
+        plt.close(fig)
+
     def summary(self) -> None:
         data_dir = self.output_dir / "data"
 
@@ -559,6 +726,63 @@ class VertexSpecparamAnalysis(BaseAnalysis):
 
         self._write_python_summary()
 
+    def _fit_window_summary_lines(self) -> list[str]:
+        """Report the border check before the results it underwrites."""
+        diag_csv = self.tbl_dir / "fit_window_diagnostic.csv"
+        if not diag_csv.exists():
+            return []
+        diag = pd.read_csv(diag_csv)
+        all_rows = diag[diag["band"] == "ALL"]
+        if all_rows.empty:
+            return []
+        a = all_rows.iloc[0]
+
+        frac = float(a["frac_crossing"])
+        if frac < 0.05:
+            verdict = "SATISFIED — the borders sit in spectral gaps on this data."
+        elif frac < 0.15:
+            verdict = ("MARGINAL — a minority of peaks touch a border, so the "
+                       "exponents carry some added error.")
+        else:
+            verdict = ("VIOLATED — peaks sit on the borders; the window needs "
+                       "revisiting for this dataset.")
+
+        lines = [
+            "## Fit-Window Diagnostic",
+            "",
+            "Gerster et al. (2022): oscillations crossing the fit borders must be "
+            "avoided, since a peak on a border inflates exponent error. A peak "
+            "counts as crossing when its support (centre frequency ± half the "
+            "specparam bandwidth) straddles a border.",
+            "",
+            f"**{int(a['n_peaks'])} peaks** detected over "
+            f"{a['peak_fmin']:g}–{a['peak_fmax']:g} Hz. "
+            f"**{int(a['n_cross_fmin']) + int(a['n_cross_fmax'])} ({100 * frac:.1f}%)** "
+            f"cross an aperiodic border ({a['aperiodic_fmin']:g} / "
+            f"{a['aperiodic_fmax']:g} Hz).",
+            "",
+            f"**Verdict: {verdict}**",
+            "",
+            "| Band | Range (Hz) | Reachable | Censored | Peaks | Median CF | Crossing |",
+            "|------|-----------|-----------|----------|-------|-----------|----------|",
+        ]
+        for _, r in diag[diag["band"] != "ALL"].iterrows():
+            cf_med = "—" if pd.isna(r["cf_median"]) else f"{r['cf_median']:.1f}"
+            lines.append(
+                f"| {r['band']} | {r['band_lo']:g}–{r['band_hi']:g} | "
+                f"{'yes' if r['reachable'] else '**no**'} | "
+                f"{'**yes**' if r['censored'] else 'no'} | "
+                f"{int(r['n_peaks'])} | {cf_med} | {100 * r['frac_crossing']:.1f}% |"
+            )
+        lines.extend([
+            "",
+            "Unreachable bands emit no peak columns at all — their absence is a "
+            "property of the window, not a measurement. Censored bands extend "
+            "past the peak window, so their detection rates are a lower bound.",
+            "",
+        ])
+        return lines
+
     def _write_python_summary(self) -> None:
         tbl_dir = self.tbl_dir
 
@@ -567,7 +791,11 @@ class VertexSpecparamAnalysis(BaseAnalysis):
             "",
             f"**Study**: {self.config.name}",
             "**Analysis**: Vertex-level spectral parameterization (aperiodic + peaks)",
-            f"**Frequency range**: {self._freq_range[0]}-{self._freq_range[1]} Hz",
+            f"**Aperiodic fit range**: {self._freq_range[0]:g}-{self._freq_range[1]:g} Hz",
+            f"**Peak detection range**: {self._peak_freq_range[0]:g}-"
+            f"{self._peak_freq_range[1]:g} Hz"
+            + (" (separate wider fit)"
+               if self._peak_freq_range != self._freq_range else " (same fit)"),
             f"**Max peaks**: {self._max_n_peaks}",
             f"**Peak width limits**: {self._peak_width_limits[0]}-{self._peak_width_limits[1]} Hz",
             "",
@@ -591,6 +819,8 @@ class VertexSpecparamAnalysis(BaseAnalysis):
                 f"of {self._epoch_config.get('epoch_duration_sec', 2.0)}s"
             )
             lines.append("")
+
+        lines.extend(self._fit_window_summary_lines())
 
         # Specparam stats
         stats_csv = tbl_dir / "vertex_specparam_stats.csv"

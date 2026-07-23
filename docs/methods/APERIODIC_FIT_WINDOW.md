@@ -96,6 +96,69 @@ Spectra that are not hemmed in by a high-pass corner, a strong low-frequency
 oscillation, a notch, and an early plateau can and should use a wider window.
 That is exactly why this is configurable rather than hard-coded.
 
+## A narrow window cannot check its own borders — use two fits
+
+The whole justification above rests on one empirical claim: **no oscillation
+crosses 12 Hz or 45 Hz on this data.** That claim is testable, and it must be
+tested, because it is dataset-specific — a different strain, age, anaesthetic or
+montage moves the peaks, and a window inherited from someone else's study is
+then simply wrong.
+
+The problem is that specparam only returns peaks whose centre frequency lies
+**inside the fitted window**. Fit at 12–45 Hz and the theta peak you are claiming
+to have cleared is invisible *by construction*. The window is being used to
+verify itself, and it always passes. Worse, the per-band peak columns for every
+band outside the window come back as a uniform `False`, which downstream looks
+exactly like a measured null: on FORGE this produced 860 rows of
+`chi2 = 0, p = 1.0` for Delta/Theta/High Gamma/Epsilon — a fabricated result for
+a comparison the data never had the power to make.
+
+So peak detection gets its **own, wider window**:
+
+```yaml
+vertex_specparam:
+  freq_range:      [12, 45]   # aperiodic: exponent, offset, r^2
+  peak_freq_range: [2, 50]    # peaks only: wide enough to see the borders
+```
+
+Both fits run per vertex; the aperiodic estimates still come from the narrow
+window and are bit-identical to a single-fit run. Two rules follow:
+
+1. **Unreachable bands emit no columns at all.** A band the peak window cannot
+   see is *absent* from the output, never `False`. Absence of a column is
+   honest; a `False` is a claim. `band_peak_reachability()` decides this, and
+   partially-covered bands are flagged `censored` — their detection rates are a
+   lower bound and their peak frequencies are truncated at the window edge.
+2. **Peaks from the wide fit are a diagnostic, not a precision measurement.** A
+   wide window is a worse 1/f model, and specparam subtracts that model before
+   finding peaks. Use these to justify the aperiodic window and to guard band
+   power interpretation — not as headline oscillation estimates.
+
+### What the diagnostic answers
+
+`tables/fit_window_diagnostic.csv` and `figures/fit_window_diagnostic.png` test
+Gerster's border rule directly. A peak counts as **crossing** when its support
+(centre frequency ± half the specparam bandwidth, i.e. ±1 SD of the fitted
+Gaussian) straddles a border — which catches both a peak centred inside whose
+tail leaks out, and one centred outside whose tail leaks in.
+
+| crossing fraction | reading |
+|---|---|
+| < 5 % | window **satisfied** — borders sit in spectral gaps |
+| 5–15 % | **marginal** — exponents carry some added error |
+| > 15 % | **violated** — revisit the window for this dataset |
+
+`data/peak_inventory.csv` holds every detected peak in long format, so the check
+can be repeated against any candidate window without re-fitting.
+
+### The second reason peaks are worth keeping
+
+Band power cannot distinguish a narrowband oscillation from a change in the 1/f
+background: if the exponent flattens, power rises across every high band with no
+oscillation involved. Since aperiodic effects are often the *largest* effects in
+a dataset, every band-power result is in principle ambiguous between the two
+readings, and peak detection is the only instrument that separates them.
+
 ## Report `offset_centered`, not `offset`, next to the exponent
 
 specparam's `offset` is the intercept **extrapolated to 1 Hz** — typically far
@@ -121,7 +184,8 @@ so the higher and narrower the window, the more this matters.
 
 Every fit records `fit_fmin` / `fit_fmax` alongside the estimates, so any results
 table states the window it came from without reference to the config that
-produced it.
+produced it. Two-fit runs also record `peak_fmin` / `peak_fmax`, so a table
+carries both windows.
 
 ## Overriding
 
@@ -134,6 +198,7 @@ electrode_aperiodic:
   freq_range: [12, 45]
 vertex_specparam:
   freq_range: [12, 45]
+  peak_freq_range: [2, 50]   # optional; unset = single fit, peaks from freq_range
 ```
 
 `resolve_freq_range()` validates the result. It **raises** on a malformed range

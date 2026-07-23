@@ -47,6 +47,16 @@ if (all(c("fit_fmin", "fit_fmax") %in% names(params))) {
 }
 max_peaks  <- sp_cfg$max_n_peaks %||% 6
 
+# Peak-detection window. When it differs from the aperiodic window the run used
+# a two-fit design: narrow window for the exponent, wider one for the peaks, so
+# the narrow window's borders can be checked against where the peaks actually
+# are instead of asserted. Python stamps peak_fmin/peak_fmax into the params.
+peak_range <- freq_range
+if (all(c("peak_fmin", "peak_fmax") %in% names(params))) {
+  peak_range <- c(params$peak_fmin[1], params$peak_fmax[1])
+}
+two_fit <- !isTRUE(all.equal(as.numeric(peak_range), as.numeric(freq_range)))
+
 # --- Summaries ----------------------------------------------------------------
 n_subjects <- length(unique(params$subject))
 n_vertices <- length(unique(params$vertex_idx))
@@ -84,7 +94,10 @@ lines <- c(
   "",
   sprintf("**Study**: %s", config$name),
   "**Analysis**: Vertex-level spectral parameterization (aperiodic + peaks)",
-  sprintf("**Frequency range**: %d-%d Hz", freq_range[1], freq_range[2]),
+  sprintf("**Aperiodic fit range**: %g-%g Hz", freq_range[1], freq_range[2]),
+  sprintf("**Peak detection range**: %g-%g Hz%s",
+          peak_range[1], peak_range[2],
+          if (two_fit) " (separate wider fit)" else " (same fit)"),
   sprintf("**Max peaks**: %d", max_peaks),
   sprintf("**Subjects**: %d (%s)", n_subjects, paste(groups, collapse = ", ")),
   sprintf("**Vertices**: %d", n_vertices),
@@ -109,7 +122,23 @@ lines <- c(lines,
   "The aperiodic component (1/f slope and offset) and oscillatory peaks were extracted.",
   "Group differences in aperiodic parameters were tested with cluster-based permutation.",
   "Per-band peak presence rates were compared with per-vertex chi-squared tests.",
-  "",
+  ""
+)
+
+if (two_fit) {
+  lines <- c(lines,
+    sprintf(paste0(
+      "Aperiodic parameters come from a %g-%g Hz fit; peaks come from a ",
+      "separate %g-%g Hz fit. The narrow window is what makes the exponent ",
+      "unbiased, but it can only find peaks inside itself, so it cannot be ",
+      "used to check its own borders. Peak columns are emitted only for bands ",
+      "the peak window can reach: a band outside it would otherwise report a ",
+      "0%% detection rate that is structural rather than measured."),
+      freq_range[1], freq_range[2], peak_range[1], peak_range[2]),
+    "")
+}
+
+lines <- c(lines,
   "## Fitting Methods Used",
   "",
   sprintf("- specparam: %d fits", method_table["specparam"] %||% 0),
@@ -136,6 +165,59 @@ for (i in seq_len(nrow(group_summary))) {
                        r$Mean_Offset, r$SD_Offset, r$Mean_R2)
   rate_vals <- paste0(sprintf(" %.3f |", unlist(r[rate_cols])), collapse = "")
   lines <- c(lines, paste0(base_fmt, rate_vals))
+}
+
+# Fit-window diagnostic — does the aperiodic window satisfy Gerster's border
+# rule on THIS data? Reported before the results it underwrites.
+diag_path <- file.path(output_dir, "tables", "fit_window_diagnostic.csv")
+if (file.exists(diag_path)) {
+  diag <- read.csv(diag_path, stringsAsFactors = FALSE)
+  all_row <- diag[diag$band == "ALL", ]
+  lines <- c(lines, "", "## Fit-Window Diagnostic", "",
+    "Gerster et al. (2022): oscillations crossing the fit borders must be",
+    "avoided, since a peak on a border inflates exponent error. A peak counts",
+    "as crossing when its support (centre frequency +/- half the specparam",
+    "bandwidth) straddles a border.",
+    "")
+  if (nrow(all_row) == 1) {
+    verdict <- if (all_row$frac_crossing < 0.05) {
+      "SATISFIED - the borders sit in spectral gaps on this data."
+    } else if (all_row$frac_crossing < 0.15) {
+      "MARGINAL - a minority of peaks touch a border; exponents carry some added error."
+    } else {
+      "VIOLATED - peaks sit on the borders; the window needs revisiting for this dataset."
+    }
+    lines <- c(lines,
+      sprintf("**%d peaks** detected over %g-%g Hz. **%d (%.1f%%)** cross an aperiodic border (%g / %g Hz).",
+              all_row$n_peaks, all_row$peak_fmin, all_row$peak_fmax,
+              all_row$n_cross_fmin + all_row$n_cross_fmax,
+              100 * all_row$frac_crossing,
+              all_row$aperiodic_fmin, all_row$aperiodic_fmax),
+      "",
+      sprintf("**Verdict: %s**", verdict),
+      "")
+  }
+  band_rows <- diag[diag$band != "ALL", ]
+  if (nrow(band_rows) > 0) {
+    lines <- c(lines,
+      "| Band | Range (Hz) | Reachable | Censored | Peaks | Median CF | Crossing |",
+      "|------|-----------|-----------|----------|-------|-----------|----------|")
+    for (i in seq_len(nrow(band_rows))) {
+      r <- band_rows[i, ]
+      lines <- c(lines, sprintf("| %s | %g-%g | %s | %s | %d | %s | %.1f%% |",
+        r$band, r$band_lo, r$band_hi,
+        if (isTRUE(as.logical(r$reachable))) "yes" else "**no**",
+        if (isTRUE(as.logical(r$censored))) "**yes**" else "no",
+        r$n_peaks,
+        if (is.na(r$cf_median)) "--" else sprintf("%.1f", r$cf_median),
+        100 * r$frac_crossing))
+    }
+    lines <- c(lines, "",
+      "Unreachable bands emit no peak columns at all - their absence is a",
+      "property of the window, not a measurement. Censored bands extend past",
+      "the peak window, so their detection rates are a lower bound.",
+      "")
+  }
 }
 
 # Cluster stats
@@ -179,8 +261,11 @@ lines <- c(lines,
   "## Output Files",
   "",
   "- `data/vertex_specparam.csv` — per-subject per-vertex specparam fit parameters",
+  "- `data/peak_inventory.csv` — every peak found by the peak-window fit (long format)",
   "- `tables/vertex_specparam_stats.csv` — cluster permutation statistics",
+  "- `tables/fit_window_diagnostic.csv` — aperiodic border check + per-band reachability",
   "- `tables/band_peak_chi2.csv` — per-band peak presence chi-squared tests",
+  "- `figures/fit_window_diagnostic.png` — peak centre frequencies vs the fit borders",
   "- `figures/specparam_*.png` — aperiodic parameter glass brain maps",
   "- `figures/{band}_peak_presence.png` — per-band peak prevalence maps",
   ""
