@@ -14,7 +14,11 @@ dependencies = [
     "scipy>=1.10",
     "pandas>=2.0",
     "pyyaml>=6.0",
-    "specparam>=2.0",
+    # specparam has no final 2.0 release: the index carries 2.0.0rc7 at the
+    # latest, and PEP 440 sorts every rc below 2.0, so ">=2.0" resolved to
+    # nothing at all. Published MS1 results used 2.0.0rc6; the lockfile pins
+    # that exactly, and this floor merely lets the declaration resolve.
+    "specparam>=2.0.0rc6",
     "joblib>=1.3",
 ]
 
