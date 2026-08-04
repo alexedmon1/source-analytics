@@ -91,6 +91,29 @@ matplotlib, mne.
 > **uv users:** run the CLI with `uv run --no-sync source-analytics …`. Plain
 > `uv run` can trip on the lockfile; `--no-sync` avoids the re-resolve.
 
+### Reproducing a published analysis
+
+`specparam` has no final 2.0 release — the index carries `2.0.0rc7` at the
+latest, and PEP 440 sorts every release candidate *below* `2.0`. A declaration
+of `specparam>=2.0` therefore resolves to nothing at all, which is what v0.4.0
+shipped with. The floor is now `>=2.0.0rc6`.
+
+That makes the package installable, but it does not make a result reproducible:
+the aperiodic numbers depend on the exact specparam build, and `mne` is
+unpinned. Install against a lockfile that pins both, then add the package
+without letting it re-resolve:
+
+```bash
+uv venv .venv
+uv pip install --python .venv -r <lockfile>
+uv pip install --python .venv --no-deps "source-analytics @ git+https://github.com/alexedmon1/source-analytics.git@<tag>"
+```
+
+⚠ **`v0.4.0` is a scientific pin, not merely an old version.** It hardcodes
+`freq_range=(2, 50)` for aperiodic fitting; later releases resolve the window
+dynamically and adopt 14–45 Hz, which changes every aperiodic number. Do not
+"upgrade" it to reproduce work that cites it.
+
 ### R
 
 Statistics and most figures are R. Install once:
