@@ -15,6 +15,59 @@ from mne.time_frequency import tfr_array_morlet
 logger = logging.getLogger(__name__)
 
 
+def resolve_n_cycles(
+    freqs: np.ndarray,
+    n_cycles_cfg,
+) -> float | np.ndarray:
+    """Turn a config `n_cycles` value into cycles per frequency.
+
+    Accepts three forms:
+
+    ``7`` (scalar)
+        Fixed cycles at every frequency. The historical default.
+    ``"adaptive"``
+        ``freqs / 2``, floored at 3.
+    ``[lo, hi]`` (two numbers)
+        Linear ramp: ``lo`` cycles at the lowest frequency rising to ``hi`` at
+        the highest. This is the form that matters for evoked work — a fixed 7
+        cycles cannot resolve a 92-308 ms onset window at low frequencies,
+        because the wavelet is longer than the window.
+
+    The ramp mirrors the ``cycles [1 30]`` setting used by the lab's EEGLAB
+    pipeline, read as "1 cycle at the low edge, 30 at the high edge". EEGLAB's
+    own second element is a growth factor rather than an endpoint, so this is
+    an interpretation, not a port; D24 keeps MNE Morlet and matches conclusions
+    rather than values, and the cross-check script quantifies the difference.
+    """
+    freqs = np.asarray(freqs, dtype=float)
+
+    if isinstance(n_cycles_cfg, str):
+        if n_cycles_cfg != "adaptive":
+            raise ValueError(
+                f"n_cycles must be a number, [lo, hi], or 'adaptive'; "
+                f"got {n_cycles_cfg!r}"
+            )
+        return np.maximum(freqs / 2.0, 3.0)
+
+    if np.isscalar(n_cycles_cfg):
+        return float(n_cycles_cfg)
+
+    ramp = np.asarray(n_cycles_cfg, dtype=float).ravel()
+    if ramp.size == len(freqs):
+        return ramp
+    if ramp.size != 2:
+        raise ValueError(
+            f"n_cycles as a sequence must be [lo, hi] or one value per "
+            f"frequency; got {ramp.size} values for {len(freqs)} frequencies"
+        )
+    lo, hi = float(ramp[0]), float(ramp[1])
+    if lo <= 0 or hi <= 0:
+        raise ValueError(f"n_cycles ramp must be positive; got [{lo}, {hi}]")
+    if len(freqs) == 1:
+        return lo
+    return np.linspace(lo, hi, len(freqs))
+
+
 def _safe_n_cycles(
     freqs: np.ndarray,
     n_cycles: float | np.ndarray,
@@ -269,6 +322,51 @@ def compute_stp(tfr_complex: np.ndarray) -> np.ndarray:
         Mean power across trials.
     """
     return np.mean((tfr_complex * np.conj(tfr_complex)).real, axis=0)
+
+
+def extract_measure_in_tiles(
+    measure_2d: np.ndarray,
+    freqs: np.ndarray,
+    sfreq: float,
+    tiles,
+    xmin: float = 0.0,
+) -> float:
+    """Mean over the union of several frequency-by-time tiles.
+
+    A single rectangle cannot express a measure that tracks a moving stimulus.
+    The chirp response sweeps in frequency over time, so the lab's chirp ITC
+    follows a diagonal of tiles rather than a box, and averaging one rectangle
+    across the whole sweep mixes response with background.
+
+    Weighted by tile size, so the result equals the plain rectangle mean when
+    a single tile is given.
+
+    Parameters
+    ----------
+    tiles : sequence of dict
+        Each with ``band`` (fmin, fmax) and ``time_window`` (tmin, tmax).
+
+    Returns
+    -------
+    float
+        Mean over all cells falling in any tile, or NaN if none do.
+    """
+    n_times = measure_2d.shape[1]
+    total, count = 0.0, 0
+
+    for tile in tiles:
+        band = tile["band"]
+        tmin, tmax = tile["time_window"]
+        freq_mask = (freqs >= band[0]) & (freqs <= band[1])
+        t_start = max(0, int(round((tmin - xmin) * sfreq)))
+        t_end = min(n_times, int(round((tmax - xmin) * sfreq)))
+        if not np.any(freq_mask) or t_start >= t_end:
+            continue
+        block = measure_2d[freq_mask, t_start:t_end]
+        total += float(block.sum())
+        count += block.size
+
+    return total / count if count else np.nan
 
 
 def extract_measure_in_band(
