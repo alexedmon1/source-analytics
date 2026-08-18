@@ -265,6 +265,59 @@ def compute_itc(tfr_complex: np.ndarray) -> np.ndarray:
     return itc
 
 
+def debias_itc(itc: np.ndarray, n_epochs: int) -> np.ndarray:
+    """Remove the trial-count bias from ITC.
+
+    ITC is biased upward at low trial counts: with n trials, pure noise still
+    yields an expected ITC near 1/sqrt(n). So a subject with 100 clean trials
+    and one with 200 are not on the same scale, and a group difference can be a
+    trial-count difference. Autifony's trial counts vary by subject and
+    paradigm; Sentinel is repeated-measures across four timepoints, where they
+    will vary by session too.
+
+    The standard correction works on the squared quantity, where the bias is
+    exactly 1/n:
+
+        ITC_debiased = sqrt(max(0, (n * ITC^2 - 1) / (n - 1)))
+
+    Note this is NOT the Rayleigh critical value used in the lab's EEGLAB
+    pipeline. That subtracts a significance threshold, sqrt(-(1/n)·log(0.5)),
+    which answers "is this ITC distinguishable from zero" rather than removing
+    the bias — and it is zeroed for mouse MEA there in any case, so it is inert.
+    Both can be reported; they answer different questions.
+
+    Parameters
+    ----------
+    itc : ndarray
+        ITC values in [0, 1], any shape.
+    n_epochs : int
+        Trials contributing to the estimate. Must be at least 2.
+
+    Returns
+    -------
+    ndarray
+        Debiased ITC, clipped at 0 where the correction would go negative —
+        which is the honest answer for an ITC at or below chance.
+    """
+    if n_epochs < 2:
+        raise ValueError(f"debiasing ITC needs at least 2 trials, got {n_epochs}")
+    itc = np.asarray(itc, dtype=float)
+    squared = (n_epochs * itc ** 2 - 1.0) / (n_epochs - 1.0)
+    return np.sqrt(np.clip(squared, 0.0, None))
+
+
+def itc_rayleigh_threshold(n_epochs: int, p: float = 0.5) -> float:
+    """Rayleigh critical ITC — the lab's ``rcrit``.
+
+    ``sqrt(-(1/n)·log(p))``. Reproduced so results can be compared against the
+    EEGLAB pipeline, which subtracts it from ITC. It is a significance
+    threshold, not a bias correction; see :func:`debias_itc`.
+    """
+    if n_epochs < 1:
+        raise ValueError(f"need at least 1 trial, got {n_epochs}")
+    return float(np.sqrt(-(1.0 / n_epochs) * np.log(p)))
+
+
 def compute_ersp(
     avg_power: np.ndarray,
     sfreq: float,

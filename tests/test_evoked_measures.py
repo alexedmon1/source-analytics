@@ -222,3 +222,56 @@ def test_erp_measures_rejects_unknown_type():
     with pytest.raises(ValueError, match="peak' or 'mean"):
         erp_measures(epochs, SFREQ, XMIN, None,
                      [{"name": "x", "time_window": (0, 0.1), "type": "rms"}])
+
+
+# --------------------------------------------------------------- ITC debias
+
+def test_debiased_itc_is_zero_for_pure_noise_at_any_trial_count():
+    """The bias this removes is a real confound when trial counts differ."""
+    from source_analytics.spectral.tfr import debias_itc
+
+    rng = np.random.default_rng(0)
+    raw_by_n, debiased_by_n = {}, {}
+    for n in (20, 100, 400):
+        phases = rng.uniform(0, 2 * np.pi, size=(4000, n))
+        raw = float(np.abs(np.exp(1j * phases).mean(axis=1)).mean())
+        raw_by_n[n] = raw
+        debiased_by_n[n] = float(debias_itc(raw, n))
+
+    # raw ITC of noise falls with trial count — that is the confound
+    assert raw_by_n[20] > raw_by_n[400] * 3
+    # debiased is ~zero regardless
+    for n in (20, 100, 400):
+        assert debiased_by_n[n] == pytest.approx(0.0, abs=0.02)
+
+
+def test_debias_preserves_a_genuinely_phase_locked_response():
+    from source_analytics.spectral.tfr import debias_itc
+
+    assert debias_itc(1.0, 50) == pytest.approx(1.0)
+    assert debias_itc(0.9, 200) == pytest.approx(0.9, abs=0.01)
+
+
+def test_debias_clips_at_zero_rather_than_going_imaginary():
+    from source_analytics.spectral.tfr import debias_itc
+
+    assert debias_itc(0.0, 10) == pytest.approx(0.0)
+    assert np.all(debias_itc(np.array([0.0, 0.01, 0.5]), 10) >= 0.0)
+
+
+def test_debias_needs_two_trials():
+    from source_analytics.spectral.tfr import debias_itc
+
+    with pytest.raises(ValueError, match="at least 2 trials"):
+        debias_itc(0.5, 1)
+
+
+def test_rayleigh_threshold_matches_the_eeglab_formula():
+    """rcrit = sqrt(-(1/n)·log(0.5)); reproduced for comparability, not used."""
+    from source_analytics.spectral.tfr import itc_rayleigh_threshold
+
+    for n in (10, 50, 200):
+        assert itc_rayleigh_threshold(n) == pytest.approx(
+            np.sqrt(-(1.0 / n) * np.log(0.5)))
+    # it is a threshold, not a bias correction: it does not vanish for noise
+    assert itc_rayleigh_threshold(100) > 0.05

@@ -25,6 +25,7 @@ from ..io.loader import SubjectLoader
 from ..spectral.tfr import (
     morlet_tfr_avg_power_itc,
     compute_ersp,
+    debias_itc,
     extract_measure_in_band,
     extract_measure_in_tiles,
     resolve_n_cycles,
@@ -139,6 +140,12 @@ class VertexEvokedAnalysis(BaseAnalysis):
             stp_map = avg_power
             ersp_map = compute_ersp(avg_power, sfreq, baseline, xmin=xmin)
             measure_maps = {"itc": itc_map, "ersp": ersp_map, "stp": stp_map}
+
+            # ITC is biased upward at low trial counts — pure noise gives about
+            # 1/sqrt(n) — so subjects with different trial counts are not on the
+            # same scale. Offered alongside raw ITC rather than replacing it.
+            if n_epochs >= 2:
+                measure_maps["itc_debiased"] = debias_itc(itc_map, n_epochs)
 
             for mdef in measures:
                 mtype, mname = mdef["type"], mdef["name"]

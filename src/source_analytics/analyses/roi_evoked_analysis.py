@@ -17,6 +17,7 @@ from ..spectral.evoked import erp_measures, subtract_evoked
 from ..spectral.tfr import (
     morlet_tfr_avg_power_itc,
     compute_ersp,
+    debias_itc,
     extract_measure_in_band,
     resolve_n_cycles,
     extract_measure_in_tiles,
@@ -131,6 +132,12 @@ class ROIEvokedAnalysis(BaseAnalysis):
 
             # Extract scalar measures
             measure_maps = {"itc": itc_map, "ersp": ersp_map, "stp": stp_map}
+
+            # ITC is biased upward at low trial counts — pure noise gives about
+            # 1/sqrt(n) — so subjects with different trial counts are not on the
+            # same scale. Offered alongside raw ITC rather than replacing it.
+            if n_epochs >= 2:
+                measure_maps["itc_debiased"] = debias_itc(itc_map, n_epochs)
 
             # Induced power: the same pipeline on trials with the phase-locked
             # average removed. Only computed when a measure asks for it, since
