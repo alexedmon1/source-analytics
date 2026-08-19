@@ -338,6 +338,20 @@ class BaseAnalysis(ABC):
         self._check_not_all_failed(len(subjects) - merged, len(subjects))
 
     @staticmethod
+    def _needs_induced(measures: list[dict]) -> bool:
+        """Whether any measure asks for induced power.
+
+        Induced doubles the TFR cost — it is a second full pass over the trials
+        with the phase-locked average removed — so it is computed only on
+        demand rather than alongside evoked power for every run.
+
+        Lives on the base class because every evoked module has to answer the
+        question identically; two copies would be two chances to disagree about
+        what a config means.
+        """
+        return any(m.get("type") in ("induced", "induced_stp") for m in measures)
+
+    @staticmethod
     def _check_not_all_failed(failed: int, total: int) -> None:
         """Raise when no subject survived processing.
 

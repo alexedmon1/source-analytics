@@ -18,6 +18,7 @@ import yaml
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.electrode_loader import load_eeglab_epochs
+from ..spectral.evoked import erp_measures, subtract_evoked
 from ..spectral.tfr import (
     morlet_tfr_avg_power_itc,
     compute_ersp,
@@ -240,9 +241,42 @@ class ElectrodeEvokedAnalysis(BaseAnalysis):
             if n_epochs >= 2:
                 measure_maps["itc_debiased"] = debias_itc(itc_map, n_epochs)
 
+            # Induced power: the same pipeline on trials with the phase-locked
+            # average removed. Only computed when a measure asks for it, since
+            # it doubles the TFR cost.
+            if self._needs_induced(measures) and n_epochs >= 2:
+                induced_power, _ = morlet_tfr_avg_power_itc(
+                    subtract_evoked(ch_epochs), sfreq, freqs, n_cycles,
+                )
+                measure_maps["induced"] = compute_ersp(
+                    induced_power, sfreq, baseline, xmin=xmin
+                )
+                measure_maps["induced_stp"] = induced_power
+
+            # ERP measures work on the trial-averaged waveform, not on a TF map
+            erp_specs = [m for m in measures if m.get("type") == "erp"]
+            if erp_specs:
+                specs = [{"name": m["name"],
+                          "time_window": tuple(m["time_window"]),
+                          "polarity": m.get("polarity", "abs"),
+                          "type": m.get("erp_type", "peak")} for m in erp_specs]
+                for key, value in erp_measures(
+                    ch_epochs, sfreq, xmin, tuple(baseline), specs
+                ).items():
+                    self._measure_rows.append({
+                        "subject": uid, "group": subject.group, "channel": ch_name,
+                        "measure_name": key, "measure_type": "erp",
+                        "band_lo": np.nan, "band_hi": np.nan,
+                        "time_lo": np.nan, "time_hi": np.nan,
+                        "value": value, "n_epochs": n_epochs,
+                    })
+
             for mdef in measures:
                 mtype = mdef["type"]
                 mname = mdef["name"]
+
+                if mtype == "erp":
+                    continue  # handled above, off the averaged waveform
 
                 if mtype not in measure_maps:
                     logger.warning("Unknown measure type '%s' — skipping", mtype)

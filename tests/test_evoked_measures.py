@@ -303,3 +303,41 @@ def test_all_subjects_failing_raises():
     BaseAnalysis._check_not_all_failed(3, 10)     # partial failure is tolerated
     with pytest.raises(RuntimeError, match="All 10 subjects failed"):
         BaseAnalysis._check_not_all_failed(10, 10)
+
+
+def test_electrode_and_roi_evoked_expose_the_same_measure_types():
+    """The three evoked modules share one config contract.
+
+    electrode_evoked shipped without erp or induced, so a config written for
+    roi_evoked ran on electrodes with two measure types silently warned away —
+    which is exactly the comparison someone reaches for when asking whether
+    localizing bought anything.
+    """
+    import inspect
+    from source_analytics.analyses.electrode_evoked_analysis import ElectrodeEvokedAnalysis
+    from source_analytics.analyses.roi_evoked_analysis import ROIEvokedAnalysis
+
+    elec = inspect.getsource(ElectrodeEvokedAnalysis.process_subject)
+    roi = inspect.getsource(ROIEvokedAnalysis.process_subject)
+    for token in ('measure_maps["induced"]', 'measure_maps["induced_stp"]',
+                  "erp_measures(", 'if mtype == "erp"'):
+        assert token in roi, f"roi_evoked lost {token}"
+        assert token in elec, f"electrode_evoked is missing {token}"
+
+    # The gate lives on the base class, inherited identically by both.
+    assert ElectrodeEvokedAnalysis._needs_induced is ROIEvokedAnalysis._needs_induced
+
+
+def test_evoked_modules_share_one_induced_gate():
+    """All three evoked modules must read a config the same way.
+
+    _needs_induced lived on ROIEvokedAnalysis alone while electrode and vertex
+    silently skipped 'induced' and 'erp' as unknown types, so the same measure
+    block meant different things per module.
+    """
+    from source_analytics.analyses.base import BaseAnalysis
+    from source_analytics.analyses.electrode_evoked_analysis import ElectrodeEvokedAnalysis
+    from source_analytics.analyses.roi_evoked_analysis import ROIEvokedAnalysis
+
+    assert ROIEvokedAnalysis._needs_induced is BaseAnalysis._needs_induced
+    assert ElectrodeEvokedAnalysis._needs_induced is BaseAnalysis._needs_induced
