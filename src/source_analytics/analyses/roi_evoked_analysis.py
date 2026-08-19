@@ -69,6 +69,16 @@ class ROIEvokedAnalysis(BaseAnalysis):
             raise ValueError(f"Evoked config missing required keys: {missing}")
         return evoked
 
+    @staticmethod
+    def _needs_induced(measures: list[dict]) -> bool:
+        """Whether any measure asks for induced power.
+
+        Induced doubles the TFR cost — it is a second full pass over the trials
+        with the phase-locked average removed — so it is computed only on
+        demand rather than alongside evoked power for every run.
+        """
+        return any(m.get("type") in ("induced", "induced_stp") for m in measures)
+
     def setup(self) -> None:
         self._measure_rows.clear()
         self._tfr_rows.clear()

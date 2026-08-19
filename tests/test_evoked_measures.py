@@ -275,3 +275,31 @@ def test_rayleigh_threshold_matches_the_eeglab_formula():
             np.sqrt(-(1.0 / n) * np.log(0.5)))
     # it is a threshold, not a bias correction: it does not vanish for noise
     assert itc_rayleigh_threshold(100) > 0.05
+
+
+def test_needs_induced_gates_on_measure_type():
+    """Induced is a second full TFR pass, so it must run only when asked for.
+
+    The call site shipped without the method (`5c3e884`), which failed every
+    subject of a 26-subject run while the run still exited 0.
+    """
+    from source_analytics.analyses.roi_evoked_analysis import ROIEvokedAnalysis
+
+    needs = ROIEvokedAnalysis._needs_induced
+    assert needs([{"type": "induced", "name": "induced_gamma"}])
+    assert needs([{"type": "induced_stp", "name": "x"}])
+    assert not needs([{"type": "itc", "name": "itc_40hz"}])
+    assert not needs([])
+    # A measure that merely mentions the word is not a request for it.
+    assert not needs([{"type": "ersp", "name": "induced_like"}])
+
+
+def test_all_subjects_failing_raises():
+    """An empty run must not report success."""
+    import pytest
+    from source_analytics.analyses.base import BaseAnalysis
+
+    BaseAnalysis._check_not_all_failed(0, 0)      # nothing to process
+    BaseAnalysis._check_not_all_failed(3, 10)     # partial failure is tolerated
+    with pytest.raises(RuntimeError, match="All 10 subjects failed"):
+        BaseAnalysis._check_not_all_failed(10, 10)
