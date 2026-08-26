@@ -3,7 +3,7 @@
 #
 # Called by Python: Rscript R/roi_evoked_analysis.R --data-dir ... --config ... --output-dir ...
 #
-# Reads evoked_measures.csv (scalar ITC/ERSP/STP values per subject/ROI/measure),
+# Reads roi_evoked_measures.csv (scalar ITC/ERSP/STP values per subject/ROI/measure),
 # runs LMM + emmeans for each measure, generates figures, writes summary.
 
 library(argparse)
@@ -38,7 +38,7 @@ source(file.path(script_dir, "report.R"))
 # --- Argument parsing ---
 parser <- ArgumentParser(description = "Evoked response statistical analysis (R)")
 parser$add_argument("--data-dir", required = TRUE,
-                    help = "Directory containing evoked_measures.csv")
+                    help = "Directory containing roi_evoked_measures.csv")
 parser$add_argument("--config", required = TRUE,
                     help = "Path to study YAML config")
 parser$add_argument("--output-dir", required = TRUE,
@@ -72,8 +72,8 @@ dir.create(tbl_dir, showWarnings = FALSE, recursive = TRUE)
 
 # --- Load data ---
 message("Loading data...")
-measures_df <- read_csv(file.path(data_dir, "evoked_measures.csv"), show_col_types = FALSE)
-message("  evoked_measures.csv: ", nrow(measures_df), " rows")
+measures_df <- read_csv(file.path(data_dir, "roi_evoked_measures.csv"), show_col_types = FALSE)
+message("  roi_evoked_measures.csv: ", nrow(measures_df), " rows")
 
 # Exclude Corpus Callosum ROIs
 cc_rois <- c("Corpus_Callosum_Genu_L", "Corpus_Callosum_Genu_R",
@@ -640,8 +640,8 @@ for (mname in measure_names) {
   message("  Saved: ", basename(fname2))
 }
 
-# TF heatmap if evoked_tfr.csv exists
-tfr_file <- file.path(data_dir, "evoked_tfr.csv")
+# TF heatmap if roi_evoked_tfr.csv exists
+tfr_file <- file.path(data_dir, "roi_evoked_tfr.csv")
 if (file.exists(tfr_file)) {
   message("  Generating TF heatmaps...")
   tfr_df <- read_csv(tfr_file, show_col_types = FALSE)

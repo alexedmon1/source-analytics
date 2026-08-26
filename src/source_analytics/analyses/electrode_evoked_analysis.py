@@ -18,10 +18,14 @@ import yaml
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.electrode_loader import load_eeglab_epochs
+from ..spectral.evoked import erp_measures, subtract_evoked
 from ..spectral.tfr import (
     morlet_tfr_avg_power_itc,
     compute_ersp,
+    debias_itc,
     extract_measure_in_band,
+    extract_measure_in_tiles,
+    resolve_n_cycles,
 )
 from .base import BaseAnalysis, find_r_script_dir
 
@@ -191,13 +195,10 @@ class ElectrodeEvokedAnalysis(BaseAnalysis):
         fmin, fmax = tf_params["freq_range"]
         freqs = np.arange(fmin, fmax + 1, 1.0)
 
-        # Determine n_cycles
-        n_cycles_cfg = tf_params.get("n_cycles", 7)
-        if n_cycles_cfg == "adaptive":
-            n_cycles = freqs / 2.0
-            n_cycles = np.maximum(n_cycles, 3.0)
-        else:
-            n_cycles = float(n_cycles_cfg)
+        # n_cycles: scalar, "adaptive", or [lo, hi] as a linear ramp (see
+        # spectral.tfr.resolve_n_cycles). Shared with roi_evoked so the three
+        # modules cannot drift apart on the config contract.
+        n_cycles = resolve_n_cycles(freqs, tf_params.get("n_cycles", 7))
 
         # Compute xmin from baseline
         xmin = baseline[0]
@@ -234,19 +235,71 @@ class ElectrodeEvokedAnalysis(BaseAnalysis):
 
             measure_maps = {"itc": itc_map, "ersp": ersp_map, "stp": stp_map}
 
+            # ITC is biased upward at low trial counts — pure noise gives about
+            # 1/sqrt(n) — so subjects with different trial counts are not on the
+            # same scale. Offered alongside raw ITC rather than replacing it.
+            if n_epochs >= 2:
+                measure_maps["itc_debiased"] = debias_itc(itc_map, n_epochs)
+
+            # Induced power: the same pipeline on trials with the phase-locked
+            # average removed. Only computed when a measure asks for it, since
+            # it doubles the TFR cost.
+            if self._needs_induced(measures) and n_epochs >= 2:
+                induced_power, _ = morlet_tfr_avg_power_itc(
+                    subtract_evoked(ch_epochs), sfreq, freqs, n_cycles,
+                )
+                measure_maps["induced"] = compute_ersp(
+                    induced_power, sfreq, baseline, xmin=xmin
+                )
+                measure_maps["induced_stp"] = induced_power
+
+            # ERP measures work on the trial-averaged waveform, not on a TF map
+            erp_specs = [m for m in measures if m.get("type") == "erp"]
+            if erp_specs:
+                specs = [{"name": m["name"],
+                          "time_window": tuple(m["time_window"]),
+                          "polarity": m.get("polarity", "abs"),
+                          "type": m.get("erp_type", "peak")} for m in erp_specs]
+                for key, value in erp_measures(
+                    ch_epochs, sfreq, xmin, tuple(baseline), specs
+                ).items():
+                    self._measure_rows.append({
+                        "subject": uid, "group": subject.group, "channel": ch_name,
+                        "measure_name": key, "measure_type": "erp",
+                        "band_lo": np.nan, "band_hi": np.nan,
+                        "time_lo": np.nan, "time_hi": np.nan,
+                        "value": value, "n_epochs": n_epochs,
+                    })
+
             for mdef in measures:
                 mtype = mdef["type"]
                 mname = mdef["name"]
-                band = tuple(mdef["band"])
-                time_window = tuple(mdef["time_window"])
+
+                if mtype == "erp":
+                    continue  # handled above, off the averaged waveform
 
                 if mtype not in measure_maps:
                     logger.warning("Unknown measure type '%s' — skipping", mtype)
                     continue
 
-                value = extract_measure_in_band(
-                    measure_maps[mtype], freqs, sfreq, band, time_window, xmin=xmin
-                )
+                # One rectangle, or a union of tiles for a response that
+                # sweeps in frequency over time (the chirp).
+                tiles = mdef.get("tiles")
+                if tiles:
+                    value = extract_measure_in_tiles(
+                        measure_maps[mtype], freqs, sfreq, tiles, xmin=xmin
+                    )
+                    band = (min(t["band"][0] for t in tiles),
+                            max(t["band"][1] for t in tiles))
+                    time_window = (min(t["time_window"][0] for t in tiles),
+                                   max(t["time_window"][1] for t in tiles))
+                else:
+                    band = tuple(mdef["band"])
+                    time_window = tuple(mdef["time_window"])
+                    value = extract_measure_in_band(
+                        measure_maps[mtype], freqs, sfreq, band, time_window,
+                        xmin=xmin,
+                    )
 
                 self._measure_rows.append({
                     "subject": uid,

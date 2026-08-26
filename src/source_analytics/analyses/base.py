@@ -335,6 +335,37 @@ class BaseAnalysis(ABC):
             except Exception as e:  # noqa: BLE001
                 logger.error("  Failed to merge %s: %s", subject.subject_id, e)
         logger.info("  Merged %d/%d subjects", merged, len(subjects))
+        self._check_not_all_failed(len(subjects) - merged, len(subjects))
+
+    @staticmethod
+    def _needs_induced(measures: list[dict]) -> bool:
+        """Whether any measure asks for induced power.
+
+        Induced doubles the TFR cost — it is a second full pass over the trials
+        with the phase-locked average removed — so it is computed only on
+        demand rather than alongside evoked power for every run.
+
+        Lives on the base class because every evoked module has to answer the
+        question identically; two copies would be two chances to disagree about
+        what a config means.
+        """
+        return any(m.get("type") in ("induced", "induced_stp") for m in measures)
+
+    @staticmethod
+    def _check_not_all_failed(failed: int, total: int) -> None:
+        """Raise when no subject survived processing.
+
+        A per-subject exception is caught and logged so one bad recording does
+        not sink a run. But when *every* subject raises, the cause is the code
+        or the config, not the data — and the run would otherwise aggregate
+        nothing, log a warning, and exit 0, which reads as success. A missing
+        method on the analysis class did exactly that across 26 subjects.
+        """
+        if total and failed == total:
+            raise RuntimeError(
+                f"All {total} subjects failed to process — see the errors above. "
+                "This is a code or configuration fault, not bad data."
+            )
 
     @abstractmethod
     def aggregate(self) -> None:
@@ -553,12 +584,15 @@ class BaseAnalysis(ABC):
                 self._process_subjects_parallel(subjects, n_jobs)
             else:
                 logger.info("Step 2/6: Processing %d subjects", len(subjects))
+                failed = 0
                 for i, subject in enumerate(subjects, 1):
                     logger.info("  [%d/%d] %s (%s)", i, len(subjects), subject.subject_id, subject.group)
                     try:
                         self.process_subject(subject)
                     except Exception as e:
+                        failed += 1
                         logger.error("  Failed to process %s: %s", subject.subject_id, e)
+                self._check_not_all_failed(failed, len(subjects))
         else:
             logger.info("Step 2/6: Processing — skipped")
 
