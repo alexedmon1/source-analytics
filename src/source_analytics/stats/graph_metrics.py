@@ -611,8 +611,20 @@ def nbs_permutation_test(
         for size in observed_components
     ]
 
-    # Build significant edge mask
+    # Build significant edge mask.
+    #
+    # A component IS a connected component of the suprathreshold graph, and the
+    # components partition the nodes, so a component's edges are exactly the
+    # suprathreshold edges whose endpoints are both in its node set. Without
+    # this loop the mask was allocated and returned unfilled — always all-False,
+    # even for a 99-edge component at p = 0.0.
     sig_edges = np.zeros((n, n), dtype=bool)
+    for pval, nodes in zip(component_pvalues, observed_nodes):
+        if pval < 0.05 and len(nodes) >= 2:
+            idx = np.asarray(nodes, dtype=int)
+            within = np.zeros((n, n), dtype=bool)
+            within[np.ix_(idx, idx)] = True
+            sig_edges |= suprathresh & within
     n_sig = sum(1 for p in component_pvalues if p < 0.05)
 
     logger.info("NBS: %d/%d components significant (p<0.05)", n_sig, len(observed_components))
