@@ -363,10 +363,22 @@ def write_module_hypotheses_tabular(
             if fam_rows:
                 method, scope = _resolve_fdr(hyp, spec)
                 facet_map = dict(zip(facet_cols, fkey))
+                # The facet combination is what makes this family distinct from
+                # the next, so it is the `dv` coordinate of the label: it plays
+                # exactly the role R's `dv_col` plays, where each DV gets its own
+                # run_hypothesis() call and so its own family. Without it, two
+                # facets over the same band x spatial grid produce BYTE-IDENTICAL
+                # labels for genuinely different families -- the member hash
+                # cannot separate them, because the member cells really are the
+                # same. Label-only: q-values are corrected per facet either way.
                 _apply_fdr(
                     fam_rows, method, scope,
                     hypothesis=hyp.name,
-                    dv=str(facet_map.get("dv", "NA")),
+                    dv=(
+                        "|".join(f"{c}={facet_map[c]}" for c in facet_cols)
+                        if facet_cols
+                        else str(facet_map.get("dv", "NA"))
+                    ),
                     spatial_name=spatial_col or "spatial",
                 )
                 all_rows.extend(fam_rows)

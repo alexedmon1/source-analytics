@@ -22,6 +22,7 @@ from ..spectral.tfr import (
     resolve_n_cycles,
     extract_measure_in_tiles,
 )
+from ._evoked_hypotheses import write_evoked_hypotheses
 from .base import BaseAnalysis, find_r_script_dir
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,8 @@ class ROIEvokedAnalysis(BaseAnalysis):
     """
 
     name = "roi_evoked"
+
+    SELECTABLE = {"hypothesis": "declared hypothesis"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -255,8 +258,16 @@ class ROIEvokedAnalysis(BaseAnalysis):
             logger.info("Exported roi_evoked_tfr.csv (%d rows)", len(tfr_df))
 
     def statistics(self) -> None:
-        """Delegated to R."""
-        pass
+        """Declared hypotheses over the ROI measure table (additive).
+
+        Delegates to the shared evoked wiring — see
+        :mod:`._evoked_hypotheses` for why the measure is the facet and the
+        band coordinate is null. The descriptive ``group * roi`` LMM in
+        ``roi_evoked_analysis.R`` is unaffected and still runs.
+        """
+        write_evoked_hypotheses(
+            self, spatial_col="roi", measures_csv="roi_evoked_measures.csv"
+        )
 
     def figures(self) -> None:
         """Regenerate R figures from existing data/tables."""
