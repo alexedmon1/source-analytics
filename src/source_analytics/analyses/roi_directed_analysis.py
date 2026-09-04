@@ -41,15 +41,17 @@ def _find_r_script_dir() -> Path:
 
 
 class ROIDirectedAnalysis(BaseAnalysis):
-    """ROI-level directed connectivity (transfer entropy; DTF planned).
+    """ROI-level directed connectivity (transfer entropy + DTF).
 
     Uses **signed** (phase-preserving) ROI timeseries to compute binned
     transfer entropy for all n*(n-1) directed ROI pairs (40 brain ROIs →
     1,560 directed pairs; 6 corpus callosum white matter tracts excluded).
 
-    Python computes directed matrices and exports directed edge-level CSV.
-    R (lme4, ggplot2) handles global t-tests, directional paired t-tests,
-    region-pair LMM, and summary report.
+    Python computes directed matrices and exports a directed edge-level CSV
+    (``roi_transfer_entropy_edges.csv``, one column per measure). R runs the
+    declared hypotheses over every directed DV present (``te``, ``net_te``,
+    ``dtf``) at the global, directed-edge and region-pair tiers, writing
+    ``roi_directed_*_hypotheses.csv`` tables and the summary report.
 
     ``--metric`` selects which directed measure(s) to compute:
     ``te`` (transfer entropy, which also yields ``net_te``) and/or ``dtf``
@@ -184,17 +186,11 @@ class ROIDirectedAnalysis(BaseAnalysis):
     def summary(self) -> None:
         """Call Rscript for statistics and summary report.
 
-        The R stats currently cover transfer entropy; a DTF-only run skips R
-        (the ``dtf`` column is still exported in the edge CSV for downstream use).
+        The R script tests whichever directed DV columns the edge CSV carries
+        (``te``/``net_te`` and/or ``dtf``), so a ``--metric dtf`` run gets the
+        same hypothesis tables as a TE run.
         """
         data_dir = self.output_dir / "data"
-
-        if "te" not in self._metrics:
-            logger.info(
-                "roi_directed: metrics=%s — DTF has no R stats yet; edge CSV written, "
-                "skipping R.", self._metrics,
-            )
-            return
 
         if not (data_dir / "roi_transfer_entropy_edges.csv").exists():
             logger.error("roi_transfer_entropy_edges.csv not found -- skipping R analysis")
@@ -238,13 +234,14 @@ class ROIDirectedAnalysis(BaseAnalysis):
         if wanted_hyp:
             cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
 
+        r_timeout = 3600
         logger.info("Calling R: %s", " ".join(cmd))
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=3600,
+                timeout=r_timeout,
             )
             if result.stdout:
                 for line in result.stdout.strip().split("\n"):
@@ -260,4 +257,4 @@ class ROIDirectedAnalysis(BaseAnalysis):
                 "Rscript not found. Install R to enable statistics and visualization."
             )
         except subprocess.TimeoutExpired:
-            logger.error("R script timed out after 600 seconds")
+            logger.error("R script timed out after %d seconds", r_timeout)

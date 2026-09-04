@@ -15,7 +15,6 @@ that runs both, with the original output filenames.
 from __future__ import annotations
 
 import logging
-import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -27,7 +26,6 @@ from ..io.discovery import SubjectInfo
 from ..stats.graph_metrics import compute_graph_metrics
 from ..viz.constants import CC_ROIS, METRIC_LABELS
 from ._network_base import NetworkAnalysisBase
-from .base import find_r_script_dir
 
 logger = logging.getLogger(__name__)
 
@@ -496,21 +494,10 @@ class ROINetworkAnalysis(_ROINetworkBase):
         self._graph_figures()
 
     def summary(self) -> None:
-        # Keep the richer R report when available; else the python summary.
+        # The combined alias has no R report of its own (graph + NBS statistics
+        # run in Python via the hypothesis layer); write the Python summary.
         data_dir = self.output_dir / "data"
         config_path = data_dir / "study_config.yaml"
         with open(config_path, "w") as f:
             yaml.dump(dict(self.config.raw), f, default_flow_style=False)
-        try:
-            r_script = find_r_script_dir() / "roi_network_analysis.R"
-            if r_script.exists():
-                cmd = ["Rscript", str(r_script), "--data-dir", str(data_dir),
-                       "--config", str(config_path), "--output-dir", str(self.output_dir),
-                       "--fig-dir", str(self.fig_dir), "--tbl-dir", str(self.tbl_dir)]
-                cmd.extend(self._r_no_figures_flags())
-                cmd.extend(self._r_roi_categories_flags())
-                if subprocess.run(cmd, capture_output=True, text=True, timeout=3600).returncode == 0:
-                    return
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
         self._write_summary(graph=True, nbs=True)

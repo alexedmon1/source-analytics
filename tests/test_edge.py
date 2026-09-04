@@ -140,3 +140,52 @@ def test_nbs_permutation_test_exposes_component_nodes():
     # node membership is aligned 1:1 with component sizes/pvalues
     assert len(res.component_nodes) == len(res.component_sizes)
     assert all(isinstance(nodes, list) and len(nodes) >= 2 for nodes in res.component_nodes)
+
+
+def test_nbs_significant_edges_mask_is_populated():
+    """A significant component must be reflected in ``significant_edges``.
+
+    Regression: the mask was allocated under a "Build significant edge mask"
+    comment and then never filled, so ``nbs_permutation_test`` returned an
+    all-False mask even for a large component at p = 0.0. Nothing in the shipped
+    pipeline reads the field (``_network_base`` uses ``component_nodes`` /
+    ``component_sizes``), so it was dormant — but it is a public field of the
+    returned dataclass and any new consumer silently gets "no edges".
+
+    The mask must equal the suprathreshold edges of the significant components:
+    components partition the nodes, so a component's edges are the
+    suprathreshold edges with both endpoints in its node set.
+    """
+    import numpy as np
+
+    from source_analytics.stats.graph_metrics import nbs_permutation_test
+
+    rng = np.random.default_rng(4)
+    n, n_sub = 10, 16
+
+    def net(shift):
+        m = np.abs(rng.normal(0.5, 0.1, size=(n, n)))
+        m = (m + m.T) / 2
+        # a dense block of genuinely different edges between groups
+        m[:5, :5] += shift
+        m = (m + m.T) / 2
+        np.fill_diagonal(m, 0.0)
+        return m
+
+    A = [net(0.6) for _ in range(n_sub)]
+    B = [net(0.0) for _ in range(n_sub)]
+    res = nbs_permutation_test(A, B, nbs_threshold=2.0, n_permutations=500, seed=7)
+
+    assert res.n_significant_components > 0, "fixture produced no component"
+    mask = np.triu(res.significant_edges, 1)
+    assert mask.sum() > 0, "significant component but an empty edge mask"
+
+    # the mask must be a subset of the suprathreshold edges, and must exactly
+    # account for the significant components' sizes
+    supra = np.triu(np.abs(res.t_matrix) > 2.0, 1)
+    assert not (mask & ~supra).any(), "mask contains sub-threshold edges"
+    expected = sum(sz for sz, p in zip(res.component_sizes, res.component_pvalues)
+                   if p < 0.05)
+    assert int(mask.sum()) == expected, (
+        f"mask has {int(mask.sum())} edges, significant components total {expected}"
+    )

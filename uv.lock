@@ -2042,6 +2042,8 @@ version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "joblib" },
+    { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "matplotlib", version = "3.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -2095,6 +2097,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'" },
     { name = "joblib", specifier = ">=1.3" },
     { name = "markdown", marker = "extra == 'render'", specifier = ">=3.4" },
+    { name = "matplotlib", specifier = ">=3.7" },
     { name = "mne", marker = "extra == 'mne'", specifier = ">=1.5" },
     { name = "networkx", marker = "extra == 'network'", specifier = ">=3.0" },
     { name = "nibabel", marker = "extra == 'atlas'", specifier = ">=5.0" },

@@ -10,8 +10,10 @@ Home for cross-frequency coupling measures, selectable via ``--metric``:
 
 All three share the signed (phase-preserving) ROI front-end and the same valid
 cross-frequency band pairs (``get_valid_pac_pairs``). PAC keeps its R statistics
-+ brain mosaics; AAC/PPC emit edge CSVs (group statistics ride the connectivity
-/ gating R path).
++ brain mosaics (``roi_pac_analysis.R``); AAC/PPC emit ROI×ROI edge CSVs whose
+declared hypotheses are tested by ``roi_cross_freq_edges_analysis.R`` at the
+global, cell and directed-region-pair tiers
+(``roi_cross_freq_{aac,ppc}_*_hypotheses.csv``).
 """
 
 from __future__ import annotations
@@ -230,39 +232,67 @@ class ROICrossFreqAnalysis(BaseAnalysis):
                 logger.info("Exported %s_edges.csv (%d rows)", metric, len(df))
 
     def statistics(self) -> None:
-        """Delegated to R (PAC) / gating engine (AAC, PPC)."""
+        """Delegated to R: PAC via ``roi_pac_analysis.R``, AAC/PPC via
+        ``roi_cross_freq_edges_analysis.R`` (both run from :meth:`summary`)."""
         pass
 
+    def _edge_metrics_on_disk(self) -> list[str]:
+        """The AAC/PPC metrics selected for this run whose edge CSV exists."""
+        data_dir = self.output_dir / "data"
+        return [
+            m for m in ("aac", "ppc")
+            if m in self._metrics and (data_dir / f"{m}_edges.csv").exists()
+        ]
+
     def figures(self) -> None:
-        """Regenerate PAC R figures from existing data/tables."""
+        """Regenerate the R figures from existing data/tables."""
         if "pac" in self._metrics:
             self._call_r_figures_only("roi_pac_analysis.R", "pac_values.csv")
+        for m in self._edge_metrics_on_disk():
+            self._call_r_figures_only("roi_cross_freq_edges_analysis.R", f"{m}_edges.csv")
+            break  # one call handles every edge CSV present
 
     # -------------------------------------------------------------- summary
     def summary(self) -> None:
-        """PAC statistics + figures via R; AAC/PPC emit matrices only (for now)."""
+        """Statistics + figures + report via R (PAC first, then AAC/PPC)."""
         if "pac" in self._metrics:
             self._run_pac_r()
-        if self._aac_rows or self._ppc_rows:
-            logger.info(
-                "AAC/PPC edge CSVs written; group statistics run via the "
-                "connectivity/gating R path (no dedicated R script yet)."
-            )
+        edge_metrics = self._edge_metrics_on_disk()
+        if edge_metrics:
+            self._run_edges_r(edge_metrics)
+
+    def _run_edges_r(self, metrics: list[str]) -> None:
+        """AAC/PPC hypotheses (global / cells / region pairs) via R."""
+        self._run_r_script(
+            "roi_cross_freq_edges_analysis.R",
+            extra_args=["--metric", ",".join(metrics)],
+            label="AAC/PPC",
+        )
 
     def _run_pac_r(self) -> None:
         data_dir = self.output_dir / "data"
         if not (data_dir / "pac_values.csv").exists():
             logger.error("pac_values.csv not found -- skipping PAC R analysis")
             return
+        if self._run_r_script("roi_pac_analysis.R", label="PAC") and self._generate_figures:
+            self._render_brain_mosaics()
+
+    def _run_r_script(self, script_name: str, *, extra_args: list[str] | None = None,
+                      label: str = "R", timeout: int = 3600) -> bool:
+        """Run one of this module's R scripts with the standard argument set.
+
+        Returns True when the script exited 0.
+        """
+        data_dir = self.output_dir / "data"
         try:
             r_dir = _find_r_script_dir()
         except FileNotFoundError as e:
             logger.error(str(e))
-            return
-        r_script = r_dir / "roi_pac_analysis.R"
+            return False
+        r_script = r_dir / script_name
         if not r_script.exists():
             logger.error("R script not found: %s", r_script)
-            return
+            return False
 
         config_path = data_dir / "study_config.yaml"
         config_data = dict(self.config.raw)
@@ -287,25 +317,26 @@ class ROICrossFreqAnalysis(BaseAnalysis):
         wanted_hyp = self._selection.get("hypothesis")
         if wanted_hyp:
             cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
+        if extra_args:
+            cmd.extend(extra_args)
 
-        logger.info("Calling R: %s", " ".join(cmd))
+        logger.info("Calling R (%s): %s", label, " ".join(cmd))
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
             for stream in (result.stdout, result.stderr):
                 if stream:
                     for line in stream.strip().split("\n"):
                         if line.strip():
                             logger.info("[R] %s", line)
             if result.returncode != 0:
-                logger.error("R script failed with exit code %d", result.returncode)
+                logger.error("%s R script failed with exit code %d", label, result.returncode)
+                return False
+            return True
         except FileNotFoundError:
-            logger.error("Rscript not found. Install R to enable PAC statistics.")
+            logger.error("Rscript not found. Install R to enable %s statistics.", label)
         except subprocess.TimeoutExpired:
-            logger.error("PAC R script timed out")
-            return
-
-        if self._generate_figures:
-            self._render_brain_mosaics()
+            logger.error("%s R script timed out after %d seconds", label, timeout)
+        return False
 
     def _render_brain_mosaics(self) -> None:
         """Render brain ROI mosaics from PAC region-level posthoc CSVs."""

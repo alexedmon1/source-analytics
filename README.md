@@ -55,24 +55,35 @@ You have run `source-localization` and have a derivatives tree of per-subject
 reconstructions. Three commands take you from there to results:
 
 ```bash
-# 1. Scaffold a study config from the reconstruction directory.
-#    (--groups-from reuses the group mapping from the source-localization config.)
+# 1. Scaffold a study config from the reconstruction directory. It is WRITTEN to
+#    <dir>/analysis/<name>.yaml (status goes to stderr); pass `--output -` to
+#    print the YAML to stdout instead. --groups-from reuses the subject→group
+#    mapping from the source-localization config.
 source-analytics init /path/to/localization/rest_roi \
-    --name "My Study" \
-    --groups-from /path/to/localization/study_config.yaml  > study.yaml
+    --name study \
+    --groups-from /path/to/localization/study_config.yaml
+#   -> /path/to/localization/rest_roi/analysis/study.yaml
 
-# 2. Edit study.yaml — declare groups, bands, the design/hypotheses, and which
-#    analyses to run under each paradigm (see "Study configuration").
+# 2. Edit that file — it already has groups, `design:`/`hypotheses:` (an omnibus
+#    plus every pairwise contrast), the canonical bands, and one `paradigms:`
+#    block (`resting`, with roi_psd / roi_aperiodic / roi_connectivity). Add
+#    paradigms and analyses as needed (see "Study configuration").
 
 # 3. Sanity-check config + subject discovery before any long run.
-source-analytics validate --study study.yaml
+source-analytics validate --study rest_roi/analysis/study.yaml
 
 # 4. Run an analysis. --paradigm picks the block under `paradigms:` in the config.
-source-analytics run --study study.yaml --paradigm resting --analysis roi_psd
+source-analytics run --study rest_roi/analysis/study.yaml --paradigm resting --analysis roi_psd
 ```
 
-Each analysis writes a self-contained output directory with a `data/`, `tables/`,
-`figures/`, and an `ANALYSIS_SUMMARY.md` (see [Output structure](#output-structure)).
+`init` discovers subjects in either layout the toolkit reads: BIDS-style
+`derivatives/sub-*/` (groups come from `--groups-from`, otherwise `UNKNOWN` until
+you edit them) or `derivatives/<Group>/<Subject>/` (the folder name is the group).
+
+Each run writes per-subject data + `ANALYSIS_SUMMARY.md` under `paths.analytics`
+and the published `tables/` + `figures/` under `paths.results` (see
+[Output structure](#output-structure)). **Figures are not produced by a default
+run** — add `--steps …,figures` or use `source-analytics figure`.
 `source-analytics list` shows every analysis you can run.
 
 ---
@@ -82,11 +93,25 @@ Each analysis writes a self-contained output directory with a `data/`, `tables/`
 ### Python (3.10+)
 
 ```bash
-pip install -e .          # or:  uv pip install -e .
+pip install -e ".[all]"   # or:  uv pip install -e ".[all]"
 ```
 
-Core dependencies: numpy, scipy, pandas, pyyaml, scikit-learn, networkx,
-matplotlib, mne.
+Core dependencies (always installed): numpy, scipy, pandas, pyyaml, specparam,
+joblib, matplotlib. The rest are **extras** — the package imports and the CLI
+works without them, and a module that needs one fails with an ImportError naming
+the extra to install:
+
+| Extra | Pulls in | Needed by |
+|---|---|---|
+| `mne` | mne | `roi_evoked`, `vertex_evoked`, `electrode_evoked` (Morlet TFR) |
+| `mvpa` | scikit-learn | `vertex_signature`, `electrode_signature` |
+| `network` | networkx | `roi_graph`, `vertex_graph`, `*_nbs`, `*_network` |
+| `atlas` | nibabel | atlas readers |
+| `all` | all of the above + dev tools | a full study |
+
+Wheels/sdists ship the R scripts under `<prefix>/share/source-analytics/R`; an
+editable checkout uses `R/` beside `src/`. `SOURCE_ANALYTICS_R_DIR` overrides
+the lookup.
 
 > **uv users:** run the CLI with `uv run --no-sync source-analytics …`. Plain
 > `uv run` can trip on the lockfile; `--no-sync` avoids the re-resolve.
@@ -111,8 +136,10 @@ uv pip install --python .venv --no-deps "source-analytics @ git+https://github.c
 
 ⚠ **`v0.4.0` is a scientific pin, not merely an old version.** It hardcodes
 `freq_range=(2, 50)` for aperiodic fitting; later releases resolve the window
-dynamically and adopt 14–45 Hz, which changes every aperiodic number. Do not
-"upgrade" it to reproduce work that cites it.
+dynamically and default to **12–45 Hz** (`spectral.aperiodic.DEFAULT_FREQ_RANGE`;
+see [`docs/methods/APERIODIC_FIT_WINDOW.md`](docs/methods/APERIODIC_FIT_WINDOW.md)),
+which changes every aperiodic number. Do not "upgrade" it to reproduce work that
+cites it.
 
 ### R
 
@@ -120,11 +147,15 @@ Statistics and most figures are R. Install once:
 
 ```r
 install.packages(c(
-  "ggplot2", "dplyr", "tidyr", "readr", "stringr", "forcats",
+  "ggplot2", "dplyr", "tidyr", "readr", "forcats", "ggsignif",
   "lme4", "lmerTest", "effectsize", "emmeans",
-  "yaml", "argparse", "patchwork", "scales"
+  "yaml", "argparse", "optparse", "patchwork", "scales"
 ))
 ```
+
+(`ggsignif` draws the significance brackets in the PSD/aperiodic/evoked figures;
+`optparse` is used by the vertex report scripts, `argparse` by the ROI/electrode
+scripts.)
 
 ---
 
@@ -201,11 +232,12 @@ What it looks for depends on the level:
 | `roi_timeseries_magnitude.set` | EEGLAB | same data + metadata (sfreq) |
 
 **Vertex-level** (`vertex_cluster`, `vertex_connectivity`, `vertex_cross_freq`,
-`vertex_directed`, `vertex_specparam`, `vertex_mvpa`, `vertex_evoked`):
+`vertex_directed`, `vertex_specparam`, `vertex_signature`, `vertex_evoked`):
 
 | File | Format | Contents |
 |------|--------|----------|
-| `step5_stc_signed.pkl` | pickle | MNE `SourceEstimate` `(n_vertices, n_times)`, signed (falls back to `step5_stc_magnitude.pkl`, legacy `step5_stc.pkl`) |
+| `step5_stc_signed.pkl` | pickle | MNE `SourceEstimate` `(n_vertices, n_times)`, signed. **No fallback**: phase-based modules refuse to read a magnitude file as signed |
+| `step5_stc_magnitude.pkl` | pickle | rectified variant; only `magnitude=True` readers use it, and only they fall back to the legacy unsuffixed `step5_stc.pkl` (which is magnitude-only) |
 | `step3_source_coords_mm.npy` | NumPy | source coordinates `(n_vertices, 3)` in mm |
 
 **Electrode-level** (`electrode_psd`, `electrode_aperiodic`,
@@ -218,14 +250,27 @@ What it looks for depends on the level:
 These need a `subject_roster.csv` (`subject_id, group, eeg_filename, eeg_dir`) set
 via `electrode.subject_roster` in the config.
 
-Expected discovery layout (group folders → subject folders → `data/`):
+Two discovery layouts are supported. **Grouped** (the folder name is the group):
 
 ```
 data_dir/
-  Group_A/Subject_001/data/…
-  Group_A/Subject_002/data/…
-  Group_B/Subject_003/data/…
+  Group_A/Subject_001/<data_subdir>/…
+  Group_A/Subject_002/<data_subdir>/…
+  Group_B/Subject_003/<data_subdir>/…
 ```
+
+**Flat** (BIDS-style `sub-*`, what source-localization writes; groups come from a
+`subjects:` map on the paradigm — `init` fills it from `--groups-from`):
+
+```
+data_dir/
+  sub-001/<data_subdir>/…
+  sub-002/<data_subdir>/…
+```
+
+`data_subdir` defaults to `pipeline/data`. Only subjects whose group is
+referenced by a declared hypothesis/contrast are analysed
+(`StudyConfig.referenced_groups()`); a group nobody tests is silently skipped.
 
 ---
 
@@ -272,8 +317,13 @@ bands:                               # name → [fmin, fmax] Hz
   High Gamma: [65, 80]
 
 circos_metrics: [imag_coherence, dwpli, pli, aec, coherence]   # gallery circos chords
+                                     # (read by source-lightbox only; source-analytics
+                                     #  passes it through untouched)
+
+jobs: -1                             # default worker count for --jobs (-1/0 = all but one core)
 
 # ── Random epoch sampling (global default; per-analysis override below) ──
+# Code defaults when the block is absent: enabled: false, n_bootstrap: 1.
 epoch_sampling:
   enabled: true
   epoch_duration_sec: 2.0
@@ -294,13 +344,17 @@ paradigms:
       roi_psd: {}
       roi_aperiodic: {}
       roi_connectivity:
+        metrics: [imag_coherence, dwpli, pli, aec, coherence]   # subset of the ROI metric set
         epoch_sampling: {n_bootstrap: 0}               # per-analysis override
       roi_graph:        {connectivity_metrics: [imag_coherence, dwpli, pli, aec, coherence]}
       roi_nbs:          {nbs_threshold: 2.5, nbs_permutations: 5000}
       roi_cross_freq: {}
       roi_directed: {}
       electrode_psd: {}
-      electrode_comparison: {}
+      electrode_comparison: {}                         # needs electrode_psd AND roi_psd
+      electrode_connectivity: {}
+      fcd_comparison: {}                               # needs electrode_connectivity (here)
+                                                       # AND vertex_connectivity (vertex paradigm)
 
   vertex:
     data_dir:    ./localization/rest_shell/derivatives
@@ -324,7 +378,9 @@ paradigms:
 | `hypotheses[]` `{name, kind, weights/groups/predictor}` | hypothesis layer | the declarative tests, run by name via `--hypothesis` |
 | `hypotheses[]` `{label, role}` | figures, gallery | readable labels + grouping tag (no gating) |
 | `bands` | all spectral/connectivity | frequency bands analysed |
-| `epoch_sampling` | spectral/connectivity | random-epoch resampling (`n_bootstrap: 0` = full timeseries) |
+| `epoch_sampling` | spectral/connectivity, all levels | random-epoch resampling (`n_bootstrap: 0` = full timeseries). Precedence: global → `vertex.epoch_sampling` → per-analysis block |
+| `jobs` | `run --jobs` default | worker count when `--jobs` is not given |
+| `<profile>.{include_analyses, include_hypotheses, bands, rois}` | `run --profile` | a narrowed study written to its own tree (see below) |
 | `paths.{analytics, results}` | I/O + gallery | working vs published output trees |
 | `paradigms.<p>.data_dir` / `data_subdir` | discovery | where subject reconstructions live |
 | `paradigms.<p>.analyses.<a>` | that analysis | enables it + sets its parameters |
@@ -364,24 +420,38 @@ source-analytics run --study study.yaml --paradigm resting --analysis roi_psd [o
 | Flag | Meaning |
 |---|---|
 | `--study PATH` | study YAML (required) |
-| `--paradigm NAME` | paradigm block under `paradigms:` (required for multi-paradigm configs) |
-| `--analysis NAME` | analysis to run (see [catalog](#analysis-catalog--what-exists)) |
+| `--paradigm NAME` | paradigm block under `paradigms:`. Omit it (and `--analysis`) on a multi-paradigm config to run **every** listed analysis of every paradigm; `--analysis` without `--paradigm` is an error |
+| `--analysis NAME` | analysis to run (see [catalog](#analysis-catalog--what-exists)). Omit it with `--paradigm` to run everything listed for that paradigm |
 | `--steps a,b,…` | lifecycle steps to run. Valid: `setup, process, aggregate, statistics, figures, summary` |
+| `--jobs N`, `-j N` | worker processes for the per-subject `process` step. `0`/`-1` = all but one core. Explicit `N` wins over the YAML `jobs:`; omitted = YAML value, else serial. Used by the vertex modules, `roi_connectivity`, `electrode_connectivity`; results are identical to serial |
+| `--profile NAME` | run under the top-level `<NAME>:` profile block (narrowed bands / ROIs / hypotheses / analyses) and write to a separate tree, `analytics/<NAME>/…` + `results/<NAME>/…`. Narrowing ROIs changes the FDR family, so profile q-values are not comparable to the default run's |
 | `--metric m,…` | restrict a module's metrics (shorthand for `--select metric=…`) |
 | `--band b,…` | restrict bands, case/format-insensitive (shorthand for `--select band=…`) |
 | `--hypothesis n,…` | test only these declared hypotheses (shorthand for `--select hypothesis=…`) |
 | `--select DIM=v,…` | generic sub-output selection, repeatable (see `list` for a module's dims) |
-| `--force` | overwrite the output directory if it exists |
-| `--strict-output` | error if the output directory exists (unless `--force`) |
+| `--force` | remove the analysis's previous output first: its published `tables/` + `figures/` always, and its working dir (`data/` + summary) when the `process` step runs. Also overrides `--strict-output` |
+| `--strict-output` | error if the working dir already holds output (unless `--force`) |
 
-**Lifecycle steps.** A run is `setup → process → aggregate → statistics → figures →
-summary`. `--steps` re-runs a subset against existing on-disk data — e.g. recompute
-only the statistics and report after a config change, without reprocessing subjects:
+**Lifecycle steps.** The full lifecycle is `setup → process → aggregate →
+statistics → figures → summary`. **A default `run` executes everything except
+`figures`** (`DEFAULT_RUN_STEPS` in `analyses/base.py`), so tables and the summary
+appear but no images do. Render figures with an explicit step list, or with
+`source-analytics figure` for the on-demand summary figures:
 
 ```bash
+# full run including figures
 source-analytics run --study study.yaml --paradigm resting --analysis roi_psd \
-    --steps statistics,summary,figures
+    --steps setup,process,aggregate,statistics,figures,summary
+# recompute only statistics + figures + report from persisted data/ (no reprocessing)
+source-analytics run --study study.yaml --paradigm resting --analysis roi_psd \
+    --steps statistics,figures,summary
 ```
+
+`--steps` re-runs a subset against the on-disk `data/` of an earlier run; the
+`figures` step clears the module's figure dir before regenerating so stale images
+never linger. Deprecated analysis names (`psd`, `pac`, `vertex_mvpa`, …) still
+resolve, and their output always lands under the **canonical** name (`roi_psd/`,
+`roi_cross_freq/`, `vertex_signature/`).
 
 ### `validate`, `list`, `figure`, `init`
 
@@ -391,8 +461,13 @@ source-analytics list [--study study.yaml]          # paradigm-aware when --stud
 source-analytics figure --study study.yaml --paradigm resting --analysis roi_psd --list
 source-analytics figure --study study.yaml --paradigm resting --analysis roi_psd \
     --type effect_heatmap [--contrast disease_effect --band low_gamma]
-source-analytics init /path/to/reconstruction_dir --name "Study" --groups-from sl_config.yaml
+source-analytics init /path/to/reconstruction_dir --name study --groups-from sl_config.yaml \
+    [--paradigm resting] [--analyses roi_psd,roi_aperiodic] [--output PATH | -]
 ```
+
+`init` writes `<reconstruction_dir>/analysis/<name>.yaml` (or stdout with
+`--output -`) and parses it back to prove the scaffold loads. `list` groups the
+catalog by paradigm category and level, tagging each module's `--select` dims.
 
 ---
 
@@ -408,17 +483,17 @@ directed families is tracked, equation-checked, in
 
 | Analysis | Level | Computes | Reference |
 |---|---|---|---|
-| `roi_psd`, `electrode_psd` | ROI, elec | band power (Welch PSD: absolute/relative/dB) | Welch 1967 |
-| `roi_aperiodic`, `electrode_aperiodic`, `vertex_specparam` | ROI, elec, vtx | 1/f aperiodic (offset, exponent) + oscillatory peaks | Donoghue 2020 (specparam) |
-| `vertex_cluster` | vtx | per-vertex band power / fALFF / slope / peak-α, cluster-corrected maps | Maris & Oostenveld 2007 |
-| `vertex_mvpa` | vtx | whole-brain pattern decoding (linear SVM, LOOCV, permutation) | — (linear SVM) |
+| `roi_psd`, `electrode_psd` | ROI, elec | band power (Welch PSD). CSV columns: `absolute` = mean power density in dB/Hz, `relative` = fraction of total; optional `delta_ref` under a profile. There is no separate `dB` column | Welch 1967 |
+| `roi_aperiodic`, `electrode_aperiodic`, `vertex_specparam` | ROI, elec, vtx | 1/f aperiodic (offset, exponent) + oscillatory peaks; default fit window **12–45 Hz** | Donoghue 2020 (specparam) |
+| `vertex_cluster` | vtx | per-vertex band power (same dB/Hz `absolute` as `roi_psd`) / fALFF / slope / peak-α, cluster-corrected maps; honours `epoch_sampling` | Maris & Oostenveld 2007 |
+| `vertex_signature` (alias `vertex_mvpa`) | vtx | whole-brain neural signature: multi-model decoding (PCA-reduced, back-projected), permutation p | — |
 | `vertex_spatial` *(RETIRED)* | vtx | was: spatial-covariance GLS robustness check | — |
 
 > `vertex_spatial` is **retired** (it produced a spatial-covariance robustness
 > table, never a manuscript result, and did not survive the design-spec migration).
 > Spatially-resolved vertex inference is `vertex_cluster` (glass-brain clusters) +
-> `vertex_nbs` (network-based statistic). The module exits cleanly with empty
-> frames + a note.
+> `vertex_nbs` (network-based statistic). The module processes no subjects and
+> calls no R: it writes empty result tables + a retirement note and exits.
 
 ### Connectivity (same-frequency functional connectivity)
 
@@ -430,41 +505,54 @@ directed families is tracked, equation-checked, in
 | `electrode_connectivity` | elec | FC-six all-pairs + per-channel FCD — the **source-vs-sensor comparator** | as above |
 
 > `roi_network` / `vertex_network` are **combined aliases** that run graph + NBS
-> together; the split modules (`*_graph`, `*_nbs`) are preferred for the gallery.
-> `dpli` is directed and is auto-excluded from the undirected graph/NBS layer.
+> together and write a Python summary (there is no R report for them); the split
+> modules (`*_graph`, `*_nbs`) are preferred for the gallery. `dpli` is directed
+> and is auto-excluded from the undirected graph/NBS layer. `roi_connectivity`
+> takes an optional `metrics:` list in its config block (like
+> `vertex_connectivity`); the R report adapts to whichever metric columns the
+> edge CSV carries, so `--metric aec` alone is fine.
 
 ### Cross-frequency
 
 | Analysis | Level | Computes | Reference |
 |---|---|---|---|
-| `roi_cross_freq`, `vertex_cross_freq` | ROI, vtx | PAC (Modulation Index, surrogate-z); cross-frequency AAC; n:m PPC | Tort 2010; Bruns 2000 / Masimore 2004; Tass 1998 / Palva 2005 |
+| `roi_cross_freq`, `vertex_cross_freq` | ROI, vtx | PAC (Modulation Index, surrogate-z); cross-frequency AAC; n:m PPC. ROI: PAC hypotheses via `roi_pac_analysis.R`; AAC/PPC via `roi_cross_freq_edges_analysis.R`, three tiers each: `roi_cross_freq_{aac,ppc}_{global,directed_edges,region}_hypotheses.csv` (PPC has DVs `ppc` + `ppc_z`) | Tort 2010; Bruns 2000 / Masimore 2004; Tass 1998 / Palva 2005 |
 
 ### Directed
 
 | Analysis | Level | Computes | Reference |
 |---|---|---|---|
-| `roi_directed` | ROI | transfer entropy (`te`, `net_te`); DTF (`dtf`, ridge-MVAR) | Schreiber 2000; Kamiński & Blinowska 1991 |
-| `vertex_directed` | vtx | DTF outflow / inflow / netflow (ridge-MVAR), cluster-corrected | Kamiński & Blinowska 1991 |
+| `roi_directed` | ROI | transfer entropy (`te`, `net_te`); DTF (`dtf`, ridge-MVAR). `--metric te,dtf`; hypothesis tables `roi_directed_{global,directed_edges,region}_hypotheses.csv` carry a `dv` column covering every exported DV (`te`, `net_te`, `dtf`) | Schreiber 2000; Kamiński & Blinowska 1991 |
+| `vertex_directed` | vtx | DTF outflow / inflow / netflow (ridge-MVAR), cluster-corrected. Filter with `--select measure=outflow,…` (not `--metric`) | Kamiński & Blinowska 1991 |
 
 > Source ROIs/vertices are strongly collinear (mean inter-node |corr| ≈ 0.64), so
 > DTF uses a **ridge-regularized** MVAR — plain LS-MVAR is non-stationary; the
 > module warns if a fit is unstable.
 
-### Sensor-level (validation)
+### Source vs sensor (validation)
 
-| Analysis | Level | Computes |
-|---|---|---|
-| `electrode_comparison` *(suppl. of `electrode_psd`)* | elec | source-vs-electrode effect-size validation |
+| Analysis | Level | Reads | Computes |
+|---|---|---|---|
+| `electrode_comparison` *(suppl.)* | elec | `electrode_psd` **and** `roi_psd` (same paradigm) | source-vs-electrode band-power concordance + effect-size validation |
+| `fcd_comparison` *(suppl.)* | elec | `electrode_connectivity` **and** `vertex_connectivity` — normally in *different* paradigms; sibling paradigm dirs are searched, or set `fcd_comparison.{sensor_dir,source_dir}` | source-vs-sensor FCD comparison (mean + spatial CV) per band × metric |
+| `electrode_signature` *(suppl. of `electrode_psd`)* | elec | `electrode_psd` | sensor-level neural signature (decoding on electrode band power) — the source-vs-sensor counterpart of `vertex_signature` |
+
+`ANALYSIS_METADATA` records these as `supplements` (the primary the gallery nests
+them under) plus `requires` (every upstream module, for run ordering).
 
 ### Evoked (trial-based paradigms only)
 
 | Analysis | Level | Computes |
 |---|---|---|
-| `roi_evoked`, `vertex_evoked`, `electrode_evoked` | ROI, vtx, elec | ITC, ERSP, single-trial power |
+| `roi_evoked`, `vertex_evoked`, `electrode_evoked` | ROI, vtx, elec | ITC (raw + debiased), ERSP, single-trial power, induced power, ERP amplitude/latency. ROI/electrode: descriptive `group × unit` LMM in R plus declared hypotheses (`_evoked_hypotheses.py`, measure as facet); vertex: cluster permutation plus declared hypotheses via the permutation adapter (`vertex_evoked_hypotheses.csv`, band = measure name, dv = measure type) |
 
 **Renames (2026-06).** `roi_pac` → `roi_cross_freq` (now also AAC + PPC);
 `roi_transfer_entropy` → `roi_directed`. Old names still work as deprecated aliases
-(`psd`/`aperiodic`/`pac`/`mvpa`/`wholebrain`/… also map to the canonical names).
+(`psd`/`aperiodic`/`pac`/`roi_pac`/`mvpa`/`vertex_mvpa`/`wholebrain`/`spatial_lmm`/
+`specparam_vertex`/`transfer_entropy`/`roi_transfer_entropy`/`evoked`/`electrode`
+map to the canonical names; output always lands under the canonical directory).
+Two R scripts keep their legacy filenames on purpose: `roi_pac_analysis.R` (for
+`roi_cross_freq`) and `roi_transfer_entropy_analysis.R` (for `roi_directed`).
 
 ---
 
@@ -518,10 +606,16 @@ source-analytics run --study study.yaml --paradigm resting \
 
 Output is **additive**: a `<module>_hypotheses.csv` written alongside the module's
 other tables, with one tidy row per band × spatial cell (estimate, SE, CI, stat, p,
-q, effect size, `fdr_family`, plus legacy-named aliases for existing figure
-consumers). Modules with multiple spatial tiers emit one table per tier — e.g.
-`roi_directed` writes `…_global_hypotheses.csv`, `…_directed_edges_hypotheses.csv`,
-and `…_region_hypotheses.csv`.
+q, effect size, `fdr_family`). Modules with multiple spatial tiers emit one table
+per tier — `roi_directed` writes `roi_directed_global_hypotheses.csv`,
+`roi_directed_directed_edges_hypotheses.csv`, and `roi_directed_region_hypotheses.csv`.
+
+Two limits worth knowing: `kind: regression` is accepted by the config and the
+emmeans (R) adapter, but the Python permutation (map) and edge (NBS) adapters
+return **no rows** for it yet — a continuous predictor is not wired into those
+paths. And the R evoked scripts and every emmeans module derive their contrast
+list from `design:`/`hypotheses:`; a legacy `contrasts:` block is lifted into the
+same spec, so both config styles work.
 
 ---
 
@@ -549,22 +643,29 @@ Selectable dimensions vary by module (`metric` / `band` / `hypothesis` /
 
 ## Output structure
 
-Each analysis writes a self-contained directory under `paths.analytics`
-(working tree). The published `tables/` + `figures/` are mirrored to
-`paths.results`, which `source-lightbox` reads.
+Two trees, both segmented by paradigm (and by profile when `--profile` is used).
+The **working tree** under `paths.analytics` holds the per-subject data and the
+narrative; the **published tree** under `paths.results` holds the tables and
+figures that `source-lightbox` reads. `tables/` and `figures/` do **not** live
+inside the analysis working directory.
 
 ```
-<analytics>/<analysis>/
+<analytics>/[<profile>/]<paradigm>/<analysis>/
   ANALYSIS_SUMMARY.md          # methods + results narrative (markdown)
   data/
     <analysis>_*.csv           # the computed per-subject measures (the inputs to stats)
     study_config.yaml          # the resolved config snapshot used for this run
-  tables/
+
+<results>/[<profile>/]tables/<paradigm>/<analysis>/
     <analysis>_hypotheses.csv  # the hypothesis-layer result (one row per band×cell)
     …                          # any module-specific diagnostic tables
-  figures/
-    *.png                      # ggplot2 / glass-brain / matplotlib figures
+<results>/[<profile>/]figures/<paradigm>/<analysis>/
+    *.png                      # ggplot2 / glass-brain / matplotlib figures (figures step only)
 ```
+
+`config.for_paradigm_analysis()` sets the working dir to `analytics/<paradigm>`;
+`BaseAnalysis.tbl_dir` / `fig_dir` resolve the published dirs. A legacy
+single-paradigm config (no `paradigms:`) omits the paradigm segment.
 
 The `<analysis>_hypotheses.csv` is the canonical statistical contract across all
 emmeans/permutation modules; figure and gallery consumers read it (plus legacy
@@ -579,7 +680,8 @@ column aliases during the migration).
 ## Running a full study, in order
 
 A study run is just the analyses invoked in dependency order (primaries before
-their supplements). The canonical recipes live in `scripts/`; the essential order:
+their supplements). [`scripts/run_study.sh study.yaml [run flags]`](scripts/run_study.sh)
+is the canonical recipe; the essential order:
 
 ```bash
 SA="source-analytics run --study study.yaml --paradigm"
@@ -594,8 +696,9 @@ $SA resting --analysis roi_cross_freq          # PAC + AAC + PPC  (--metric to p
 $SA resting --analysis roi_directed            # transfer entropy + DTF  (--metric te|dtf)
 $SA resting --analysis electrode_psd           # PRIMARY
 $SA resting --analysis electrode_aperiodic
-$SA resting --analysis electrode_comparison    # ↳ after electrode_psd
+$SA resting --analysis electrode_comparison    # ↳ after electrode_psd AND roi_psd
 $SA resting --analysis electrode_connectivity  # sensor FC comparator
+$SA resting --analysis electrode_signature     # ↳ after electrode_psd
 
 # Vertex paradigm — whole-brain
 $SA vertex  --analysis vertex_connectivity     # PRIMARY (slow; computes matrices)
@@ -603,9 +706,12 @@ $SA vertex  --analysis vertex_graph            # ↳ after vertex_connectivity
 $SA vertex  --analysis vertex_nbs              # ↳ after vertex_connectivity
 $SA vertex  --analysis vertex_cluster
 $SA vertex  --analysis vertex_specparam
-$SA vertex  --analysis vertex_mvpa
+$SA vertex  --analysis vertex_signature
 $SA vertex  --analysis vertex_cross_freq        # local PAC + AAC + PPC
 $SA vertex  --analysis vertex_directed         # vertex DTF (outflow/inflow/netflow)
+
+# Source-vs-sensor FCD: reads electrode_connectivity (resting) + vertex_connectivity (vertex)
+$SA resting --analysis fcd_comparison
 
 # Evoked paradigm (trial-based data only)
 $SA evoked  --analysis roi_evoked

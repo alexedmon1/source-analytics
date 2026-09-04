@@ -209,7 +209,7 @@ class ROIAperiodicAnalysis(BaseAnalysis):
         except FileNotFoundError:
             logger.error("Rscript not found. Install R to enable statistics and visualization.")
         except subprocess.TimeoutExpired:
-            logger.error("R script timed out after 600 seconds")
+            logger.error("R script timed out after 3600 seconds")
 
         # Render brain mosaics from posthoc effect sizes
         if self._generate_figures:

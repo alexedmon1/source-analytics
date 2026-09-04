@@ -10,7 +10,6 @@
 suppressPackageStartupMessages({
   library(optparse)
   library(yaml)
-  library(nlme)
   library(lme4)
   library(lmerTest)
   library(dplyr)

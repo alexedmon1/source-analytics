@@ -33,7 +33,18 @@ script_dir <- if (exists("script.dir")) {
   }, error = function(e) "R")
 }
 
-tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
+source(file.path(script_dir, "stats_utils.R"))
+
+# Connectivity metrics the Python side can export. Every step below iterates the
+# subset actually present in the edge CSV, so a `--metric aec` (or any other
+# single-metric) run works end to end.
+KNOWN_METRICS <- c("coherence", "imag_coherence", "pli", "wpli", "dwpli", "dpli",
+                   "aec", "partial_corr")
+METRIC_LABELS <- c(coherence = "Coherence", imag_coherence = "Imag. Coherence",
+                   pli = "PLI", wpli = "wPLI", dwpli = "dwPLI", dpli = "dPLI",
+                   aec = "AEC", partial_corr = "Partial Corr.")
+present_metrics <- function(df) intersect(KNOWN_METRICS, names(df))
+metric_label <- function(m) ifelse(is.na(METRIC_LABELS[m]), m, METRIC_LABELS[m])
 
 # Define sig_stars locally if not sourced
 if (!exists("sig_stars")) {
@@ -64,17 +75,15 @@ theme_pub <- function(base_size = 14) {
 # ===========================================================================
 
 #' Compute global connectivity per subject x band (mean of all edges)
-#' @param edges data.frame with columns: subject, group, band, roi1, roi2, coherence, imag_coherence
-#' @return data.frame with subject, group, band, mean_coherence, mean_imag_coherence
+#' @param edges data.frame with columns: subject, group, band, roi1, roi2, plus one
+#'   column per connectivity metric present (any of KNOWN_METRICS)
+#' @return data.frame with subject, group, band, mean_<metric> per metric present
 compute_global_connectivity <- function(edges) {
+  mets <- present_metrics(edges)
   edges %>%
     group_by(subject, group, band) %>%
     summarise(
-      mean_coherence = mean(coherence, na.rm = TRUE),
-      mean_imag_coherence = mean(imag_coherence, na.rm = TRUE),
-      mean_pli = if ("pli" %in% names(.)) mean(pli, na.rm = TRUE) else NA_real_,
-      mean_dwpli = if ("dwpli" %in% names(.)) mean(dwpli, na.rm = TRUE) else NA_real_,
-      mean_aec = if ("aec" %in% names(.)) mean(aec, na.rm = TRUE) else NA_real_,
+      across(all_of(mets), ~ mean(.x, na.rm = TRUE), .names = "mean_{.col}"),
       n_edges = n(),
       .groups = "drop"
     )
@@ -87,21 +96,11 @@ compute_global_connectivity <- function(edges) {
 #' @param bands named list of band limits
 #' @return data.frame with t-test results
 run_global_ttests <- function(global_df, contrasts, bands) {
-  metrics <- c("mean_coherence", "mean_imag_coherence")
-  metric_labels <- c("coherence", "imag_coherence")
-  # Include optional metrics if present in data
-  if ("mean_pli" %in% names(global_df) && !all(is.na(global_df$mean_pli))) {
-    metrics <- c(metrics, "mean_pli")
-    metric_labels <- c(metric_labels, "pli")
-  }
-  if ("mean_dwpli" %in% names(global_df) && !all(is.na(global_df$mean_dwpli))) {
-    metrics <- c(metrics, "mean_dwpli")
-    metric_labels <- c(metric_labels, "dwpli")
-  }
-  if ("mean_aec" %in% names(global_df) && !all(is.na(global_df$mean_aec))) {
-    metrics <- c(metrics, "mean_aec")
-    metric_labels <- c(metric_labels, "aec")
-  }
+  # Every mean_<metric> column present (and not all-NA) is tested.
+  metric_labels <- KNOWN_METRICS[paste0("mean_", KNOWN_METRICS) %in% names(global_df)]
+  metric_labels <- metric_labels[vapply(metric_labels, function(m)
+    !all(is.na(global_df[[paste0("mean_", m)]])), logical(1))]
+  metrics <- paste0("mean_", metric_labels)
   results <- list()
 
   for (contrast in contrasts) {
@@ -183,7 +182,8 @@ run_global_ttests <- function(global_df, contrasts, bands) {
 # ===========================================================================
 
 #' Map edges to region pairs, average within
-#' @param edges data.frame with columns: subject, group, band, roi1, roi2, coherence, imag_coherence
+#' @param edges data.frame with columns: subject, group, band, roi1, roi2, plus the
+#'   metric columns present
 #' @param roi_categories named list of ROI name vectors
 #' @return data.frame with region_pair replacing roi1/roi2
 aggregate_edges_to_region_pairs <- function(edges, roi_categories) {
@@ -210,14 +210,11 @@ aggregate_edges_to_region_pairs <- function(edges, roi_categories) {
     )
 
   # Average edge values within each subject x band x region_pair
+  mets <- present_metrics(edges)
   edges_mapped %>%
     group_by(subject, group, band, region_pair) %>%
     summarise(
-      coherence = mean(coherence, na.rm = TRUE),
-      imag_coherence = mean(imag_coherence, na.rm = TRUE),
-      pli = if ("pli" %in% names(.)) mean(pli, na.rm = TRUE) else NA_real_,
-      dwpli = if ("dwpli" %in% names(.)) mean(dwpli, na.rm = TRUE) else NA_real_,
-      aec = if ("aec" %in% names(.)) mean(aec, na.rm = TRUE) else NA_real_,
+      across(all_of(mets), ~ mean(.x, na.rm = TRUE)),
       n_edges = n(),
       .groups = "drop"
     )
@@ -228,7 +225,7 @@ aggregate_edges_to_region_pairs <- function(edges, roi_categories) {
 #' @param region_pair_df data.frame from aggregate_edges_to_region_pairs()
 #' @param contrasts list of contrast definitions
 #' @param bands named list of band limits
-#' @param metric character: "coherence" or "imag_coherence"
+#' @param metric character: one of the metric columns present (see KNOWN_METRICS)
 #' @return data.frame with omnibus results
 run_omnibus_lmm_region_pair <- function(region_pair_df, contrasts, bands, metric = "coherence") {
   if (!has_lme4) {
@@ -332,7 +329,7 @@ run_omnibus_lmm_region_pair <- function(region_pair_df, contrasts, bands, metric
 #' @param contrasts list of contrast definitions
 #' @param bands named list of band limits
 #' @param omnibus_df data.frame from run_omnibus_lmm_region_pair()
-#' @param metric character: "coherence" or "imag_coherence"
+#' @param metric character: one of the metric columns present (see KNOWN_METRICS)
 #' @param gate logical: if TRUE, only run for significant omnibus results
 #' @return data.frame with post-hoc results
 run_posthoc_emmeans_region_pair <- function(region_pair_df, contrasts, bands,
@@ -424,8 +421,8 @@ run_posthoc_emmeans_region_pair <- function(region_pair_df, contrasts, bands,
 # ===========================================================================
 
 #' Plot group-mean connectivity matrices (heatmaps) per band
-#' @param edges data.frame with subject, group, band, roi1, roi2, coherence, imag_coherence
-#' @param metric_col column name: "coherence" or "imag_coherence"
+#' @param edges data.frame with subject, group, band, roi1, roi2, plus metric columns
+#' @param metric_col column name: one of the metric columns present
 #' @param group_colors, group_labels, group_order from config
 #' @param output_dir figures/ directory
 plot_connectivity_matrices <- function(edges, metric_col, group_colors,
@@ -486,19 +483,18 @@ plot_connectivity_matrices <- function(edges, metric_col, group_colors,
 plot_global_connectivity_bar <- function(global_df, group_colors, group_labels,
                                          group_order, output_dir,
                                          sig_df = NULL) {
-  # Pivot to long format for both metrics
+  # Pivot to long format over every metric present
+  mean_cols <- paste0("mean_", KNOWN_METRICS)
+  mean_cols <- mean_cols[mean_cols %in% names(global_df)]
   plot_data <- global_df %>%
     filter(group %in% group_order) %>%
     pivot_longer(
-      cols = c(mean_coherence, mean_imag_coherence),
+      cols = all_of(mean_cols),
       names_to = "metric",
       values_to = "value"
     ) %>%
     mutate(
-      metric = case_when(
-        metric == "mean_coherence" ~ "Coherence",
-        metric == "mean_imag_coherence" ~ "Imag. Coherence"
-      ),
+      metric = unname(metric_label(sub("^mean_", "", metric))),
       group_label = group_labels[group],
       group_label = factor(group_label, levels = group_labels[group_order])
     )
@@ -536,13 +532,7 @@ plot_global_connectivity_bar <- function(global_df, group_colors, group_labels,
     if (nrow(sig_hits) > 0) {
       # Map metric names to facet labels
       sig_hits <- sig_hits %>%
-        mutate(
-          metric_facet = case_when(
-            metric == "coherence" ~ "Coherence",
-            metric == "imag_coherence" ~ "Imag. Coherence",
-            TRUE ~ metric
-          )
-        )
+        mutate(metric_facet = unname(metric_label(metric)))
 
       # Compute y_max per band x metric for positioning
       y_maxes <- plot_data %>%
@@ -660,7 +650,9 @@ write_connectivity_summary <- function(global_df, global_ttest_df,
     collapse = ", "
   )
 
-  add("**Analysis:** Functional Connectivity (Coherence & Imaginary Coherence)")
+  mets <- sub("^mean_", "", grep("^mean_", names(global_df), value = TRUE))
+  mets <- intersect(KNOWN_METRICS, mets)
+  add("**Analysis:** Functional Connectivity (", paste(metric_label(mets), collapse = ", "), ")")
   add("")
   add("**Groups:** ", group_str)
   add("")
@@ -668,7 +660,16 @@ write_connectivity_summary <- function(global_df, global_ttest_df,
   add("")
   add("**Frequency Bands:** ", band_str)
   add("")
-  add("**Metrics:** Magnitude-squared coherence (MSC) and absolute imaginary coherence (|iCoh|)")
+  metric_desc <- c(
+    coherence = "magnitude-squared coherence (MSC)",
+    imag_coherence = "absolute imaginary coherence (|iCoh|; Nolte 2004)",
+    pli = "phase lag index (PLI; Stam 2007)",
+    wpli = "weighted PLI (wPLI; Vinck 2011)",
+    dwpli = "debiased weighted PLI (dwPLI; Vinck 2011)",
+    dpli = "directed PLI (dPLI; Stam & van Straaten 2012)",
+    aec = "orthogonalized amplitude envelope correlation (AEC; Hipp 2012)",
+    partial_corr = "partial correlation (Marrelec 2006)")
+  add("**Metrics:** ", paste(ifelse(is.na(metric_desc[mets]), mets, metric_desc[mets]), collapse = "; "))
   add("")
   add("**Timeseries:** Signed (phase-preserving) ROI source timeseries used for all computations.")
   add("")
@@ -881,6 +882,10 @@ dir.create(tbl_dir, showWarnings = FALSE, recursive = TRUE)
 message("Loading data...")
 edges <- read_csv(file.path(data_dir, "roi_connectivity_edges.csv"), show_col_types = FALSE)
 message("  roi_connectivity_edges.csv: ", nrow(edges), " rows")
+if (length(present_metrics(edges)) == 0)
+  stop("roi_connectivity_edges.csv has no known connectivity metric column (",
+       paste(KNOWN_METRICS, collapse = ", "), ")")
+message("  Metrics present: ", paste(present_metrics(edges), collapse = ", "))
 
 # --- Load config ---
 config <- read_yaml(config_path)
@@ -961,8 +966,8 @@ if (!figures_only) {
 # ===========================================================================
 message("\nGenerating figures...")
 
-# Connectivity matrices (per metric)
-for (mc in c("coherence", "imag_coherence")) {
+# Connectivity matrices (one set per metric present in the edge CSV)
+for (mc in present_metrics(edges)) {
   plot_connectivity_matrices(edges, mc, group_colors, group_labels, group_order, fig_dir)
 }
 

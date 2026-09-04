@@ -79,6 +79,8 @@ def test_resolve_jobs_auto_and_config():
     class _Cfg:
         raw = {"jobs": 3}
     a.config = _Cfg()
-    assert a._resolve_jobs(1) == 3          # config fallback when CLI=1
+    assert a._resolve_jobs(None) == 3       # CLI not given -> config `jobs:`
+    assert a._resolve_jobs(1) == 1          # explicit CLI 1 wins over config
     assert a._resolve_jobs(2) == 2          # CLI wins over config
     assert a._resolve_jobs(-1) >= 1         # auto (all-but-one core)
+    assert a._resolve_jobs(0) >= 1          # auto (all-but-one core)

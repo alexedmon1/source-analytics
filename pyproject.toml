@@ -20,8 +20,17 @@ dependencies = [
     # that exactly, and this floor merely lets the declaration resolve.
     "specparam>=2.0.0rc6",
     "joblib>=1.3",
+    # Figures (matplotlib glass brains, comparison plots) are part of the core
+    # lifecycle, so matplotlib is a core dependency, not an extra.
+    "matplotlib>=3.7",
 ]
 
+# Optional extras. The package imports without any of them; the modules that
+# need one raise a clear ImportError naming the extra to install:
+#   mne     -> the evoked / TFR modules (roi_evoked, vertex_evoked, electrode_evoked)
+#   mvpa    -> vertex_signature / electrode_signature (scikit-learn)
+#   network -> roi_graph / vertex_graph / *_network / *_nbs (networkx)
+#   atlas   -> nibabel atlas readers
 [project.optional-dependencies]
 mne = ["mne>=1.5"]
 atlas = ["nibabel>=5.0"]
@@ -36,6 +45,13 @@ source-analytics = "source_analytics.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Ship the R scripts in wheels/sdists. They live outside the Python package
+# (R/ beside src/), so they go in as data files under
+# <sys.prefix>/share/source-analytics/R, where analyses.base.find_r_script_dir()
+# looks after the repo checkout. MANIFEST.in grafts R/ into the sdist.
+[tool.setuptools.data-files]
+"share/source-analytics/R" = ["R/*.R"]
 
 [tool.black]
 line-length = 99

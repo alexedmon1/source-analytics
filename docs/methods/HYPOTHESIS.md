@@ -192,6 +192,14 @@ This fits modules with a modest spatial cardinality (≤ ~32 ROIs / ~30 channels
 and connectivity-**matrix** subnetworks (roi_nbs / vertex_nbs) belong to the edge/NBS adapter — a
 `group × edge` LMM is infeasible and wrong for either (~496 edges → ~2500 params).
 
+**Long-DV modules take the Python tabular adapter instead.** When a module exports one `value`
+column plus a label column saying what it holds (the evoked pair: `value` + `measure_name`),
+there is no `dv_cols` vector to pass. Hand the label column to `write_module_hypotheses_tabular`
+as a **facet** — `facet_cols=("measure_name",)` — which runs an independent FDR family per facet
+across the band × spatial grid. Facet ≡ DV: R gives each `dv_col` its own `run_hypothesis()` call
+and so its own family, and a facet is that same family boundary expressed in a long table.
+`analyses/_evoked_hypotheses.py` is the live example, shared by both evoked modules.
+
 ## 9. Status
 
 - ✅ **emmeans adapter** built + verified (bit-exact vs legacy on real data); wired into
@@ -209,9 +217,19 @@ and connectivity-**matrix** subnetworks (roi_nbs / vertex_nbs) belong to the edg
   `vertex_nbs`, and the combined `roi_network`/`vertex_network` aliases** via
   `write_module_hypotheses_edge()` (additive `<module>_hypotheses.csv`). Verified bit-exact vs the
   legacy NBS on real FORGE data (Low Gamma / imag_coherence / KO_VEH vs WT_VEH).
-- ⏳ **deferred:** `roi_evoked` / `electrode_evoked` (long-format DV; no data in the resting
-  study). **specials:** `vertex_mvpa` (decoding), `vertex_spatial` (GLS), `electrode_comparison`
-  (agreement — may not take hypotheses).
+- ✅ **evoked (tabular adapter, measure as facet):** wired into `roi_evoked` (spatial `roi`) and
+  `electrode_evoked` (spatial `channel`) via the shared `analyses/_evoked_hypotheses.py`. These
+  two export a long DV — one `value` column faceted by `measure_name`, not one column per
+  measure — so the measure is passed as a **facet**, giving an independent FDR family per measure
+  across the spatial grid. That is the only defensible family: the measures are on incomparable
+  scales (ITC 0-1, ERSP dB, ERP amplitude in signal units, latency in seconds). There is **no band
+  axis** — each measure definition already fixes its own band and time window — so the band
+  coordinate is null. Additive: the descriptive `group * roi` LMM in the R scripts is unchanged
+  and still runs. Verified on planted synthetic signal in `tests/test_evoked_hypotheses.py`.
+- ✅ **vertex_evoked (permutation adapter):** per-measure vertex maps through the same map+cluster
+  contract as `vertex_cluster` (band coordinate = measure name, dv = measure type).
+- ⏳ **specials:** `vertex_signature` (decoding), `electrode_comparison` / `fcd_comparison`
+  (agreement — may not take hypotheses). `vertex_spatial` is retired (no inference).
 - ⏳ **migration / retirement:** move `study_treatment.yaml` to `design:`/`hypotheses:` and
   delete the retired gating code (`apply_hypothesis_gating`, `build_rescue_verdicts`,
   `gate_on`).

@@ -58,7 +58,7 @@ study.yaml: design: + hypotheses:
    ▼
 hypothesis layer ─────────────────────────────────────────────────────────────
    R/hypothesis.R               load_design_spec() + run_hypothesis() + EMMEANS adapter
-                                (sourced by roi_psd_analysis.R, electrode_psd_analysis.R, …)
+                                (sourced by roi_psd_analysis.R, electrode_analysis.R, …)
    src/source_analytics/        load_design_spec() + run_hypothesis() + PERMUTATION adapter
      hypothesis/                (built on stats/cluster_permutation.py, stats/graph_metrics.py;
        __init__.py              imported by vertex_network_analysis.py, …)

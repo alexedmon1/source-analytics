@@ -17,20 +17,32 @@ DEFAULT_RUN_STEPS = VALID_STEPS - {"figures"}
 
 
 def find_r_script_dir() -> Path:
-    """Locate the R/ directory relative to this package.
+    """Locate the R/ scripts directory.
 
-    Searches upward from the analyses/ directory to find the R/ scripts
-    directory that lives at the package root (sibling to src/).
+    Checked in order: ``SOURCE_ANALYTICS_R_DIR`` (env override), the repo
+    checkout (``R/`` beside ``src/``, the editable-install case), the wheel's
+    data files (``<sys.prefix>/share/source-analytics/R``, see
+    ``[tool.setuptools.data-files]`` in pyproject.toml), then ``./R``.
     """
+    import os
+    import sys
+
+    env = os.environ.get("SOURCE_ANALYTICS_R_DIR")
+    candidates: list[Path] = [Path(env)] if env else []
     pkg_root = Path(__file__).resolve().parent.parent.parent.parent  # src/../..
-    r_dir = pkg_root / "R"
-    if r_dir.is_dir():
-        return r_dir
-    for candidate in [Path.cwd() / "R", Path(__file__).parent.parent.parent / "R"]:
+    candidates += [
+        pkg_root / "R",
+        Path(sys.prefix) / "share" / "source-analytics" / "R",
+        Path(__file__).parent.parent.parent / "R",
+        Path.cwd() / "R",
+    ]
+    for candidate in candidates:
         if candidate.is_dir():
             return candidate
     raise FileNotFoundError(
-        "Cannot find R/ scripts directory. Expected at: " + str(pkg_root / "R")
+        "Cannot find the R/ scripts directory. Looked in: "
+        + ", ".join(str(c) for c in candidates)
+        + ". Set SOURCE_ANALYTICS_R_DIR to point at it."
     )
 
 
@@ -295,21 +307,42 @@ class BaseAnalysis(ABC):
         """True when this module overrides the parallel per-subject compute."""
         return type(self)._compute_subject is not BaseAnalysis._compute_subject
 
-    def _resolve_jobs(self, jobs: int) -> int:
-        """Effective worker count. CLI ``jobs`` wins; else ``jobs:`` in the study
-        config; ``-1``/``0`` → all but one core. Clamped to [1, #subjects]."""
+    def _resolve_jobs(self, jobs: int | None) -> int:
+        """Effective worker count.
+
+        An explicit CLI ``--jobs N`` (any integer, including ``1``) wins. When
+        the CLI gave nothing (``None``), ``jobs:`` in the study config is used,
+        else serial. ``0``/``-1`` from either source mean "all but one core".
+        """
         import os
 
         n = jobs
-        if n in (None, 1):
-            cfg_n = self.config.raw.get("jobs")
-            if cfg_n is not None:
-                n = int(cfg_n)
         if n is None:
-            n = 1
+            cfg_n = self.config.raw.get("jobs")
+            n = int(cfg_n) if cfg_n is not None else 1
+        n = int(n)
         if n <= 0:  # -1 / 0 → auto: leave one core free
             n = max(1, (os.cpu_count() or 1) - 1)
-        return max(1, int(n))
+        return max(1, n)
+
+    def _vertex_epoch_config(self) -> dict | None:
+        """Merged epoch-sampling config for the vertex modules, or None if disabled.
+
+        Precedence (lowest → highest): top-level ``epoch_sampling:`` → the
+        ``vertex:`` block's ``epoch_sampling:`` → this analysis's own
+        ``epoch_sampling:`` (under ``paradigms.<p>.analyses.<name>``). The ROI
+        and electrode modules already merge global + per-analysis in
+        ``__init__``; the vertex modules used to read only the ``vertex:``
+        block, so the documented global default never reached them.
+        """
+        raw = self.config.raw or {}
+        global_cfg = raw.get("epoch_sampling") or {}
+        vertex_cfg = (self.config.vertex or {}).get("epoch_sampling") or {}
+        analysis_cfg = (raw.get(self.name) or {}).get("epoch_sampling") or {}
+        merged = {**global_cfg, **vertex_cfg, **analysis_cfg}
+        if not merged.get("enabled", False):
+            return None
+        return merged
 
     def _process_subjects_parallel(self, subjects: list[SubjectInfo], n_jobs: int) -> None:
         """Compute per-subject payloads in worker processes, merge in the parent.
@@ -546,7 +579,7 @@ class BaseAnalysis(ABC):
         subjects: list[SubjectInfo],
         steps: set[str] | None = None,
         select: dict[str, frozenset[str]] | None = None,
-        jobs: int = 1,
+        jobs: int | None = None,
     ) -> None:
         """Execute the analysis lifecycle.
 

@@ -36,9 +36,9 @@ script_dir <- if (exists("script.dir")) {
 }
 
 # Source helpers
-tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
-tryCatch(source(file.path(script_dir, "hypothesis.R")), error = function(e) NULL)
-tryCatch(source(file.path(script_dir, "plot_psd.R")), error = function(e) NULL)
+source(file.path(script_dir, "stats_utils.R"))
+source(file.path(script_dir, "hypothesis.R"))
+source(file.path(script_dir, "plot_psd.R"))
 
 if (!exists("theme_pub")) {
   theme_pub <- function(base_size = 14) {

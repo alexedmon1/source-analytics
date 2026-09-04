@@ -25,7 +25,7 @@ from ..io.loader import SubjectLoader
 from ..spectral.aperiodic import band_peak_reachability, resolve_freq_range
 from ..spectral.vertex import compute_psd_vertices
 from ..spectral.vertex_aperiodic import fit_aperiodic_vertices
-from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
+from ..spectral.epoch_sampler import sample_epochs
 from ..stats.cluster_permutation import (
     cluster_permutation_test,
     has_significant_cluster as _has_significant_cluster,
@@ -102,7 +102,8 @@ class VertexSpecparamAnalysis(BaseAnalysis):
         if self._noise_exclude is not None:
             self._noise_exclude = tuple(self._noise_exclude)
 
-        self._epoch_config = get_epoch_config(wb_cfg)
+        # Global epoch_sampling → vertex: block → per-analysis block (see base).
+        self._epoch_config = self._vertex_epoch_config()
         self._cluster_results: dict = {}
 
     def setup(self) -> None:

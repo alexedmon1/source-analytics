@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from .config import StudyConfig
-from .core import StudyAnalyzer, ANALYSIS_REGISTRY, ANALYSIS_METADATA
+from .core import StudyAnalyzer, ANALYSIS_REGISTRY, ANALYSIS_METADATA, canonical_analysis_name
 from .analyses.base import VALID_STEPS, BaseAnalysis
 
 
@@ -41,13 +41,14 @@ def _run_single(
     analysis_name: str,
     steps: set[str] | None = None,
     select: dict[str, frozenset[str]] | None = None,
-    jobs: int = 1,
+    jobs: int | None = None,
 ):
     """Run one analysis on a (possibly paradigm-scoped) config."""
     analyzer = StudyAnalyzer(config)
     _print_study_summary(config, analyzer)
     analyzer.run_analysis(analysis_name, steps=steps, select=select, jobs=jobs)
-    print(f"\nDone. Output: {config.output_dir / analysis_name}")
+    # run_analysis writes under the CANONICAL name (deprecated aliases resolve).
+    print(f"\nDone. Output: {config.output_dir / canonical_analysis_name(analysis_name)}")
 
 
 def _parse_selection(args) -> dict[str, frozenset[str]] | None:
@@ -110,21 +111,50 @@ def _parse_selection(args) -> dict[str, frozenset[str]] | None:
     return {d: frozenset(v) for d, v in sel.items()}
 
 
-def _check_output_clean(out_dir, analysis_name, *, strict, force):
-    """Enforce --strict-output: error if `out_dir / analysis_name` exists.
+def _prepare_output(config, analysis_name, *, strict, force, steps=None):
+    """Apply --strict-output / --force to the analysis's output directories.
 
-    --force overrides (re-process anyway).
+    All paths use the CANONICAL analysis name (a deprecated alias such as
+    ``psd`` writes to ``roi_psd/``), matching what ``run_analysis`` does.
+
+    --strict-output: error if the working dir (``analytics/<paradigm>/<name>``)
+    already holds output, unless --force.
+
+    --force: actually remove the previous output before running — the
+    published ``tables/`` and ``figures/`` dirs always, and the working dir
+    (``data/`` + summary) only when the ``process`` step will re-create it.
+    With ``--steps`` that excludes ``process`` the persisted data is kept, since
+    the requested steps read it back.
     """
-    if not strict or force:
-        return
-    target = out_dir / analysis_name
-    if target.exists() and any(target.iterdir()):
+    import shutil
+
+    canonical = canonical_analysis_name(analysis_name)
+    work = config.output_dir / canonical
+    paradigm = config.paradigm_name or ""
+    published = [
+        config.results_dir / "tables" / paradigm / canonical,
+        config.results_dir / "figures" / paradigm / canonical,
+    ]
+    has_output = work.exists() and any(work.iterdir())
+
+    if strict and has_output and not force:
         print(
-            f"ERROR: --strict-output set and analysis output already exists: {target}",
+            f"ERROR: --strict-output set and analysis output already exists: {work}",
             file=sys.stderr,
         )
         print("Pass --force to overwrite, or remove the directory first.", file=sys.stderr)
         sys.exit(1)
+
+    if force:
+        reprocess = steps is None or "process" in steps
+        targets = list(published) + ([work] if reprocess else [])
+        for t in targets:
+            if t.exists():
+                shutil.rmtree(t)
+                print(f"--force: removed {t}")
+        if not reprocess and work.exists():
+            print(f"--force: kept {work} (data/) because --steps excludes 'process'")
+    return work
 
 
 def cmd_run(args):
@@ -176,7 +206,7 @@ def cmd_run(args):
 
     # Parse --metric / --band / --select sub-output selection
     select = _parse_selection(args)
-    jobs = getattr(args, "jobs", 1) or 1
+    jobs = getattr(args, "jobs", None)  # None → YAML `jobs:` → serial; 0/-1 → auto
 
     strict = getattr(args, "strict_output", False)
     force = getattr(args, "force", False)
@@ -187,7 +217,7 @@ def cmd_run(args):
             if args.analysis:
                 # Scope to one paradigm + one analysis
                 aconfig = config.for_paradigm_analysis(args.paradigm, args.analysis)
-                _check_output_clean(aconfig.output_dir, args.analysis, strict=strict, force=force)
+                _prepare_output(aconfig, args.analysis, strict=strict, force=force, steps=steps)
                 _run_single(aconfig, args.analysis, steps=steps, select=select, jobs=jobs)
             else:
                 # Run all analyses listed for this paradigm
@@ -200,7 +230,7 @@ def cmd_run(args):
                     print(f"Paradigm: {args.paradigm}  |  Analysis: {analysis_name}")
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(args.paradigm, analysis_name)
-                    _check_output_clean(aconfig.output_dir, analysis_name, strict=strict, force=force)
+                    _prepare_output(aconfig, analysis_name, strict=strict, force=force, steps=steps)
                     _run_single(aconfig, analysis_name, steps=steps, select=select, jobs=jobs)
                     print()
         else:
@@ -219,7 +249,7 @@ def cmd_run(args):
                     print(f"Paradigm: {pname}  |  Analysis: {analysis_name}")
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(pname, analysis_name)
-                    _check_output_clean(aconfig.output_dir, analysis_name, strict=strict, force=force)
+                    _prepare_output(aconfig, analysis_name, strict=strict, force=force, steps=steps)
                     _run_single(aconfig, analysis_name, steps=steps, select=select, jobs=jobs)
                     print()
     else:
@@ -227,11 +257,11 @@ def cmd_run(args):
         if not args.analysis:
             print("ERROR: --analysis is required for single-paradigm configs.")
             sys.exit(1)
-        _check_output_clean(config.output_dir, args.analysis, strict=strict, force=force)
+        _prepare_output(config, args.analysis, strict=strict, force=force, steps=steps)
         analyzer = StudyAnalyzer(config)
         _print_study_summary(config, analyzer)
         analyzer.run_analysis(args.analysis, steps=steps, select=select, jobs=jobs)
-        print(f"\nDone. Output: {config.output_dir / args.analysis}")
+        print(f"\nDone. Output: {config.output_dir / canonical_analysis_name(args.analysis)}")
 
 
 def _validate_single(config: StudyConfig, paradigm_name: str | None = None):
@@ -388,6 +418,7 @@ def cmd_list(args):
         "resting|vertex": "Resting State (Vertex Level)",
         "resting|electrode": "Resting State (Electrode Level)",
         "evoked|roi": "Evoked Response (ROI Level)",
+        "evoked|vertex": "Evoked Response (Vertex Level)",
         "evoked|electrode": "Evoked Response (Electrode Level)",
     }
 
@@ -493,103 +524,172 @@ def cmd_figure(args):
         print("\nNo figures generated (no data matched filters or no significant results).")
 
 
-def cmd_init(args):
-    """Scaffold a source-analytics YAML config from a paradigm directory."""
-    paradigm_dir = Path(args.paradigm_dir).resolve()
-    derivatives_dir = paradigm_dir / "derivatives"
+def _discover_init_subjects(derivatives_dir: Path, data_subdir: str):
+    """Find subjects under a reconstruction root, in either supported layout.
 
-    if not derivatives_dir.is_dir():
-        print(f"ERROR: derivatives directory not found: {derivatives_dir}")
-        sys.exit(1)
-
-    # Discover sub-* directories
-    subject_dirs = sorted(
+    Returns ``(layout, subject_groups)`` where ``layout`` is ``"flat"`` (BIDS
+    ``sub-*`` dirs directly under ``derivatives/``; groups unknown unless
+    ``--groups-from`` supplies them) or ``"grouped"`` (``<Group>/<Subject>/``
+    dirs; the group is the folder name).
+    """
+    flat = sorted(
         d.name for d in derivatives_dir.iterdir()
         if d.is_dir() and d.name.startswith("sub-")
     )
-    if not subject_dirs:
-        print(f"ERROR: no sub-* directories found in {derivatives_dir}")
+    if flat:
+        return "flat", {name: "UNKNOWN" for name in flat}
+
+    grouped: dict[str, str] = {}
+    for group_dir in sorted(d for d in derivatives_dir.iterdir() if d.is_dir()):
+        for subj_dir in sorted(d for d in group_dir.iterdir() if d.is_dir()):
+            if (subj_dir / data_subdir).is_dir() or (subj_dir / "data").is_dir():
+                grouped[subj_dir.name] = group_dir.name
+    if grouped:
+        return "grouped", grouped
+    return "flat", {}
+
+
+# Starter bands for a scaffolded config — the README's canonical set.
+_INIT_BANDS = {
+    "Delta": [1, 4],
+    "Theta": [4, 10],
+    "Alpha": [10, 13],
+    "Beta": [13, 30],
+    "Low Gamma": [30, 55],
+    "High Gamma": [65, 80],
+}
+
+_INIT_DEFAULT_ANALYSES = ["roi_psd", "roi_aperiodic", "roi_connectivity"]
+
+
+def cmd_init(args):
+    """Scaffold a study YAML (design:/hypotheses: + paradigms:) from a reconstruction dir.
+
+    Writes ``{paradigm_dir}/analysis/{name}.yaml`` by default; ``--output -``
+    prints the YAML to stdout (status goes to stderr) so it can be redirected.
+    The file parses with ``StudyConfig.from_yaml`` as-is; edit groups/hypotheses
+    and the analysis list, then ``validate`` it.
+    """
+    paradigm_dir = Path(args.paradigm_dir).resolve()
+    derivatives_dir = paradigm_dir / "derivatives"
+    data_subdir = args.data_subdir
+    err = sys.stderr
+
+    if not derivatives_dir.is_dir():
+        print(f"ERROR: derivatives directory not found: {derivatives_dir}", file=err)
         sys.exit(1)
 
-    # Build subject_groups mapping
-    subject_groups = {}
+    layout, subject_groups = _discover_init_subjects(derivatives_dir, data_subdir)
+    if not subject_groups:
+        print(
+            f"ERROR: no subjects found in {derivatives_dir} (expected sub-* dirs, "
+            "or <Group>/<Subject>/ dirs).", file=err,
+        )
+        sys.exit(1)
+
+    # --groups-from: source-localization study_config has subjects[].id/.group
     if args.groups_from:
-        groups_path = Path(args.groups_from).resolve()
-        with open(groups_path) as f:
-            src_config = yaml.safe_load(f)
-        # source-localization study_config has subjects[].id and subjects[].group
+        with open(Path(args.groups_from).resolve()) as f:
+            src_config = yaml.safe_load(f) or {}
         id_to_group = {}
-        for s in src_config.get("subjects", []):
-            sid = s.get("id", "")
-            group = s.get("group")
+        for s_ in src_config.get("subjects", []) or []:
+            sid, group = str(s_.get("id", "")), s_.get("group")
             if sid and group:
+                id_to_group[sid] = group
                 id_to_group[f"sub-{sid}"] = group
-        for subj in subject_dirs:
+        for subj in subject_groups:
             if subj in id_to_group:
                 subject_groups[subj] = id_to_group[subj]
-            else:
-                subject_groups[subj] = "UNKNOWN"
-    else:
-        for subj in subject_dirs:
-            subject_groups[subj] = "UNKNOWN"
+            elif subj.startswith("sub-") and subj[4:] in id_to_group:
+                subject_groups[subj] = id_to_group[subj[4:]]
 
-    # Determine unique groups (excluding UNKNOWN)
-    unique_groups = sorted(set(
-        g for g in subject_groups.values() if g != "UNKNOWN"
-    ))
+    unique_groups = sorted({g for g in subject_groups.values() if g != "UNKNOWN"})
+    levels = unique_groups or ["Group1", "Group2"]
 
-    # Build YAML structure
+    # Declared hypotheses: an omnibus when there are >2 groups, plus every
+    # pairwise contrast (weights: later level minus earlier level).
+    hypotheses: list[dict] = []
+    if len(levels) > 2:
+        hypotheses.append({"name": "group_omnibus", "kind": "omnibus", "role": "phenotype"})
+    for i, ga in enumerate(levels):
+        for gb in levels[i + 1:]:
+            hypotheses.append({
+                "name": f"{gb}_vs_{ga}",
+                "kind": "contrast",
+                "label": f"{gb} vs {ga}",
+                "weights": {gb: 1, ga: -1},
+                "role": "phenotype",
+            })
+
     config_name = args.name or paradigm_dir.name
+    out_dir = paradigm_dir / "analysis"
+    analyses = [a.strip() for a in args.analyses.split(",") if a.strip()]
+    unknown = [a for a in analyses if a not in ANALYSIS_REGISTRY]
+    if unknown:
+        print(f"ERROR: unknown analyses: {', '.join(unknown)} (see `source-analytics list`)", file=err)
+        sys.exit(1)
+
+    paradigm_block: dict = {
+        "data_dir": str(derivatives_dir),
+        "data_subdir": data_subdir,
+        "analyses": {a: {} for a in analyses},
+    }
+    if layout == "flat":
+        # Flat sub-* layout needs the explicit subject → group map.
+        paradigm_block["subjects"] = dict(subject_groups)
+
     config = {
         "name": config_name,
-        "groups": {g: g for g in unique_groups} if unique_groups else {"Group1": "Group 1"},
-        "group_order": unique_groups if unique_groups else ["Group1"],
+        "groups": {g: g for g in levels},
+        "group_order": list(levels),
         "group_colors": {},
-        "contrasts": [],
-        "bands": {
-            "delta": [2, 3.5],
-            "theta": [3.5, 7.5],
-            "alpha_1": [8, 10],
-            "alpha_2": [10.5, 12.5],
-            "beta": [13, 30],
-            "gamma_1": [30, 55],
-            "gamma_2": [65, 80],
-            "epsilon": [81, 120],
+        "design": {"factor": "group", "reference": levels[0], "levels": list(levels)},
+        "hypotheses": hypotheses,
+        "bands": dict(_INIT_BANDS),
+        "epoch_sampling": {
+            "enabled": False, "epoch_duration_sec": 2.0, "n_epochs": 80, "n_bootstrap": 1,
         },
-        "roi_categories": {},
-        "discovery": {
-            "data_subdir": "pipeline/data",
-            "subject_groups": subject_groups,
-        },
+        # Absolute so the file works from any working directory.
+        "output_dir": str(out_dir / "analytics"),
+        "results_dir": str(out_dir / "results"),
+        "paradigms": {args.paradigm: paradigm_block},
     }
 
-    # Generate pairwise contrasts
-    if len(unique_groups) >= 2:
-        for i, ga in enumerate(unique_groups):
-            for gb in unique_groups[i + 1:]:
-                config["contrasts"].append({
-                    "name": f"{ga}_vs_{gb}",
-                    "group_a": ga,
-                    "group_b": gb,
-                })
+    header = (
+        f"# source-analytics study config, scaffolded by `source-analytics init` from\n"
+        f"# {paradigm_dir}\n"
+        f"# Layout: {layout}. Edit groups / hypotheses / analyses, then:\n"
+        f"#   source-analytics validate --study <this file>\n"
+        f"#   source-analytics run --study <this file> --paradigm {args.paradigm} "
+        f"--analysis {analyses[0] if analyses else 'roi_psd'}\n"
+    )
+    text = header + yaml.dump(config, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
-    # Write config
-    analysis_dir = paradigm_dir / "analysis"
-    analysis_dir.mkdir(exist_ok=True)
-    out_path = analysis_dir / f"{config_name}.yaml"
+    if args.output == "-":
+        sys.stdout.write(text)
+        out_path = None
+    else:
+        out_path = Path(args.output).resolve() if args.output else out_dir / f"{config_name}.yaml"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text)
+        print(f"Config written: {out_path}", file=err)
 
-    with open(out_path, "w") as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-
-    print(f"Config written: {out_path}")
-    print(f"Subjects: {len(subject_dirs)}")
-    if unique_groups:
-        for g in unique_groups:
-            n = sum(1 for v in subject_groups.values() if v == g)
-            print(f"  {g}: n={n}")
+    print(f"Layout: {layout}; subjects: {len(subject_groups)}", file=err)
+    for g in unique_groups:
+        n = sum(1 for v in subject_groups.values() if v == g)
+        print(f"  {g}: n={n}", file=err)
     n_unknown = sum(1 for v in subject_groups.values() if v == "UNKNOWN")
     if n_unknown:
-        print(f"  UNKNOWN: n={n_unknown} (edit config to assign groups)")
+        print(
+            f"  UNKNOWN: n={n_unknown} (pass --groups-from, or edit "
+            f"paradigms.{args.paradigm}.subjects to assign groups)", file=err,
+        )
+    if out_path is not None:
+        # Prove the scaffold parses before the user edits it.
+        try:
+            StudyConfig.from_yaml(out_path)
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING: scaffolded config failed to parse: {exc}", file=err)
 
 
 def main():
@@ -619,11 +719,13 @@ def main():
         f"Valid: {', '.join(sorted(VALID_STEPS))}",
     )
     p_run.add_argument(
-        "--jobs", "-j", type=int, default=1, metavar="N",
-        help="Parallel worker processes for the per-subject process step "
-        "(default 1 = serial). N<=0 uses all-but-one core. Only parallel-capable "
-        "modules (the vertex analyses) use it; others run serially. Results are "
-        "identical to serial regardless of N.",
+        "--jobs", "-j", type=int, default=None, metavar="N",
+        help="Parallel worker processes for the per-subject process step. "
+        "An explicit N wins over the study YAML's top-level `jobs:`; when omitted "
+        "that YAML value is used, else serial. N<=0 uses all-but-one core. Only "
+        "parallel-capable modules use it (the vertex analyses, roi_connectivity, "
+        "electrode_connectivity); others run serially. Results are identical to "
+        "serial regardless of N.",
     )
     p_run.add_argument(
         "--metric",
@@ -662,7 +764,10 @@ def main():
     p_run.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite the analysis output directory if it already exists",
+        help="Remove the analysis's previous output before running: its published "
+             "tables/ and figures/ dirs always, and its analytics working dir "
+             "(data/ + summary) when the process step runs. Also overrides "
+             "--strict-output.",
     )
     p_run.set_defaults(func=cmd_run)
 
@@ -690,10 +795,24 @@ def main():
     p_fig.set_defaults(func=cmd_figure)
 
     # init
-    p_init = subparsers.add_parser("init", help="Scaffold analysis config from paradigm directory")
-    p_init.add_argument("paradigm_dir", type=Path, help="Paradigm directory (contains derivatives/)")
+    p_init = subparsers.add_parser(
+        "init",
+        help="Scaffold a study YAML (design/hypotheses + one paradigm) from a "
+             "reconstruction directory; writes <dir>/analysis/<name>.yaml",
+    )
+    p_init.add_argument("paradigm_dir", type=Path, help="Reconstruction directory (contains derivatives/)")
     p_init.add_argument("--name", help="Study name (default: directory name)")
     p_init.add_argument("--groups-from", type=Path, help="source-localization study_config.yaml for group mappings")
+    p_init.add_argument("--paradigm", default="resting", help="Name of the paradigm block to emit (default: resting)")
+    p_init.add_argument(
+        "--analyses", default=",".join(_INIT_DEFAULT_ANALYSES), metavar="a,b,...",
+        help=f"Analyses to list under the paradigm (default: {','.join(_INIT_DEFAULT_ANALYSES)})",
+    )
+    p_init.add_argument("--data-subdir", default="pipeline/data", help="Per-subject data subdir (default: pipeline/data)")
+    p_init.add_argument(
+        "--output", "-o", metavar="PATH",
+        help="Where to write the YAML (default: <paradigm_dir>/analysis/<name>.yaml); '-' prints to stdout",
+    )
     p_init.set_defaults(func=cmd_init)
 
     args = parser.parse_args()

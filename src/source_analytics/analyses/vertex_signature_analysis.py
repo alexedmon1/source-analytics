@@ -26,7 +26,7 @@ from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.vertex import compute_psd_vertices, extract_band_power_vertices
-from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
+from ..spectral.epoch_sampler import sample_epochs
 from ..stats.signature import (
     SignatureResult,
     classifier_label,
@@ -87,7 +87,8 @@ class VertexSignatureAnalysis(BaseAnalysis):
         if self._noise_exclude is not None:
             self._noise_exclude = tuple(self._noise_exclude)
 
-        self._epoch_config = get_epoch_config(wb_cfg)
+        # Global epoch_sampling → vertex: block → per-analysis block (see base).
+        self._epoch_config = self._vertex_epoch_config()
         self._signature_results: dict[str, object] = {}
 
     def setup(self) -> None:

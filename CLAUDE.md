@@ -1,77 +1,74 @@
 # CLAUDE.md — source-analytics
 
-## What This Is
+Group-level statistics for source-localized EEG. **Python** orchestrates, loads
+reconstructions, does signal processing, and runs the permutation/cluster stats
+for vertex and sensor maps. **R** (lme4/lmerTest/emmeans, ggplot2) does the LMM
+statistics and figures for the ROI/electrode modules. Python calls `Rscript`.
 
-Statistical analysis toolkit for source-localized EEG data. **Python** handles signal processing (PSD, band power) and data I/O. **R** handles statistics (lme4/lmerTest LMMs, t-tests, effect sizes) and visualization (ggplot2).
+`README.md` is the user manual and is kept in sync with the code. For methods,
+`docs/methods/` is authoritative. When the two disagree with the code, fix the doc.
 
 ## Setup
 
 ```bash
-# Python
-cd /home/edm9fd/sandbox/source-analytics
 uv venv && source .venv/bin/activate
-uv pip install -e .
-
-# R packages (one-time)
-Rscript -e 'install.packages(c("ggplot2","dplyr","tidyr","readr","stringr","forcats","lme4","lmerTest","effectsize","emmeans","yaml","argparse","patchwork","scales"))'
+uv pip install -e ".[all]"        # mne / scikit-learn / networkx / nibabel extras
+Rscript -e 'install.packages(c("ggplot2","dplyr","tidyr","readr","forcats","lme4","lmerTest","effectsize","emmeans","yaml","argparse","optparse","patchwork","scales","ggsignif"))'
 ```
+
+Tests: `.venv/bin/python -m pytest -q`. R syntax check:
+`for f in R/*.R; do Rscript -e "invisible(parse(file='$f'))"; done`.
 
 ## Usage
 
 ```bash
-source-analytics validate --study /mnt/d/research/EEG/FORGE/analysis.yaml
-source-analytics run --study /mnt/d/research/EEG/FORGE/analysis.yaml --analysis psd
-source-analytics list
+source-analytics init /path/to/rest_roi --name study        # writes rest_roi/analysis/study.yaml
+source-analytics validate --study study.yaml
+source-analytics list --study study.yaml
+source-analytics run --study study.yaml --paradigm resting --analysis roi_psd
+source-analytics run ... --steps statistics,figures,summary  # figures are OFF by default
+scripts/run_study.sh study.yaml                             # whole study, dependency order
 ```
 
-## Architecture
+## Layout
 
 ```
-Python (orchestration + signal processing)     R (statistics + visualization)
-─────────────────────────────────────────      ─────────────────────────────
-1. Discovery (find subjects, load YAML)
-2. Load ROI timeseries (pickle/.set)
-3. Compute PSD (Welch's, scipy)
-4. Extract band power (abs, rel, dB)
-5. Export CSVs ──────────────────────────►  6. Read CSVs + YAML config
-                                            7. LMMs (lme4/lmerTest)
-                                            8. t-tests, Hedges' g, FDR
-                                            9. ggplot2 figures
-                                            10. Markdown summary
+src/source_analytics/
+  cli.py            run / validate / list / figure / init
+  core.py           ANALYSIS_REGISTRY (+ deprecated aliases), ANALYSIS_METADATA, StudyAnalyzer
+  config.py         StudyConfig, DesignSpec (design:/hypotheses:), profiles, paradigm scoping
+  analyses/         one module per analysis, all subclass analyses/base.BaseAnalysis
+  hypothesis/       Python adapters (tabular / permutation / edge) for declared hypotheses
+  spectral/, stats/, io/, viz/, atlas/
+R/                  <module>_analysis.R scripts, hypothesis.R (emmeans adapter), stats_utils.R
+scripts/run_study.sh
+docs/methods/       APERIODIC_FIT_WINDOW, CONNECTIVITY_METHODS, HYPOTHESIS, DESIGN_SPEC
 ```
 
-### Python modules (`src/source_analytics/`)
-- `cli.py` — CLI entry point
-- `core.py` — StudyAnalyzer orchestrator
-- `config.py` — YAML study config loader
-- `io/` — Data loading (pkl/npy/.set readers, subject discovery)
-- `spectral/` — PSD and band power extraction
-- `analyses/` — BaseAnalysis ABC + PSD module (exports CSV, calls Rscript)
+Lifecycle per module: `setup → process(_subject) → aggregate → statistics →
+figures → summary`. `DEFAULT_RUN_STEPS` excludes `figures`.
 
-### R scripts (`R/`)
-- `psd_analysis.R` — Main entry point (called by Python)
-- `stats_utils.R` — Omnibus LMM (group*roi interaction), emmeans post-hoc, FDR/Holm correction
-- `plot_psd.R` — ggplot2 figures (PSD curves, boxplots, heatmaps)
-- `report.R` — Markdown summary writer
+## Output contract
 
-## CSV Interface (Python → R)
+- Working tree: `paths.analytics/[<profile>/]<paradigm>/<analysis>/` holds
+  `data/` (per-subject CSVs + `study_config.yaml` snapshot) and `ANALYSIS_SUMMARY.md`.
+- Published: `paths.results/[<profile>/]{tables,figures}/<paradigm>/<analysis>/`
+  (`BaseAnalysis.tbl_dir` / `fig_dir`). source-lightbox reads these.
+- Every inferential module writes `<analysis>_hypotheses.csv` (one row per
+  band × spatial cell, or per cluster for map modules) into `tables/`.
+- Band power CSVs carry `absolute` (mean power density, dB/Hz) and `relative`.
+  There is no `dB` column.
 
-Exported to `{output_dir}/psd/data/`:
-- `band_power.csv` — subject, group, roi, band, absolute, relative, dB
-- `psd_curves.csv` — subject, group, roi, freq_hz, psd
-- `study_config.yaml` — copy of study config for R
+## Conventions
 
-R outputs to `{output_dir}/psd/tables/`:
-- `psd_omnibus.csv` — Omnibus LMM results (group x ROI interaction, Type III ANOVA)
-- `psd_posthoc_roi.csv` — emmeans post-hoc contrasts per ROI (Holm-corrected)
-
-## R packages required
-
-ggplot2, dplyr, tidyr, readr, stringr, forcats, lme4, lmerTest, effectsize, emmeans, yaml, argparse, patchwork, scales
-
-## Adding a New Analysis
-
-1. Create `src/source_analytics/analyses/my_analysis.py` (Python: data extraction + CSV export)
-2. Create `R/my_analysis.R` (R: statistics + visualization)
-3. Register in `core.py` ANALYSIS_REGISTRY
-4. **Update `README.md`** — add the new module to the "Analysis Modules" section with a description of what it does, its Python/R responsibilities, and its output files
+- Deprecated analysis names (`psd`, `pac`, `vertex_mvpa`, …) are in
+  `core._DEPRECATED_NAMES`; output always goes under the canonical name.
+- R scripts derive contrasts with `contrasts_from_spec(parse_design_spec(config))`
+  from `R/hypothesis.R`; never read `config$contrasts` directly.
+- Optional deps are lazy: mne (evoked/TFR), scikit-learn (signature), networkx
+  (graph). The package must import without them.
+- Adding an analysis: subclass `BaseAnalysis`, register in `ANALYSIS_REGISTRY`,
+  add an `ANALYSIS_METADATA` entry (`category`, `level`, `domain`, and
+  `supplements`/`requires` for secondaries), declare `SELECTABLE`, add the R
+  script if it uses emmeans, then add it to the README catalog and
+  `scripts/run_study.sh`. Keep the timeout value and its log message in step.

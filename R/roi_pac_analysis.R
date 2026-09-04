@@ -33,7 +33,7 @@ script_dir <- if (exists("script.dir")) {
   }, error = function(e) "R")
 }
 
-tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
+source(file.path(script_dir, "stats_utils.R"))
 source(file.path(script_dir, "hypothesis.R"))
 
 # --- Hypothesis-layer adapters --------------------------------------------

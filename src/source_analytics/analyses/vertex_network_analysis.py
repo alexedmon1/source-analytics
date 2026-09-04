@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import pickle
-import subprocess
 from functools import lru_cache
 from pathlib import Path
 
@@ -32,7 +31,7 @@ from ..spectral.vertex_connectivity import (
     compute_vertex_connectivity_matrix,
     compute_vertex_connectivity_matrix_epochs,
 )
-from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
+from ..spectral.epoch_sampler import sample_epochs
 from ..stats.graph_metrics import (
     GLOBAL_METRIC_NAMES,
     compute_auc,
@@ -44,7 +43,6 @@ from ..viz.glass_brain import (
     plot_nbs_roi_circos,
 )
 from ._network_base import NetworkAnalysisBase
-from .base import find_r_script_dir
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +109,8 @@ class _VertexNetworkBase(NetworkAnalysisBase):
         self._density_min = float(cfg.get("density_min", 0.05))
         self._density_max = float(cfg.get("density_max", 0.40))
         self._density_step = float(cfg.get("density_step", 0.01))
-        self._epoch_config = get_epoch_config(config.vertex)
+        # Global epoch_sampling → vertex: block → per-analysis block (see base).
+        self._epoch_config = self._vertex_epoch_config()
 
     def setup(self) -> None:
         self._auc_rows.clear()
@@ -583,15 +582,6 @@ class VertexNetworkAnalysis(_VertexNetworkBase):
             config_data["sfreq"] = self._sfreq
         with open(config_path, "w") as f:
             yaml.dump(config_data, f, default_flow_style=False)
-        try:
-            r_script = find_r_script_dir() / "vertex_network_analysis.R"
-            if r_script.exists():
-                cmd = ["Rscript", str(r_script), "--data-dir", str(data_dir),
-                       "--config", str(config_path), "--output-dir", str(self.output_dir),
-                       "--fig-dir", str(self.fig_dir), "--tbl-dir", str(self.tbl_dir)]
-                cmd.extend(self._r_no_figures_flags())
-                if subprocess.run(cmd, capture_output=True, text=True, timeout=3600).returncode == 0:
-                    return
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+        # The combined alias has no R report of its own (graph + NBS statistics
+        # run in Python via the hypothesis layer); write the Python summary.
         self._write_summary(graph=True, nbs=True)

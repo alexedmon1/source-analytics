@@ -32,8 +32,8 @@ script_dir <- if (exists("script.dir")) {
   }, error = function(e) "R")
 }
 
-tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
-tryCatch(source(file.path(script_dir, "hypothesis.R")), error = function(e) NULL)
+source(file.path(script_dir, "stats_utils.R"))
+source(file.path(script_dir, "hypothesis.R"))
 
 # --- Argument parsing ---
 parser <- ArgumentParser(description = "Electrode aperiodic analysis (R)")
