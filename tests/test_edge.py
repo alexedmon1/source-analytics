@@ -189,3 +189,74 @@ def test_nbs_significant_edges_mask_is_populated():
     assert int(mask.sum()) == expected, (
         f"mask has {int(mask.sum())} edges, significant components total {expected}"
     )
+
+
+def test_subnetwork_edges_sidecar_matches_component_rows(tmp_path):
+    """``write_module_hypotheses_edge(node_labels=...)`` writes
+    ``<prefix>_subnetwork_edges.csv``: one row per supra-threshold edge of every
+    component, labelled by ROI. Its per-component edge count must equal the
+    ``n_edges`` of the matching row in ``<prefix>_hypotheses.csv``, and every
+    edge of the significant component must fall inside the planted clique.
+    This sidecar is the inferential source the gallery's circos draws from now
+    that roi_connectivity's per-edge posthoc tables are retired.
+    """
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from source_analytics.config import DesignSpec
+    from source_analytics.hypothesis.edge import write_module_hypotheses_edge
+
+    rng = np.random.default_rng(1)
+    mats, sgroups = _make({"A": (14, 2.0), "B": (14, 0.0)}, rng)
+    labels = [f"ROI{i:02d}" for i in range(N_NODE)]
+    spec = DesignSpec(factor="group", reference="B", levels=["A", "B"],
+                      hypotheses=[Hypothesis(name="a_vs_b", kind="contrast",
+                                             weights={"A": 1.0, "B": -1.0})])
+    config = SimpleNamespace(design_spec=spec)
+
+    df = write_module_hypotheses_edge(
+        {("Theta", "imag_coherence"): mats}, sgroups, config, tmp_path,
+        prefix="roi_nbs", nbs_threshold=2.0, n_perms=100, seed=7, node_labels=labels)
+
+    edges = pd.read_csv(tmp_path / "roi_nbs_subnetwork_edges.csv")
+    assert list(edges.columns) == [
+        "hypothesis", "band", "dv", "component_id", "component_p", "significant",
+        "node_i", "node_j", "roi_i", "roi_j", "stat"]
+    assert set(edges["hypothesis"]) == {"a_vs_b"}
+    assert set(edges["band"]) == {"Theta"} and set(edges["dv"]) == {"imag_coherence"}
+
+    comps = df[df["component_id"] > 0]
+    per_comp = edges.groupby("component_id").size().to_dict()
+    for _, row in comps.iterrows():
+        assert per_comp.get(int(row["component_id"]), 0) == int(row["n_edges"])
+
+    sig = edges[edges["significant"]]
+    assert len(sig) > 0
+    # Every planted clique edge is in the significant subnetwork (noise edges
+    # above threshold may attach to it, so the converse is not required).
+    sig_pairs = {frozenset((a, b)) for a, b in zip(sig["roi_i"], sig["roi_j"])}
+    clique = [labels[i] for i in range(BLOCK.stop)]
+    for i, a in enumerate(clique):
+        for b in clique[i + 1:]:
+            assert frozenset((a, b)) in sig_pairs
+    assert (sig["stat"].abs() > 2.0).all()     # supra-threshold by construction
+    assert (edges["node_i"] < edges["node_j"]).all()
+
+
+def test_subnetwork_edges_sidecar_skipped_without_node_labels(tmp_path):
+    """Vertex modules pass no node labels; no sidecar is written for them."""
+    from types import SimpleNamespace
+
+    from source_analytics.config import DesignSpec
+    from source_analytics.hypothesis.edge import write_module_hypotheses_edge
+
+    rng = np.random.default_rng(2)
+    mats, sgroups = _make({"A": (6, 2.0), "B": (6, 0.0)}, rng)
+    spec = DesignSpec(hypotheses=[Hypothesis(name="a_vs_b", kind="contrast",
+                                             weights={"A": 1.0, "B": -1.0})])
+    write_module_hypotheses_edge(
+        {("Theta", "aec"): mats}, sgroups, SimpleNamespace(design_spec=spec), tmp_path,
+        prefix="vertex_nbs", nbs_threshold=2.0, n_perms=20, seed=1)
+    assert (tmp_path / "vertex_nbs_hypotheses.csv").exists()
+    assert not (tmp_path / "vertex_nbs_subnetwork_edges.csv").exists()

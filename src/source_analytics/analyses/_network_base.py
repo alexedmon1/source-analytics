@@ -201,4 +201,7 @@ class NetworkAnalysisBase(BaseAnalysis):
             n_perms=self._nbs_permutations,
             hypothesis=",".join(sorted(wanted)) if wanted else None, seed=42,
             coords=getattr(self, "_source_coords", None), atlas_dir=self._atlas_dir,
+            # ROI modules: name the matrix indices so the subnetwork-edge sidecar
+            # carries roi_i / roi_j (vertex modules have no per-node names).
+            node_labels=list(getattr(self, "_roi_labels", None) or []) or None,
         )

@@ -33,6 +33,18 @@ found 24 defects plus a dozen false README claims. All verified and fixed here.
   `resting` and `vertex`); `sensor_dir` / `source_dir` overrides are accepted.
 - Deprecated analysis names print/check the **canonical** output directory.
 
+### Added
+
+- **`<module>_subnetwork_edges.csv`** next to `roi_nbs_hypotheses.csv` (ROI edge modules):
+  one row per supra-threshold edge of every NBS component (`hypothesis, band, dv,
+  component_id, component_p, significant, node_i, node_j, roi_i, roi_j, stat`). The
+  component rows only carry counts; this sidecar is the edge-level membership behind them,
+  and is what `source-lightbox` now draws its connectivity circos from (the retired
+  `roi_connectivity_posthoc_region_pair.csv` used to play that role). Vertex modules, whose
+  nodes have no names, do not write it.
+- `plot_significance_circos(sig_label=...)` names what the opaque edges are in the axis
+  title (default unchanged: "region pairs p < 0.05 uncorrected").
+
 ### Fixed
 
 - Evoked R scripts (`roi_evoked`, `electrode_evoked`) looped `config$contrasts`, which is NULL

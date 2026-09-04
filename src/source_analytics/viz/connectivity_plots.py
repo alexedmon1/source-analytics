@@ -212,6 +212,7 @@ def plot_significance_circos(
     group_labels: tuple[str, str] = ("Group A", "Group B"),
     title: str = "",
     dpi: int = 200,
+    sig_label: str = "region pairs p < 0.05 uncorrected",
 ) -> None:
     """Single-panel circos highlighting significant connections.
 
@@ -227,6 +228,10 @@ def plot_significance_circos(
     group_labels : tuple[str, str]
     title : str
     dpi : int
+    sig_label : str
+        What the opaque edges are, printed after their count in the axis title
+        (e.g. ``"edges of an FDR-significant NBS subnetwork"`` when *sig_mask*
+        comes from ``<module>_subnetwork_edges.csv``).
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -252,7 +257,7 @@ def plot_significance_circos(
 
     ax.set_title(
         f"Difference ({group_labels[0]} \u2013 {group_labels[1]})"
-        f"\n{n_sig} region pairs p < 0.05 uncorrected",
+        f"\n{n_sig} {sig_label}",
         fontsize=11, fontweight="bold", pad=12,
     )
 

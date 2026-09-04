@@ -223,6 +223,38 @@ def _component_rows(comps: list[tuple[np.ndarray, int]], masses: list[float],
     return rows
 
 
+def _component_edge_rows(comps: list[tuple[np.ndarray, int]], pvals: list[float],
+                         stat_matrix: np.ndarray, threshold: float,
+                         node_labels: list[str] | None = None) -> list[dict[str, Any]]:
+    """Edge-level membership of every component: one row per supra-threshold
+    edge with both endpoints in the component's node set (exactly the edges the
+    subnetwork row's ``n_edges`` counts). Consumers that draw a subnetwork (e.g.
+    the gallery's circos) need this — the component rows only carry counts.
+
+    ``node_labels`` (one name per matrix index) adds ``roi_i`` / ``roi_j``.
+    """
+    rows: list[dict[str, Any]] = []
+    for ci, ((nodes, _n_edges), p) in enumerate(zip(comps, pvals), start=1):
+        idx = np.asarray(nodes, dtype=int)
+        sub = stat_matrix[np.ix_(idx, idx)]
+        ii, jj = np.triu_indices(len(idx), k=1)
+        for a, b in zip(ii, jj):
+            s = float(sub[a, b])
+            if not abs(s) > threshold:
+                continue
+            i, j = int(idx[a]), int(idx[b])
+            row: dict[str, Any] = {
+                "component_id": ci, "component_p": float(p),
+                "significant": float(p) < 0.05,
+                "node_i": i, "node_j": j, "stat": s,
+            }
+            if node_labels is not None:
+                row["roi_i"] = node_labels[i]
+                row["roi_j"] = node_labels[j]
+            rows.append(row)
+    return rows
+
+
 # --------------------------------------------------------------------------- #
 # Runner
 # --------------------------------------------------------------------------- #
@@ -237,12 +269,18 @@ def run_hypothesis_edge(
     covariates: dict[str, np.ndarray] | None = None,
     seed: int = 42,
     vertex_rois: list[str | None] | None = None,
+    node_labels: list[str] | None = None,
+    edge_rows: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Run ONE hypothesis over per-subject connectivity matrices → component rows.
 
     subject_matrices: {uid -> (n, n)} for a single (band, metric) cell, ALL
     subjects. subject_groups: {uid -> group}. ``vertex_rois`` (one ROI name per
     node) adds a ``region`` column naming each subnetwork's node regions.
+
+    ``edge_rows`` (a list) is an optional sink: when given, the per-edge
+    membership of every component (see :func:`_component_edge_rows`) is
+    appended to it, labelled with ``node_labels`` when those are supplied.
     """
     present = set(subject_groups.values())
     groups = _fit_groups(hyp, spec, present)
@@ -271,8 +309,10 @@ def run_hypothesis_edge(
         k = len(arrays)
         n_total = sum(a.shape[0] for a in arrays)
         f_thresh = float(stats.f.ppf(1 - _OMNIBUS_NBS_ALPHA, k - 1, n_total - k))
-        _, comps, masses, peaks, pvals = _nbs_components(
+        obs, comps, masses, peaks, pvals = _nbs_components(
             arrays, _f_edges, f_thresh, n_perms, seed)
+        if edge_rows is not None:
+            edge_rows.extend(_component_edge_rows(comps, pvals, obs, f_thresh, node_labels))
         return _component_rows(comps, masses, peaks, pvals, "F", vertex_rois)
 
     if hyp.kind == "contrast":
@@ -290,6 +330,9 @@ def run_hypothesis_edge(
                 n_permutations=n_perms, seed=seed)
             comps = _components(np.abs(r.t_matrix) > nbs_threshold)
             masses, peaks = _mass_peak(r.t_matrix, comps, nbs_threshold)
+            if edge_rows is not None:
+                edge_rows.extend(_component_edge_rows(
+                    comps, r.component_pvalues, r.t_matrix, nbs_threshold, node_labels))
             return _component_rows(comps, masses, peaks, r.component_pvalues, "t",
                                    vertex_rois, stat_matrix=r.t_matrix,
                                    threshold=nbs_threshold)
@@ -298,6 +341,8 @@ def run_hypothesis_edge(
         obs, comps, masses, peaks, pvals = _nbs_components(
             arrays, lambda arr: _weighted_t_edges(arr, weights),
             nbs_threshold, n_perms, seed)
+        if edge_rows is not None:
+            edge_rows.extend(_component_edge_rows(comps, pvals, obs, nbs_threshold, node_labels))
         return _component_rows(comps, masses, peaks, pvals, "t", vertex_rois,
                                stat_matrix=obs, threshold=nbs_threshold)
 
@@ -354,6 +399,7 @@ def write_module_hypotheses_edge(
     seed: int = 42,
     coords=None,
     atlas_dir=None,
+    node_labels: list[str] | None = None,
 ):
     """Run every declared hypothesis over per-cell connectivity matrices.
 
@@ -361,6 +407,13 @@ def write_module_hypotheses_edge(
     ``coords`` + ``atlas_dir`` (optional): when both are given (vertex modules),
     each subnetwork row gets a ``region`` column naming the regions of its nodes.
     Writes ``<prefix>_hypotheses.csv``; returns the rows DataFrame (or None).
+
+    ``node_labels`` (one ROI name per matrix index; the ROI modules) additionally
+    writes ``<prefix>_subnetwork_edges.csv`` — one row per supra-threshold edge
+    of every component (``hypothesis, band, dv, component_id, component_p,
+    significant, node_i, node_j, roi_i, roi_j, stat``). This is the edge-level
+    evidence behind each subnetwork row, for consumers that draw the subnetwork
+    (e.g. the gallery's circos).
     """
     import pandas as pd
     from pathlib import Path
@@ -388,16 +441,21 @@ def write_module_hypotheses_edge(
             return None
 
     rows: list[dict[str, Any]] = []
+    edge_rows: list[dict[str, Any]] = []
     for hyp in hyps:
         for (band, dv), subject_matrices in matrices_by_cell.items():
+            cell_edges: list[dict[str, Any]] | None = [] if node_labels is not None else None
             try:
                 comps = run_hypothesis_edge(
                     hyp, subject_matrices, subject_groups, spec=spec,
                     nbs_threshold=nbs_threshold, n_perms=n_perms, seed=seed,
-                    vertex_rois=vertex_rois)
+                    vertex_rois=vertex_rois, node_labels=node_labels,
+                    edge_rows=cell_edges)
             except Exception as e:  # noqa: BLE001 — keep the sweep going
                 logger.warning("  %s [%s/%s]: %s", hyp.name, band, dv, e)
                 continue
+            for e_row in (cell_edges or []):
+                edge_rows.append({"hypothesis": hyp.name, "band": band, "dv": dv, **e_row})
             for c in comps:
                 rows.append({
                     "hypothesis": hyp.name, "kind": hyp.kind, "role": hyp.role,
@@ -414,4 +472,10 @@ def write_module_hypotheses_edge(
     n_sig = int(df["significant"].sum())
     logger.info("  Saved: %s (%d rows, %d hypotheses; %d significant subnetworks)",
                 path.name, len(df), len(hyps), n_sig)
+    if node_labels is not None:
+        edge_path = Path(tbl_dir) / f"{prefix}_subnetwork_edges.csv"
+        edge_cols = ["hypothesis", "band", "dv", "component_id", "component_p",
+                     "significant", "node_i", "node_j", "roi_i", "roi_j", "stat"]
+        pd.DataFrame(edge_rows, columns=edge_cols).to_csv(edge_path, index=False)
+        logger.info("  Saved: %s (%d edges)", edge_path.name, len(edge_rows))
     return df

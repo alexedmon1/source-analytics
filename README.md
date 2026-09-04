@@ -658,6 +658,7 @@ inside the analysis working directory.
 
 <results>/[<profile>/]tables/<paradigm>/<analysis>/
     <analysis>_hypotheses.csv  # the hypothesis-layer result (one row per band×cell)
+    <analysis>_subnetwork_edges.csv  # roi_nbs only: per-edge membership of each NBS component
     …                          # any module-specific diagnostic tables
 <results>/[<profile>/]figures/<paradigm>/<analysis>/
     *.png                      # ggplot2 / glass-brain / matplotlib figures (figures step only)
