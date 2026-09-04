@@ -82,18 +82,58 @@ class FCDComparisonAnalysis(BaseAnalysis):
         cfg = config.raw.get(self.name, {})
         self._metric_filter = cfg.get("metrics")
 
-    def setup(self) -> None:
+    def _find_upstream_csv(self, module: str, filename: str, override_key: str) -> Path:
+        """Locate a primary module's data CSV, in this paradigm or a sibling one.
+
+        The two primaries usually live in *different* paradigms (the canonical
+        layout runs ``electrode_connectivity`` under ``resting`` and
+        ``vertex_connectivity`` under ``vertex``), so a same-paradigm lookup is
+        not enough. Search order:
+
+        1. an explicit ``<override_key>: <path>`` in this module's config block
+           (a directory containing ``data/<filename>`` or the CSV itself);
+        2. this paradigm's working dir (``analytics/<paradigm>/<module>/data``);
+        3. every sibling paradigm dir under the same analytics root.
+        """
+        cfg = self.config.raw.get(self.name, {}) or {}
+        override = cfg.get(override_key)
+        if override:
+            p = Path(override)
+            if not p.is_absolute():
+                p = (self.config.output_dir / p).resolve()
+            candidate = p if p.suffix == ".csv" else p / "data" / filename
+            if candidate.exists():
+                return candidate
+            raise FileNotFoundError(
+                f"{self.name}: {override_key}={override!r} does not contain {filename}"
+            )
+
         base = self.config.output_dir
-        sensor_csv = base / "electrode_connectivity" / "data" / "electrode_fcd.csv"
-        source_csv = base / "vertex_connectivity" / "data" / "vertex_fcd.csv"
-        if not sensor_csv.exists():
-            raise FileNotFoundError(
-                f"{sensor_csv} not found — run 'electrode_connectivity' first."
-            )
-        if not source_csv.exists():
-            raise FileNotFoundError(
-                f"{source_csv} not found — run 'vertex_connectivity' first."
-            )
+        same = base / module / "data" / filename
+        if same.exists():
+            return same
+
+        searched = [same]
+        root = base.parent if self.config.paradigm_name else base
+        for sibling in sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []:
+            candidate = sibling / module / "data" / filename
+            searched.append(candidate)
+            if candidate.exists():
+                logger.info("%s: using %s from paradigm dir %s", self.name, module, sibling.name)
+                return candidate
+        raise FileNotFoundError(
+            f"{filename} not found — run '{module}' first (any paradigm). Searched: "
+            + ", ".join(str(s) for s in searched)
+            + f". Or set {self.name}.{override_key} to its output directory."
+        )
+
+    def setup(self) -> None:
+        sensor_csv = self._find_upstream_csv(
+            "electrode_connectivity", "electrode_fcd.csv", "sensor_dir",
+        )
+        source_csv = self._find_upstream_csv(
+            "vertex_connectivity", "vertex_fcd.csv", "source_dir",
+        )
         self._sensor_df = pd.read_csv(sensor_csv)
         self._source_df = pd.read_csv(source_csv)
         logger.info(

@@ -39,7 +39,7 @@ order_bands <- function(x, ref = NULL) {
 #' Reports Type III ANOVA F-tests for group, roi, and group:roi interaction.
 #' FDR (BH) correction applied across bands within each contrast.
 #'
-#' @param band_df data.frame with columns: subject, group, roi, band, absolute, relative, dB
+#' @param band_df data.frame with columns: subject, group, roi, band, absolute (dB/Hz), relative [, delta_ref]
 #' @param contrasts list of lists, each with name, group_a, group_b
 #' @param bands named list of c(fmin, fmax) — used only for ordering
 #' @param power_type character — column to use as DV: "relative" or "absolute"
@@ -138,7 +138,7 @@ run_omnibus_lmm <- function(band_df, contrasts, bands, power_type = "relative") 
 
 #' Run emmeans post-hoc contrasts per ROI for significant omnibus results
 #'
-#' @param band_df data.frame with columns: subject, group, roi, band, absolute, relative, dB
+#' @param band_df data.frame with columns: subject, group, roi, band, absolute (dB/Hz), relative [, delta_ref]
 #' @param contrasts list of lists, each with name, group_a, group_b
 #' @param bands named list of c(fmin, fmax)
 #' @param omnibus_df data.frame from run_omnibus_lmm()
@@ -229,7 +229,7 @@ run_posthoc_emmeans <- function(band_df, contrasts, bands, omnibus_df,
 
 #' Aggregate ROI-level data to region-level means
 #'
-#' @param band_df data.frame with columns: subject, group, roi, band, absolute, relative, dB
+#' @param band_df data.frame with columns: subject, group, roi, band, absolute (dB/Hz), relative [, delta_ref]
 #' @param roi_categories named list of ROI name vectors
 #' @return data.frame with 'region' column replacing 'roi'
 aggregate_to_regions <- function(band_df, roi_categories) {
@@ -239,12 +239,13 @@ aggregate_to_regions <- function(band_df, roi_categories) {
     stringsAsFactors = FALSE
   )
 
+  # Average every power DV present (absolute / relative / delta_ref) so a
+  # config `dvs:` that includes delta_ref survives the region aggregate.
   band_df %>%
     inner_join(roi_to_region, by = "roi") %>%
     group_by(subject, group, region, band) %>%
     summarise(
-      absolute = mean(absolute, na.rm = TRUE),
-      relative = mean(relative, na.rm = TRUE),
+      across(any_of(c("absolute", "relative", "delta_ref")), ~ mean(.x, na.rm = TRUE)),
       .groups = "drop"
     )
 }
@@ -448,7 +449,7 @@ run_posthoc_emmeans_region <- function(band_df, contrasts, bands, roi_categories
 #' ROIs/electrodes are retained as replicate observations within regions.
 #' Model: dv ~ group * region + (1|subject)
 #'
-#' @param band_df data.frame with columns: subject, group, roi, band, absolute, relative, dB
+#' @param band_df data.frame with columns: subject, group, roi, band, absolute (dB/Hz), relative [, delta_ref]
 #' @param contrasts list of contrast definitions
 #' @param bands named list of frequency band limits
 #' @param roi_categories named list of ROI/electrode name vectors per region
@@ -558,7 +559,7 @@ run_omnibus_lmm_region_nested <- function(band_df, contrasts, bands, roi_categor
 #' Same model as run_omnibus_lmm_region_nested() — individual ROIs/electrodes
 #' retained as replicates. emmeans(fit, pairwise ~ group | region).
 #'
-#' @param band_df data.frame with columns: subject, group, roi, band, absolute, relative, dB
+#' @param band_df data.frame with columns: subject, group, roi, band, absolute (dB/Hz), relative [, delta_ref]
 #' @param contrasts list of contrast definitions
 #' @param bands named list of frequency band limits
 #' @param roi_categories named list of ROI/electrode name vectors per region

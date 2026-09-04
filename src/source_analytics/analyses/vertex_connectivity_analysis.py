@@ -27,7 +27,7 @@ from ..spectral.vertex_connectivity import (
     compute_fcd,
     FCD_CENTER,
 )
-from ..spectral.epoch_sampler import sample_epochs, get_epoch_config
+from ..spectral.epoch_sampler import sample_epochs
 from ..stats.cluster_permutation import (
     cluster_permutation_test,
     has_significant_cluster as _has_significant_cluster,
@@ -73,7 +73,8 @@ class VertexConnectivityAnalysis(BaseAnalysis):
         self._adjacency_distance = float(wb_cfg.get("adjacency_distance_mm", 5.0))
         self._cluster_threshold = float(wb_cfg.get("cluster_threshold", 2.0))
 
-        self._epoch_config = get_epoch_config(wb_cfg)
+        # Global epoch_sampling → vertex: block → per-analysis block (see base).
+        self._epoch_config = self._vertex_epoch_config()
 
         self._cluster_results: dict = {}
 

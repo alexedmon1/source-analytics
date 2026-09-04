@@ -1,9 +1,13 @@
 #!/usr/bin/env Rscript
-# roi_transfer_entropy_analysis.R — Transfer entropy statistics and report
+# roi_transfer_entropy_analysis.R — roi_directed statistics and report (TE + DTF)
+#
+# Output tables/figures carry the module's canonical prefix `roi_directed_*`;
+# this file keeps its legacy name because Python resolves it by that name.
 #
 # Called by Python: Rscript R/roi_transfer_entropy_analysis.R --data-dir ... --config ... --output-dir ...
 #
-# Reads transfer_entropy_edges.csv exported by Python.
+# Reads roi_transfer_entropy_edges.csv exported by Python. Directed DVs present
+# in the CSV (te, net_te, dtf) are all tested; a DTF-only run works.
 # Three analysis tiers:
 #   1. Global TE: mean TE across all directed edges per subject x band, Welch t-test, BH FDR
 #   2. Directional: paired t-test on TE(X→Y) vs TE(Y→X) within groups (test for net directionality)
@@ -37,7 +41,7 @@ script_dir <- if (exists("script.dir")) {
     }
   }, error = function(e) "R")
 }
-tryCatch(source(file.path(script_dir, "stats_utils.R")), error = function(e) NULL)
+source(file.path(script_dir, "stats_utils.R"))
 source(file.path(script_dir, "hypothesis.R"))
 
 # --- Hypothesis-layer adapters --------------------------------------------
@@ -86,15 +90,27 @@ theme_pub <- function(base_size = 14) {
 # 1. Global TE analysis: Welch t-tests
 # ===========================================================================
 
+# Directed DVs the module can export; whichever are present in the edge CSV
+# are tested (te + net_te from --metric te, dtf from --metric dtf).
+DIRECTED_DVS <- c("te", "net_te", "dtf")
+
 compute_global_te <- function(edges) {
-  edges %>%
+  present <- intersect(DIRECTED_DVS, names(edges))
+  out <- edges %>%
     group_by(subject, group, band) %>%
     summarise(
-      mean_te = mean(te, na.rm = TRUE),
-      mean_abs_net_te = mean(abs(net_te), na.rm = TRUE),
+      across(any_of(setdiff(present, "net_te")), ~ mean(.x, na.rm = TRUE),
+             .names = "mean_{.col}"),
       n_edges = n(),
       .groups = "drop"
     )
+  if ("net_te" %in% present) {
+    abs_net <- edges %>%
+      group_by(subject, group, band) %>%
+      summarise(mean_abs_net_te = mean(abs(net_te), na.rm = TRUE), .groups = "drop")
+    out <- left_join(out, abs_net, by = c("subject", "group", "band"))
+  }
+  out
 }
 
 run_global_ttests <- function(global_df, contrasts, bands) {
@@ -253,14 +269,13 @@ aggregate_edges_to_region_pairs <- function(edges, roi_categories) {
   edges_mapped %>%
     group_by(subject, group, band, region_pair) %>%
     summarise(
-      te = mean(te, na.rm = TRUE),
-      net_te = mean(net_te, na.rm = TRUE),
+      across(any_of(DIRECTED_DVS), ~ mean(.x, na.rm = TRUE)),
       n_edges = n(),
       .groups = "drop"
     )
 }
 
-run_omnibus_lmm <- function(region_pair_df, contrasts, bands) {
+run_omnibus_lmm <- function(region_pair_df, contrasts, bands, dv = "te") {
   if (!has_lme4) {
     message("  lme4/lmerTest not available -- skipping region-pair LMM")
     return(data.frame())
@@ -293,7 +308,8 @@ run_omnibus_lmm <- function(region_pair_df, contrasts, bands) {
       converged <- TRUE; singular <- FALSE
 
       tryCatch({
-        fit <- lmer(te ~ group * region_pair + (1 | subject), data = bdata)
+        bdata$.dv <- bdata[[dv]]
+        fit <- lmer(.dv ~ group * region_pair + (1 | subject), data = bdata)
         singular <- isSingular(fit)
 
         aov <- anova(fit, type = 3)
@@ -438,7 +454,12 @@ run_posthoc_emmeans <- function(region_pair_df, contrasts, bands, omnibus_df, ga
 # ===========================================================================
 
 plot_global_te_bar <- function(global_df, group_colors, group_labels,
-                               group_order, output_dir) {
+                               group_order, output_dir, dv = "te") {
+  mean_col <- paste0("mean_", dv)
+  if (!mean_col %in% names(global_df)) return(invisible(NULL))
+  dv_label <- c(te = "Transfer Entropy", dtf = "DTF")[dv]
+  if (is.na(dv_label)) dv_label <- toupper(dv)
+  global_df$mean_te <- global_df[[mean_col]]
   plot_data <- global_df %>%
     filter(group %in% group_order) %>%
     mutate(
@@ -465,15 +486,16 @@ plot_global_te_bar <- function(global_df, group_colors, group_labels,
                 size = 1.5, alpha = 0.5, show.legend = FALSE) +
     scale_fill_manual(values = color_vals, name = NULL) +
     scale_color_manual(values = color_vals, name = NULL) +
-    labs(x = "Frequency Band", y = "Global Transfer Entropy (mean of all directed edges)",
-         title = "Global Transfer Entropy by Band and Group") +
+    labs(x = "Frequency Band", y = paste0("Global ", dv_label, " (mean of all directed edges)"),
+         title = paste0("Global ", dv_label, " by Band and Group")) +
     theme_pub() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
   n_bands <- length(unique(summary_data$band))
-  ggsave(file.path(output_dir, "roi_transfer_entropy_global_bar.png"), p,
+  fname <- if (dv == "te") "roi_directed_global_bar.png" else paste0("roi_directed_global_bar_", dv, ".png")
+  ggsave(file.path(output_dir, fname), p,
          width = max(8, 2 * n_bands), height = 5, dpi = 300)
-  message("  Saved: roi_transfer_entropy_global_bar.png")
+  message("  Saved: ", fname)
 }
 
 # ===========================================================================
@@ -509,7 +531,11 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
     collapse = ", "
   )
 
-  add("**Analysis:** Binned Transfer Entropy (Schreiber 2000)")
+  dv_desc <- c(te = "binned transfer entropy (Schreiber 2000)",
+               net_te = "net transfer entropy TE(X\u2192Y) \u2212 TE(Y\u2192X)",
+               dtf = "directed transfer function (Kami\u0144ski & Blinowska 1991; ridge-MVAR)")
+  add("**Analysis:** Directed connectivity \u2014 ",
+      paste(dv_desc[intersect(names(dv_desc), dv_cols)], collapse = "; "))
   add("")
   add("**Groups:** ", group_str)
   add("")
@@ -517,10 +543,16 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
   add("")
   add("**Frequency Bands:** ", band_str)
   add("")
-  add("**Metric:** TE(X\u2192Y) = H(Y_f, Y_p) + H(Y_p, X_p) \u2212 H(Y_p) \u2212 H(Y_f, Y_p, X_p)")
-  add("")
-  add("**Parameters:** lag=1 sample, 5 equal-probability bins (quantile-based)")
-  add("")
+  if ("te" %in% dv_cols) {
+    add("**TE metric:** TE(X\u2192Y) = H(Y_f, Y_p) + H(Y_p, X_p) \u2212 H(Y_p) \u2212 H(Y_f, Y_p, X_p)")
+    add("")
+    add("**TE parameters:** lag=1 sample, 5 equal-probability bins (quantile-based)")
+    add("")
+  }
+  if ("dtf" %in% dv_cols) {
+    add("**DTF:** normalized directed transfer function from a ridge-regularized MVAR fit, band-averaged")
+    add("")
+  }
   add("**Timeseries:** Signed (phase-preserving) ROI source timeseries, band-pass filtered (4th-order Butterworth)")
   add("")
 
@@ -529,8 +561,9 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
 
   add("**Statistics (declarative hypothesis layer):**")
   add("")
-  add("1. **Global:** between-group contrast on per-subject mean TE (across all ",
-      n_edges_str, " directed edges) per band \u2014 lm(mean_te ~ group), per-band FDR.")
+  add("1. **Global:** between-group contrast on the per-subject mean of each directed DV (",
+      paste(setdiff(dv_cols, "net_te"), collapse = ", "), "; across all ",
+      n_edges_str, " directed edges) per band \u2014 lm(mean_dv ~ group), per-band FDR.")
   add("")
   add("2. **Directed edges:** mass-univariate group contrast per ordered ",
       "source\u2192target edge (the directed-edge adapter; source\u2192target and ",
@@ -549,13 +582,13 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
   gc <- if (!is.null(hyp_global) && nrow(hyp_global) > 0)
           hyp_global[hyp_global$kind == "contrast", , drop = FALSE] else data.frame()
   if (nrow(gc) > 0) {
-    add("| Hypothesis | Band | estimate | t | df | q | Hedges' g | Sig |")
-    add("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    add("| Hypothesis | DV | Band | estimate | t | df | q | Hedges' g | Sig |")
+    add("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for (i in seq_len(nrow(gc))) {
       row <- gc[i, ]
       sig_str <- if (isTRUE(row$significant)) "**Yes**" else "No"
-      add(sprintf("| %s | %s | %.5f | %.2f | %.1f | %.4f | %.2f | %s |",
-                  row$label %||% row$hypothesis, row$band,
+      add(sprintf("| %s | %s | %s | %.5f | %.2f | %.1f | %.4f | %.2f | %s |",
+                  row$label %||% row$hypothesis, row$dv %||% "te", row$band,
                   ifelse(is.na(row$estimate), 0, row$estimate),
                   ifelse(is.na(row$stat), 0, row$stat),
                   ifelse(is.na(row$df), 0, row$df),
@@ -776,8 +809,13 @@ if (!is.null(args$roi_categories) && file.exists(args$roi_categories)) {
 # ===========================================================================
 # 1. Global TE analysis (needed for figures — always compute)
 # ===========================================================================
-message("\n=== Global Transfer Entropy Analysis ===")
+message("\n=== Global Directed Connectivity Analysis ===")
 
+dv_cols <- intersect(DIRECTED_DVS, names(edges))
+if (length(dv_cols) == 0)
+  stop("roi_transfer_entropy_edges.csv has none of the directed DV columns: ",
+       paste(DIRECTED_DVS, collapse = ", "))
+message("Directed DVs present: ", paste(dv_cols, collapse = ", "))
 global_df <- compute_global_te(edges)
 message("  Global TE computed: ", nrow(global_df), " subject x band rows")
 
@@ -793,17 +831,21 @@ if (!figures_only) {
   # hypothesis layer has a single cell — handled by the directed-edge adapter
   # with one synthetic (global) edge (lm(mean_te ~ group), no spatial term).
   # ===========================================================================
-  message("\n=== Global TE (hypothesis layer) ===")
+  message("\n=== Global directed (hypothesis layer) ===")
   global_edges <- global_df
   global_edges$source_roi <- "(global)"; global_edges$target_roi <- "(global)"
-  hyp_global <- run_directed_edges(global_edges, names(spec$hypotheses), spec,
-                                   dv_col = "mean_te", band_col = "band")
+  hyp_global <- bind_rows(lapply(setdiff(dv_cols, "net_te"), function(dv) {
+    h <- run_directed_edges(global_edges, names(spec$hypotheses), spec,
+                            dv_col = paste0("mean_", dv), band_col = "band")
+    if (nrow(h) > 0) h$dv <- dv
+    h
+  }))
   if (!is.null(args$hypothesis) && nrow(hyp_global) > 0)
     hyp_global <- hyp_global[hyp_global$hypothesis %in%
                              trimws(strsplit(args$hypothesis, ",")[[1]]), , drop = FALSE]
   if (nrow(hyp_global) > 0) {
-    write_csv(hyp_global, file.path(tbl_dir, "roi_transfer_entropy_global_hypotheses.csv"))
-    message("  Saved: roi_transfer_entropy_global_hypotheses.csv (", nrow(hyp_global), " rows)")
+    write_csv(hyp_global, file.path(tbl_dir, "roi_directed_global_hypotheses.csv"))
+    message("  Saved: roi_directed_global_hypotheses.csv (", nrow(hyp_global), " rows)")
     for (i in seq_len(nrow(hyp_global))) {
       row <- hyp_global[i, ]
       sig_str <- if (isTRUE(row$significant)) " ***" else ""
@@ -820,8 +862,8 @@ if (!figures_only) {
   # ===========================================================================
   message("\n=== Directed-Edge TE (hypothesis layer, mass-univariate) ===")
   hyp_edges <- write_module_directed_edges(
-    edges, config, tbl_dir, prefix = "roi_transfer_entropy",
-    dv_cols = "te", source_col = "source_roi", target_col = "target_roi",
+    edges, config, tbl_dir, prefix = "roi_directed",
+    dv_cols = dv_cols, source_col = "source_roi", target_col = "target_roi",
     band_col = "band", hypothesis = args$hypothesis)
   if (is.null(hyp_edges)) hyp_edges <- data.frame()
 
@@ -843,8 +885,8 @@ if (!figures_only) {
     message("  Aggregated to ", n_region_pairs, " directed region pairs")
 
     hyp_region <- write_module_hypotheses(
-      region_pair_df, config, tbl_dir, prefix = "roi_transfer_entropy_region",
-      dv_cols = "te", spatial_col = "region_pair", band_col = "band",
+      region_pair_df, config, tbl_dir, prefix = "roi_directed_region",
+      dv_cols = dv_cols, spatial_col = "region_pair", band_col = "band",
       hypothesis = args$hypothesis)
     if (is.null(hyp_region)) hyp_region <- data.frame()
 
@@ -853,7 +895,11 @@ if (!figures_only) {
 
     # Diagnostic omnibus LMM (group x region_pair interaction-F) — NOT a
     # hypothesis; provides the interaction the marginal hypothesis layer lacks.
-    omnibus_df <- run_omnibus_lmm(region_pair_df, te_contrasts, config$bands)
+    omnibus_df <- bind_rows(lapply(setdiff(dv_cols, "net_te"), function(dv) {
+      o <- run_omnibus_lmm(region_pair_df, te_contrasts, config$bands, dv = dv)
+      if (nrow(o) > 0) o$dv <- dv
+      o
+    }))
     if (nrow(omnibus_df) > 0) {
       message("\n  === Region-Pair Omnibus (diagnostic) ===")
       for (i in seq_len(nrow(omnibus_df))) {
@@ -865,8 +911,8 @@ if (!figures_only) {
                         row$group_F, row$group_q, grp_sig,
                         row$interaction_F, row$interaction_q, int_sig))
       }
-      write_csv(omnibus_df, file.path(tbl_dir, "roi_transfer_entropy_omnibus_lmm.csv"))
-      message("  Saved: roi_transfer_entropy_omnibus_lmm.csv (diagnostic)")
+      write_csv(omnibus_df, file.path(tbl_dir, "roi_directed_omnibus_lmm.csv"))
+      message("  Saved: roi_directed_omnibus_lmm.csv (diagnostic)")
     }
     if (nrow(posthoc_df) > 0) {
       sig_count <- sum(posthoc_df$significant, na.rm = TRUE)
@@ -881,10 +927,10 @@ if (!figures_only) {
   message("Figures-only mode: loading existing hypothesis tables...")
   rd <- function(f) tryCatch(read_csv(file.path(tbl_dir, f), show_col_types = FALSE),
                              error = function(e) data.frame())
-  hyp_global <- rd("roi_transfer_entropy_global_hypotheses.csv")
-  hyp_edges  <- rd("roi_transfer_entropy_directed_edges_hypotheses.csv")
-  hyp_region <- rd("roi_transfer_entropy_region_hypotheses.csv")
-  omnibus_df <- rd("roi_transfer_entropy_omnibus_lmm.csv")
+  hyp_global <- rd("roi_directed_global_hypotheses.csv")
+  hyp_edges  <- rd("roi_directed_directed_edges_hypotheses.csv")
+  hyp_region <- rd("roi_directed_region_hypotheses.csv")
+  omnibus_df <- rd("roi_directed_omnibus_lmm.csv")
   posthoc_df <- .te_contrast_rows(hyp_region)
   if (nrow(posthoc_df) > 0) posthoc_df$region_pair <- posthoc_df$spatial
 }
@@ -893,7 +939,8 @@ if (!figures_only) {
 # Figures
 # ===========================================================================
 message("\nGenerating figures...")
-plot_global_te_bar(global_df, group_colors, group_labels, group_order, fig_dir)
+for (dv in setdiff(dv_cols, "net_te"))
+  plot_global_te_bar(global_df, group_colors, group_labels, group_order, fig_dir, dv = dv)
 
 if (!figures_only) {
   # ===========================================================================

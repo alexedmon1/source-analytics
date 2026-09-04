@@ -57,7 +57,10 @@ def sample_epochs(
         Sampled epochs. ``effective_n_epochs`` equals ``n_epochs`` when
         ``n_bootstrap == 1``, or up to ``n_bootstrap * n_epochs`` otherwise.
     """
-    if n_epochs is None or n_epochs == 0:
+    # n_epochs=0 or n_bootstrap<=0 both mean "no sampling": return the full
+    # timeseries as a single epoch. The ROI path (sample_roi_epochs) has
+    # honoured n_bootstrap=0 this way all along; the vertex path now matches.
+    if n_epochs is None or n_epochs == 0 or (n_bootstrap is not None and n_bootstrap <= 0):
         return data[np.newaxis, :, :]  # (1, n_channels, n_times)
 
     if n_bootstrap > 1:

@@ -29,6 +29,7 @@ from ..spectral.vertex import (
     compute_spectral_slope,
     compute_peak_frequency,
 )
+from ..spectral.epoch_sampler import sample_epochs
 from ..stats.cluster_permutation import (
     cluster_permutation_test,
     has_significant_cluster as _has_significant_cluster,
@@ -105,6 +106,10 @@ class VertexClusterAnalysis(BaseAnalysis):
             )
             self._correction_method = "cluster"
 
+        # Global epoch_sampling → vertex: block → per-analysis block (see base).
+        # None = full continuous PSD (the historical vertex_cluster behaviour).
+        self._epoch_config = self._vertex_epoch_config()
+
     def setup(self) -> None:
         self._band_power_rows.clear()
         self._feature_rows.clear()
@@ -131,7 +136,21 @@ class VertexClusterAnalysis(BaseAnalysis):
 
         # Compute PSD for all vertices: (n_vertices, n_freqs)
         fmax = max(hi for _, hi in self.config.bands.values()) + 10
-        freqs, psd = compute_psd_vertices(stc_data, sfreq, fmax=fmax)
+        if self._epoch_config is not None:
+            epochs = sample_epochs(
+                stc_data, sfreq,
+                epoch_duration_sec=self._epoch_config.get("epoch_duration_sec", 2.0),
+                n_epochs=self._epoch_config.get("n_epochs", 80),
+                seed=self._epoch_config.get("seed", 42),
+                n_bootstrap=self._epoch_config.get("n_bootstrap", 1),
+            )
+            all_psd = []
+            for ep in epochs:
+                freqs, p = compute_psd_vertices(ep, sfreq, fmax=fmax)
+                all_psd.append(p)
+            psd = np.mean(all_psd, axis=0)
+        else:
+            freqs, psd = compute_psd_vertices(stc_data, sfreq, fmax=fmax)
 
         # Extract band power metrics
         band_power = extract_band_power_vertices(
@@ -694,7 +713,7 @@ class VertexClusterAnalysis(BaseAnalysis):
             logger.warning("Rscript not found — writing Python summary")
             self._write_python_summary()
         except subprocess.TimeoutExpired:
-            logger.error("R script timed out after 600 seconds")
+            logger.error("R script timed out after 3600 seconds")
             self._write_python_summary()
 
     def _write_python_summary(self) -> None:

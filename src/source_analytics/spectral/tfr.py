@@ -10,7 +10,24 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from mne.time_frequency import tfr_array_morlet
+
+
+def tfr_array_morlet(*args, **kwargs):
+    """Lazy proxy for :func:`mne.time_frequency.tfr_array_morlet`.
+
+    MNE is an optional extra (``pip install source-analytics[mne]``); importing
+    it here at module level would make every spectral import — and therefore
+    the whole CLI — depend on it. Resolve it on first use instead, with a clear
+    message when it is missing.
+    """
+    try:
+        from mne.time_frequency import tfr_array_morlet as _impl
+    except ImportError as exc:  # pragma: no cover - exercised only without mne
+        raise ImportError(
+            "The evoked (TFR) analyses need MNE-Python. Install it with "
+            "'pip install \"source-analytics[mne]\"' (or [all])."
+        ) from exc
+    return _impl(*args, **kwargs)
 
 logger = logging.getLogger(__name__)
 

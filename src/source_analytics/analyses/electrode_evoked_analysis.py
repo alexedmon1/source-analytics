@@ -417,6 +417,10 @@ class ElectrodeEvokedAnalysis(BaseAnalysis):
             "--tbl-dir", str(self.tbl_dir),
         ]
         cmd.extend(self._r_no_figures_flags())
+        # --hypothesis NAME[,NAME] narrows the R-side pairwise contrast list too.
+        wanted_hyp = self._selection.get("hypothesis")
+        if wanted_hyp:
+            cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:

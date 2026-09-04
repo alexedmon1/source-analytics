@@ -46,6 +46,7 @@ class VertexEvokedAnalysis(BaseAnalysis):
     """
 
     name = "vertex_evoked"
+    SELECTABLE = {"hypothesis": "declared hypothesis"}
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -289,6 +290,36 @@ class VertexEvokedAnalysis(BaseAnalysis):
             )
             logger.info("Exported vertex_evoked_stats.csv (%d rows)", len(all_stats))
 
+        # --- Declared hypotheses (hypothesis layer; additive, map+cluster contract) ---
+        # Same wiring as vertex_cluster: every declared hypothesis runs over the
+        # per-subject vertex maps through the permutation adapter and lands in
+        # tables/vertex_evoked_hypotheses.csv. The measure is the cell's "band"
+        # coordinate (each measure fixes its own band + time window, so there is
+        # no separate band axis — see analyses/_evoked_hypotheses.py) and the
+        # dv is the measure type (itc / ersp / stp / ...). --hypothesis narrows.
+        from ..hypothesis import write_module_hypotheses_perm
+
+        measure_types = {
+            m["measure_name"]: m["measure_type"] for m in self._measure_rows
+        }
+        maps_by_cell = {
+            (mname, measure_types.get(mname, "value")): {
+                uid: self._subject_measures[uid][mname]
+                for uid in self._subject_groups
+                if mname in self._subject_measures.get(uid, {})
+            }
+            for mname in measure_names
+        }
+        wanted_hyp = self._selection.get("hypothesis")
+        write_module_hypotheses_perm(
+            maps_by_cell, self._subject_groups, coords, self.config, self.tbl_dir,
+            prefix="vertex_evoked",
+            n_perms=self._n_permutations, threshold=self._cluster_threshold,
+            distance_mm=self._adjacency_distance,
+            hypothesis=",".join(sorted(wanted_hyp)) if wanted_hyp else None,
+            atlas_dir=self._atlas_dir,
+        )
+
         self._save_cluster_state()
 
     def figures(self) -> None:
@@ -325,7 +356,9 @@ class VertexEvokedAnalysis(BaseAnalysis):
             "",
             "- `data/vertex_evoked_measures.csv` — per-subject per-vertex measures",
             "- `data/source_coords.csv` — vertex coordinates (mm)",
-            "- `tables/vertex_evoked_stats.csv` — cluster-permutation statistics",
+            "- `tables/vertex_evoked_stats.csv` — cluster-permutation statistics (pairwise contrasts)",
+            "- `tables/vertex_evoked_hypotheses.csv` — declared hypotheses (permutation adapter; "
+            "band = measure name, dv = measure type)",
             "- `figures/evoked_*.png` — glass-brain measure maps",
             "",
         ]

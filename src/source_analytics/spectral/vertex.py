@@ -95,7 +95,8 @@ def extract_band_power_vertices(
     -------
     dict[str, dict[str, ndarray]]
         band_name -> {"absolute": (n_vertices,), "relative": (n_vertices,)}
-        where absolute is 10*log10(integrated power) in dB.
+        where absolute is the mean band power density, 10*log10(integrated
+        power / bandwidth), in dB/Hz — the same definition as the ROI path.
     """
     # Total power (optionally excluding noise band)
     if noise_exclude is not None:
@@ -129,7 +130,15 @@ def extract_band_power_vertices(
         abs_power = trapezoid(band_psd, band_freqs, axis=-1)
 
         rel_power = abs_power / total_power
-        db_power = np.where(abs_power > 0, 10.0 * np.log10(abs_power), -np.inf)
+
+        # "absolute" is the mean power DENSITY over the band (integrated power
+        # / bandwidth) in dB/Hz — the same definition as the ROI/electrode path
+        # in band_power.py, so the column is comparable across levels. (A
+        # per-band constant shift relative to the old integrated-power form;
+        # within-band group statistics are unaffected.)
+        bandwidth = fmax - fmin
+        density = abs_power / bandwidth if bandwidth > 0 else abs_power
+        db_power = np.where(density > 0, 10.0 * np.log10(density), -np.inf)
 
         result[band_name] = {
             "absolute": db_power,

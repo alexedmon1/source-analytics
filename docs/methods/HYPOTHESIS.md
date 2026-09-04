@@ -226,8 +226,10 @@ and so its own family, and a facet is that same family boundary expressed in a l
   axis** — each measure definition already fixes its own band and time window — so the band
   coordinate is null. Additive: the descriptive `group * roi` LMM in the R scripts is unchanged
   and still runs. Verified on planted synthetic signal in `tests/test_evoked_hypotheses.py`.
-- ⏳ **specials:** `vertex_mvpa` (decoding), `vertex_spatial` (GLS), `electrode_comparison`
-  (agreement — may not take hypotheses).
+- ✅ **vertex_evoked (permutation adapter):** per-measure vertex maps through the same map+cluster
+  contract as `vertex_cluster` (band coordinate = measure name, dv = measure type).
+- ⏳ **specials:** `vertex_signature` (decoding), `electrode_comparison` / `fcd_comparison`
+  (agreement — may not take hypotheses). `vertex_spatial` is retired (no inference).
 - ⏳ **migration / retirement:** move `study_treatment.yaml` to `design:`/`hypotheses:` and
   delete the retired gating code (`apply_hypothesis_gating`, `build_rescue_verdicts`,
   `gate_on`).

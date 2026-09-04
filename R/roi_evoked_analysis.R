@@ -33,6 +33,7 @@ script_dir <- if (exists("script.dir")) {
 }
 
 source(file.path(script_dir, "stats_utils.R"))
+source(file.path(script_dir, "hypothesis.R"))
 source(file.path(script_dir, "report.R"))
 
 # --- Argument parsing ---
@@ -53,6 +54,8 @@ parser$add_argument("--no-figures", action = "store_true", default = FALSE,
                     help = "Skip all figure generation (stats/tables only)")
 parser$add_argument("--roi-categories", default = NULL,
                     help = "Path to roi_categories.yaml (atlas ROI groupings)")
+parser$add_argument("--hypothesis", default = NULL,
+                    help = "Run only the named hypothesis(es) (comma-separated) from the design spec; default = all")
 args <- parser$parse_args()
 
 data_dir <- args$data_dir
@@ -89,6 +92,20 @@ group_colors <- unlist(config$group_colors)
 group_labels <- unlist(config$groups)
 group_order <- config$group_order
 
+# Pairwise contrast list for the descriptive group*spatial LMM below. Derived from
+# the design:/hypotheses: spec (config$contrasts is NULL for modern configs);
+# falls back to a legacy contrasts: block if the spec has none.
+contrasts <- tryCatch(contrasts_from_spec(parse_design_spec(config)),
+                      error = function(e) config$contrasts)
+if (is.null(contrasts)) contrasts <- list()
+if (!is.null(args$hypothesis) && length(contrasts) > 0) {
+  want <- trimws(strsplit(args$hypothesis, ",")[[1]])
+  contrasts <- Filter(function(ct) ct$name %in% want, contrasts)
+  message("Contrasts narrowed to --hypothesis set: ",
+          paste(vapply(contrasts, function(ct) ct$name, character(1)), collapse = ", "))
+}
+message("Contrasts: ", length(contrasts))
+
 message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 
@@ -108,7 +125,7 @@ if (!figures_only) {
 all_omnibus <- list()
 all_posthoc <- list()
 
-for (contrast in config$contrasts) {
+for (contrast in contrasts) {
   cname <- contrast$name
   ga <- contrast$group_a
   gb <- contrast$group_b
@@ -208,7 +225,7 @@ if (nrow(omnibus_df) > 0) {
 # --- Post-hoc emmeans (gated on significant omnibus) ---
 message("\nRunning post-hoc emmeans...")
 
-for (contrast in config$contrasts) {
+for (contrast in contrasts) {
   cname <- contrast$name
   ga <- contrast$group_a
   gb <- contrast$group_b
@@ -310,7 +327,7 @@ if (length(config$roi_categories) > 0) {
   all_omnibus_reg <- list()
   all_posthoc_reg <- list()
 
-  for (contrast in config$contrasts) {
+  for (contrast in contrasts) {
     cname <- contrast$name
     ga <- contrast$group_a
     gb <- contrast$group_b
@@ -394,7 +411,7 @@ if (length(config$roi_categories) > 0) {
   }
 
   # Region post-hoc
-  for (contrast in config$contrasts) {
+  for (contrast in contrasts) {
     cname <- contrast$name
     ga <- contrast$group_a
     gb <- contrast$group_b
@@ -500,11 +517,11 @@ global_posthoc_list <- list()
 for (mname in measure_names) {
   gp_data <- measures_df %>%
     filter(measure_name == mname,
-           group %in% unlist(lapply(config$contrasts, function(c) c(c$group_a, c$group_b))))
+           group %in% unlist(lapply(contrasts, function(c) c(c$group_a, c$group_b))))
 
   if (nrow(gp_data) == 0) next
 
-  gp <- run_posthoc_global(gp_data, config$contrasts, spatial_col = "roi",
+  gp <- run_posthoc_global(gp_data, contrasts, spatial_col = "roi",
                             dv_col = "value", dv_label = mname)
   if (nrow(gp) > 0) global_posthoc_list[[mname]] <- gp
 }

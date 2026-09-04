@@ -63,8 +63,22 @@ class ConnectivityAnalysis(BaseAnalysis):
         self._metrics: list[str] = list(self._ROI_METRICS)
 
     def setup(self) -> None:
-        # Restrict emitted metrics to --metric / --select metric=... if given.
-        self._metrics = self._select("metric", self._ROI_METRICS)
+        # Configured set: the module's `metrics:` list (under
+        # paradigms.<p>.analyses.roi_connectivity), else every ROI metric — the
+        # same contract vertex_connectivity honours. --metric / --select then
+        # narrows within that set.
+        cfg_metrics = (self.config.raw.get(self.name) or {}).get("metrics")
+        if cfg_metrics:
+            unknown = [m for m in cfg_metrics if m not in self._ROI_METRICS]
+            if unknown:
+                raise ValueError(
+                    f"roi_connectivity: unknown metrics in config {unknown}; "
+                    f"known: {list(self._ROI_METRICS)}"
+                )
+            configured = [m for m in self._ROI_METRICS if m in set(cfg_metrics)]
+        else:
+            configured = list(self._ROI_METRICS)
+        self._metrics = self._select("metric", configured)
         self._edge_rows.clear()
 
     def _compute_subject(self, subject: SubjectInfo):
@@ -345,4 +359,4 @@ class ConnectivityAnalysis(BaseAnalysis):
                 "Rscript not found. Install R to enable statistics and visualization."
             )
         except subprocess.TimeoutExpired:
-            logger.error("R script timed out after 600 seconds")
+            logger.error("R script timed out after 3600 seconds")

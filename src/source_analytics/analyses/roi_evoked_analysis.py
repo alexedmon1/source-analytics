@@ -310,6 +310,10 @@ class ROIEvokedAnalysis(BaseAnalysis):
         ]
         cmd.extend(self._r_no_figures_flags())
         cmd.extend(self._r_roi_categories_flags())
+        # --hypothesis NAME[,NAME] narrows the R-side pairwise contrast list too.
+        wanted_hyp = self._selection.get("hypothesis")
+        if wanted_hyp:
+            cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
 
         logger.info("Calling R: %s", " ".join(cmd))
         try:
