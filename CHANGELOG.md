@@ -31,6 +31,11 @@ found 24 defects plus a dozen false README claims. All verified and fixed here.
   `vertex_signature_results.csv` anywhere under the results tree, which can be a
   stale table from another run. `signature_source_vs_sensor.csv` gains a
   `source_module` column.
+- **Signature fits run single-threaded** (`threadpoolctl`, installed with scikit-learn).
+  A run fits a tiny model LOOCV x (1 + n_permutations) times, and a multithreaded BLAS
+  spent that time synchronising threads: logistic fits ran 60-90x slower (FORGE
+  electrode features: 105-128 s vs 1.4-1.7 s per 21 LOOCV passes, same accuracy).
+  Results are unchanged; a signature module that took days now takes about an hour.
 
 - **Vertex `absolute` band power is now a density (dB/Hz)**, `10*log10(integral / bandwidth)`,
   matching the ROI/electrode definition. Previously `vertex_cluster` / `vertex_specparam`
