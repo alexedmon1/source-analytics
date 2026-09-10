@@ -7,6 +7,31 @@ found 24 defects plus a dozen false README claims. All verified and fixed here.
 
 ### Behaviour changes (read these before re-running a study)
 
+- **Atlases resolve by name to their own files.** `pipeline.atlas` is looked up in
+  source-localization's `registry.yaml`, so allen26 and allen64 no longer pick up
+  allen32's labels, mapping and `roi_categories.yaml` from the shared `allen/`
+  directory. For allen26 studies this changes every region-level table
+  (Frontal-Anterior and Olfactory were silently dropped; Deep Subcortical was built
+  from 4 of its 8 parcels) and every ROI mosaic (the six merged parcels drew blank).
+  ROI-level results are unchanged, and allen32/antwerp studies resolve to the same
+  files as before. An atlas name that cannot be resolved is now an error, not a guess.
+- **The R region tier uses the study's categories.** Every ROI R entry point replaced
+  the study's (or a profile's) `roi_categories` with the atlas-directory file whenever
+  one existed. Python now hands R the effective map and R prefers it
+  (`resolve_roi_categories` in `stats_utils.R`); the file is only a fallback for a
+  config that carries none.
+- **The 10x voxel convention is read from the NIfTI header**, as source-localization
+  does, not guessed from the filename. `Atlas_3DRoisLeftRight.Labels.nii` stores true
+  units and was being shrunk 10x on the default-affine path (`load_atlas`,
+  `load_vertex_roi_labels`, the ROI mosaics); raw-affine extraction was unaffected.
+  **Antwerp-based studies' vertex ROI labels and mosaics move to their correct
+  positions.**
+- **`electrode_signature` compares only within its own paradigm**, preferring
+  `roi_signature` over `vertex_signature`. It used to take the first
+  `vertex_signature_results.csv` anywhere under the results tree, which can be a
+  stale table from another run. `signature_source_vs_sensor.csv` gains a
+  `source_module` column.
+
 - **Vertex `absolute` band power is now a density (dB/Hz)**, `10*log10(integral / bandwidth)`,
   matching the ROI/electrode definition. Previously `vertex_cluster` / `vertex_specparam`
   reported `10*log10(integral)`. Within-band group statistics are unaffected (a per-band
@@ -34,6 +59,14 @@ found 24 defects plus a dozen false README claims. All verified and fixed here.
 - Deprecated analysis names print/check the **canonical** output directory.
 
 ### Added
+
+- **`roi_signature`**: ROI-level neural signature (decoding on per-parcel relative band
+  power), the source-side counterpart of `electrode_signature` with the identical
+  feature estimator. It needs no vertex estimate, so it runs on any ROI output,
+  including Monte Carlo operators. `sensor_paradigm:` compares it against an
+  `electrode_signature` run in another paradigm.
+- **`resolve_atlas` / `AtlasSpec`**, and `atlas_files:` in the study config for atlases
+  that are not registered. Also `header_is_inflated` and `registered_atlases`.
 
 - **`<module>_subnetwork_edges.csv`** next to `roi_nbs_hypotheses.csv` (ROI edge modules):
   one row per supra-threshold edge of every NBS component (`hypothesis, band, dv,
