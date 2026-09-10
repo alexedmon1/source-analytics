@@ -537,7 +537,7 @@ def _load_atlas_slices(
     Parameters
     ----------
     atlas_dir : Path
-        Directory containing Atlas_3DRois.nii.
+        An atlas (anything ``resolve_atlas`` accepts); its ``brain_volume`` is drawn.
     slice_coords : dict, optional
         Override slice positions: {"axial_z": 1.5, "coronal_y": 0.0,
         "sagittal_x": 0.0}. Defaults to midline/dorsal center.
@@ -550,16 +550,21 @@ def _load_atlas_slices(
     """
     import nibabel as nib
 
-    atlas_dir = Path(atlas_dir)
-    nii_path = atlas_dir / _ATLAS_INTENSITY_NIFTI
-    if not nii_path.exists():
-        raise FileNotFoundError(f"Atlas intensity template not found: {nii_path}")
+    from ..atlas.atlas_utils import header_is_inflated, resolve_atlas
+
+    spec = resolve_atlas(atlas_dir)
+    nii_path = spec.brain_volume
+    if nii_path is None or not Path(nii_path).exists():
+        raise FileNotFoundError(
+            f"No intensity template (brain_volume) for atlas {spec.name or spec.labels}")
 
     nii = nib.load(str(nii_path))
     vol = nii.get_fdata()
     affine = nii.affine.copy()
-    affine[:3, :3] *= _ATLAS_VOXEL_SCALE
-    affine[:3, 3] *= _ATLAS_VOXEL_SCALE
+    # Scale only a header that is actually inflated (read, not assumed).
+    if header_is_inflated(nii_path):
+        affine[:3, :3] *= _ATLAS_VOXEL_SCALE
+        affine[:3, 3] *= _ATLAS_VOXEL_SCALE
     nx, ny, nz = vol.shape
 
     x_coords = affine[0, 3] + np.arange(nx) * affine[0, 0]

@@ -1,9 +1,19 @@
 """Atlas utilities: load atlas NIfTI, map vertex coordinates to ROI labels.
 
-Replicates the 10x voxel-size correction from source_localization/utils/atlas.py.
-The Atlas_3DRoisLeftRight.Labels.nii header has voxel sizes 10x larger than reality,
-so we apply ATLAS_VOXEL_SCALE_FACTOR = 0.1 to both the rotation/scaling block
-and the translation vector of the affine.
+Some bundled NIfTI files store voxel sizes 10x larger than reality and some
+store true units. Which is which is read from the header, as
+source_localization.utils.atlas.header_is_inflated does, never guessed from a
+filename: the guess was wrong for Atlas_3DRoisLeftRight.Labels.nii, which stores
+true units and was being shrunk 10x. Inflated files get
+ATLAS_VOXEL_SCALE_FACTOR = 0.1 applied to the rotation/scaling block and the
+translation vector of the affine.
+
+An atlas is resolved by NAME to its own file set (:func:`resolve_atlas`), from
+source-localization's ``registry.yaml``. The registry is where an atlas is
+defined; a directory is not, because several atlases share one (allen32, allen26
+and allen64 all live in ``allen/``), so "the roi_mapping.json in the atlas
+directory" names allen32's files whatever the study asked for. Atlases that are
+not registered can name their files explicitly.
 
 Also provides on-the-fly ROI extraction from vertex-level source time courses,
 ported from source_localization/steps/roi_extraction.py.
@@ -13,6 +23,8 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -103,23 +115,217 @@ def _find_atlas_nifti(atlas_dir: Path) -> tuple[Path, bool]:
     nii_path : Path
         Path to the NIfTI file.
     needs_10x_correction : bool
-        True for the Antwerp atlas whose header has 10x inflated voxel sizes.
-        False for the Allen atlas and other atlases with correct headers.
+        Read from the header (:func:`header_is_inflated`), not the filename.
     """
     # Try Allen atlas first (correct header)
     allen_path = atlas_dir / _ALLEN_NIFTI
     if allen_path.exists():
-        return allen_path, False
+        return allen_path, header_is_inflated(allen_path)
 
     # Try Antwerp atlas (needs 10x correction)
     antwerp_path = atlas_dir / _ATLAS_NIFTI
     if antwerp_path.exists():
-        return antwerp_path, True
+        return antwerp_path, header_is_inflated(antwerp_path)
 
     raise FileNotFoundError(
         f"No atlas NIfTI found in {atlas_dir}. "
         f"Expected {_ALLEN_NIFTI} or {_ATLAS_NIFTI}"
     )
+
+
+
+# Source-localization's threshold for the inflated-header convention: true-unit
+# mouse atlases have sub-0.3 mm voxels, inflated ones 0.8-2 mm.
+_INFLATED_ZOOM_THRESHOLD_MM = 0.5
+_REGISTRY_FILE = "registry.yaml"
+# Names source-localization still accepts for atlases that were renamed.
+_LEGACY_ATLAS_ALIASES = {"full": "antwerp", "coarse_22roi": "coarse22"}
+# Atlases the fixed per-directory file names genuinely describe, for when no
+# registry is reachable. Anything else must be registered or named explicitly.
+_LEGACY_ATLAS_DIRS = {"allen": "allen", "allen32": "allen", "antwerp": "."}
+_ATLAS_FILE_KEYS = ("labels", "roi_mapping", "roi_categories", "brain_volume", "brain_mask")
+
+
+def header_is_inflated(nii_path: str | Path) -> bool:
+    """True if this NIfTI stores the 10x-inflated voxel sizes.
+
+    Mirrors ``source_localization.utils.atlas.header_is_inflated``. Applying the
+    correction to a true-unit file is silent -- the affine stays well formed and
+    every coordinate lands 10x away -- so the convention is read, not assumed.
+    """
+    import nibabel as nib
+
+    zooms = nib.load(str(nii_path)).header.get_zooms()[:3]
+    return bool(max(float(z) for z in zooms) >= _INFLATED_ZOOM_THRESHOLD_MM)
+
+
+@dataclass(frozen=True)
+class AtlasSpec:
+    """One atlas, as the set of files that define it.
+
+    Everything that needs atlas data accepts one of these wherever it used to
+    accept an atlas directory. ``roi_categories``, ``brain_volume`` and
+    ``brain_mask`` are optional: allen64 and coarse22 ship no category file.
+    """
+
+    name: str | None
+    labels: Path
+    roi_mapping: Path
+    roi_categories: Path | None = None
+    brain_volume: Path | None = None
+    brain_mask: Path | None = None
+
+    @property
+    def labels_inflated(self) -> bool:
+        return header_is_inflated(self.labels)
+
+
+@lru_cache(maxsize=None)
+def _read_registry(path: str) -> dict:
+    with open(path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def _registry_path(base_dir: Path) -> Path | None:
+    p = Path(base_dir) / _REGISTRY_FILE
+    return p if p.is_file() else None
+
+
+def _registry_file(entry_path: str, registry: Path) -> Path:
+    """Registry paths are relative to the source-localization package root
+    (``data/atlas/...``); a hand-written registry may use paths relative to itself."""
+    p = Path(entry_path)
+    if p.is_absolute():
+        return p
+    pkg_root = registry.parent.parent.parent
+    for root in (registry.parent, pkg_root):
+        if (root / p).exists():
+            return root / p
+    return pkg_root / p
+
+
+def registered_atlases(base_dir: str | Path | None = None) -> list[str]:
+    """Names in the atlas registry (empty if none is reachable)."""
+    reg = _registry_path(Path(base_dir) if base_dir is not None else find_atlas_dir())
+    return sorted(_read_registry(str(reg))) if reg else []
+
+
+def _normalise_files(files: dict | None, base: Path | None) -> dict:
+    out: dict[str, Path] = {}
+    for key, value in (files or {}).items():
+        k = "labels" if key == "brain_labels" else key
+        if k not in _ATLAS_FILE_KEYS:
+            raise ValueError(
+                f"atlas_files: unknown key '{key}'. Known: brain_labels (or labels), "
+                "roi_mapping, roi_categories, brain_volume, brain_mask.")
+        if value is None:
+            continue
+        p = Path(value)
+        out[k] = p if (p.is_absolute() or base is None) else base / p
+    return out
+
+
+def _spec_from_dir(atlas_dir: Path, name: str | None) -> AtlasSpec:
+    """The legacy convention: fixed file names inside one directory."""
+    labels, _ = _find_atlas_nifti(atlas_dir)
+    cats = atlas_dir / _ROI_CATEGORIES_FILE
+
+    def _near(fname: str) -> Path | None:
+        for d in (atlas_dir, atlas_dir.parent):
+            if (d / fname).exists():
+                return d / fname
+        return None
+
+    return AtlasSpec(
+        name=name, labels=labels, roi_mapping=atlas_dir / _ROI_MAPPING_FILE,
+        roi_categories=cats if cats.exists() else None,
+        brain_volume=_near("Atlas_3DRois.nii"),
+        brain_mask=_near("Atlas_3DRois_brain.nii.gz"),
+    )
+
+
+def resolve_atlas(
+    atlas: "AtlasSpec | str | Path | None" = None,
+    *,
+    atlas_name: str | None = None,
+    files: dict | None = None,
+) -> AtlasSpec:
+    """Resolve an atlas to its own file set.
+
+    Parameters
+    ----------
+    atlas : AtlasSpec, directory, or None
+        A spec is returned as is (with any ``files`` overrides applied). A
+        directory is the atlas base: its ``registry.yaml`` is used when present,
+        otherwise the legacy fixed file names inside it. None means the
+        source-localization atlas data.
+    atlas_name : str, optional
+        A registered atlas (renamed aliases accepted).
+    files : dict, optional
+        Explicit files, for an atlas that is not registered or to override one
+        that is: ``brain_labels`` (or ``labels``), ``roi_mapping``,
+        ``roi_categories``, ``brain_volume``, ``brain_mask``. Relative paths are
+        taken relative to the atlas base directory.
+
+    Raises
+    ------
+    ValueError
+        ``atlas_name`` cannot be resolved to its own files. Falling back to
+        whatever files share a directory is how allen32's partition was applied
+        to allen26 data without a word.
+    FileNotFoundError
+        The atlas files do not exist.
+    """
+    if isinstance(atlas, AtlasSpec):
+        overrides = _normalise_files(files, None)
+        return replace(atlas, **overrides) if overrides else atlas
+
+    base = Path(atlas) if atlas is not None else find_atlas_dir()
+    if not base.is_dir():
+        raise FileNotFoundError(f"Atlas directory not found: {base}")
+    overrides = _normalise_files(files, base)
+    name = _LEGACY_ATLAS_ALIASES.get(atlas_name, atlas_name) if atlas_name else None
+    explicit = "labels" in overrides and "roi_mapping" in overrides
+
+    spec: AtlasSpec | None = None
+    registry = _registry_path(base)
+    if name is not None and registry is not None:
+        entries = _read_registry(str(registry))
+        if name in entries:
+            ins = entries[name].get("inputs", {})
+            opt = {k: _registry_file(ins[k], registry)
+                   for k in ("roi_categories", "brain_volume", "brain_mask") if ins.get(k)}
+            spec = AtlasSpec(
+                name=atlas_name,
+                labels=_registry_file(ins["brain_labels"], registry),
+                roi_mapping=_registry_file(ins["roi_mapping"], registry),
+                **opt)
+        elif not explicit:
+            raise ValueError(
+                f"Atlas '{atlas_name}' is not in {registry}. Registered: "
+                f"{', '.join(sorted(entries))}. Register it there, or name its files "
+                "under atlas_files: (brain_labels, roi_mapping, roi_categories).")
+    if spec is None and explicit:
+        spec = AtlasSpec(name=atlas_name, labels=overrides["labels"],
+                         roi_mapping=overrides["roi_mapping"])
+    if spec is None:
+        if name is None:
+            spec = _spec_from_dir(base, None)
+        elif (base / name).is_dir():
+            spec = _spec_from_dir(base / name, atlas_name)
+        elif name in _LEGACY_ATLAS_DIRS and (base / _LEGACY_ATLAS_DIRS[name]).is_dir():
+            spec = _spec_from_dir(base / _LEGACY_ATLAS_DIRS[name], atlas_name)
+        else:
+            raise ValueError(
+                f"Cannot resolve atlas '{atlas_name}' under {base}: no registry.yaml "
+                "there, and its files are not identifiable by name. Name them under "
+                "atlas_files: (brain_labels, roi_mapping, roi_categories).")
+    if overrides:
+        spec = replace(spec, **overrides)
+    for f in (spec.labels, spec.roi_mapping):
+        if not Path(f).exists():
+            raise FileNotFoundError(f"Atlas file not found: {f}")
+    return spec
 
 
 def load_atlas(
@@ -131,14 +337,14 @@ def load_atlas(
 
     Parameters
     ----------
-    atlas_dir : str or Path
-        Directory containing the atlas NIfTI file.
+    atlas_dir : AtlasSpec, str or Path
+        An atlas: anything :func:`resolve_atlas` accepts.
     raw_affine : bool, default False
         If True, return the raw NIfTI affine without any correction.
         Use this when source coordinates are in the same uncorrected frame
         as the atlas (e.g., coordinates from source-localization pipeline).
-        If False (default), apply the 10x voxel correction for the Antwerp
-        atlas (no-op for Allen atlas which has correct headers).
+        If False (default), apply the 10x voxel correction when the labels
+        header is inflated (read from the header; see :func:`header_is_inflated`).
 
     Returns
     -------
@@ -149,8 +355,9 @@ def load_atlas(
     """
     import nibabel as nib
 
-    atlas_dir = Path(atlas_dir)
-    nii_path, needs_correction = _find_atlas_nifti(atlas_dir)
+    spec = resolve_atlas(atlas_dir)
+    nii_path = spec.labels
+    needs_correction = spec.labels_inflated
 
     nii = nib.load(str(nii_path))
     label_data = np.asarray(nii.dataobj, dtype=np.int32)
@@ -158,7 +365,7 @@ def load_atlas(
     if raw_affine or not needs_correction:
         return label_data, nii.affine.copy()
 
-    # Apply 10x voxel correction (Antwerp atlas only)
+    # Apply the 10x voxel correction (inflated header)
     true_affine = nii.affine.copy()
     true_affine[:3, :3] *= ATLAS_VOXEL_SCALE_FACTOR
     true_affine[:3, 3] *= ATLAS_VOXEL_SCALE_FACTOR
@@ -179,8 +386,7 @@ def load_roi_mapping(atlas_dir: str | Path) -> dict:
     dict
         ROI mapping: label_id (str) -> {abbreviation, name, category, color, ...}.
     """
-    atlas_dir = Path(atlas_dir)
-    mapping_path = atlas_dir / _ROI_MAPPING_FILE
+    mapping_path = Path(resolve_atlas(atlas_dir).roi_mapping)
     if not mapping_path.exists():
         raise FileNotFoundError(f"ROI mapping not found: {mapping_path}")
 
@@ -191,8 +397,8 @@ def load_roi_mapping(atlas_dir: str | Path) -> dict:
 def load_roi_categories(atlas_dir: str | Path) -> dict[str, list[str]]:
     """Load canonical ROI categories from the atlas directory.
 
-    Reads ``roi_categories.yaml`` from *atlas_dir*. Returns an empty dict if
-    the file does not exist (studies can define their own via config).
+    Reads the atlas's OWN category file (``AtlasSpec.roi_categories``). Returns
+    an empty dict if the atlas ships none (studies can define their own via config).
 
     Parameters
     ----------
@@ -204,9 +410,8 @@ def load_roi_categories(atlas_dir: str | Path) -> dict[str, list[str]]:
     dict[str, list[str]]
         Mapping of category name -> list of ROI names.
     """
-    atlas_dir = Path(atlas_dir)
-    categories_path = atlas_dir / _ROI_CATEGORIES_FILE
-    if not categories_path.exists():
+    categories_path = resolve_atlas(atlas_dir).roi_categories
+    if categories_path is None or not Path(categories_path).exists():
         return {}
     with open(categories_path) as f:
         raw = yaml.safe_load(f) or {}
@@ -430,7 +635,7 @@ def label_vertices_to_rois(
     list[str | None]
         ROI name per vertex (``None`` only if a vertex mapped to no labeled ROI).
     """
-    atlas_dir = Path(atlas_dir)
+    atlas_dir = resolve_atlas(atlas_dir)
     label_data, affine = load_atlas(atlas_dir, raw_affine=True)
     roi_mapping = load_roi_mapping(atlas_dir)
     rois = roi_mapping.get("rois", roi_mapping)
@@ -526,7 +731,7 @@ def extract_roi_timeseries(
         sources).  Only ROIs with at least one assigned source are
         included.
     """
-    atlas_dir = Path(atlas_dir)
+    atlas_dir = resolve_atlas(atlas_dir)
 
     # Load atlas with RAW affine — source coordinates from the pipeline
     # are in the same uncorrected frame as the original NIfTI headers.

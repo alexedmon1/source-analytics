@@ -106,6 +106,31 @@ class SignatureResult:
     balanced_accuracy_ci: tuple[float, float] = (float("nan"), float("nan"))
 
 
+def _single_threaded(fn):
+    """Run ``fn`` with the BLAS/OpenMP thread pools limited to one thread.
+
+    A signature run fits a tiny model (tens of subjects by tens of features)
+    LOOCV x (1 + n_permutations) times. At that size a multithreaded BLAS spends
+    its time starting and synchronising threads rather than computing: on the
+    FORGE treatment electrode features the logistic fit took 105-128 s per 21
+    LOOCV passes with default threads and 1.4-1.7 s single-threaded, with the
+    same accuracy. One thread per process is also what the subject pool wants.
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            from threadpoolctl import threadpool_limits
+        except ImportError:   # installed with scikit-learn; absent only without it
+            return fn(*args, **kwargs)
+        with threadpool_limits(limits=1):
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
+@_single_threaded
 def run_signature(
     features: np.ndarray,
     labels: np.ndarray,

@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.colors import TwoSlopeNorm
 
-from ..atlas import find_atlas_dir, load_atlas, load_roi_mapping
+from ..atlas import find_atlas_dir, load_atlas, load_roi_mapping, resolve_atlas
 from .palettes import get_diverging_cmap_name
 
 logger = logging.getLogger(__name__)
@@ -299,12 +299,12 @@ def plot_brain_roi_mosaic(
         sagittal_slices = DEFAULT_SAGITTAL_SLICES
 
     # Load atlas volumes
-    atlas_dir_path = find_atlas_dir(atlas_dir)
-    label_data, affine = load_atlas(atlas_dir_path)
-    roi_mapping = load_roi_mapping(atlas_dir_path)
+    spec = resolve_atlas(atlas_dir)
+    label_data, affine = load_atlas(spec)
+    roi_mapping = load_roi_mapping(spec)
 
-    # Anatomy background (skull-stripped)
-    anat_path = Path(atlas_dir_path) / "Atlas_3DRois_brain.nii.gz"
+    # Anatomy background (skull-stripped): the atlas's own brain-mask volume
+    anat_path = spec.brain_mask
     anat_data = nib.load(str(anat_path)).get_fdata()
     anat_norm = (anat_data / anat_data.max()) ** gamma
 
@@ -548,15 +548,21 @@ def _pick_informative_slices(
 
 
 def _load_atlas_and_anat(
-    atlas_name: str = "allen",
+    atlas="allen",
     gamma: float = 0.5,
 ):
-    """Load atlas label volume, affine, ROI mapping, and anatomy background."""
-    atlas_dir = find_atlas_dir(atlas_name=atlas_name)
-    label_data, affine = load_atlas(atlas_dir)
-    roi_mapping = load_roi_mapping(atlas_dir)
+    """Load atlas label volume, affine, ROI mapping, and anatomy background.
 
-    anat_path = atlas_dir.parent / "Atlas_3DRois_brain.nii.gz"
+    ``atlas`` is an AtlasSpec, an atlas directory, or a registered atlas NAME.
+    It must be the data's own atlas: drawing allen32's volume for allen26 data
+    leaves the six merged parcels with no voxels, so they render blank.
+    """
+    spec = (resolve_atlas(atlas_name=atlas) if isinstance(atlas, str)
+            else resolve_atlas(atlas))
+    label_data, affine = load_atlas(spec)
+    roi_mapping = load_roi_mapping(spec)
+
+    anat_path = spec.brain_mask
     anat_data = nib.load(str(anat_path)).get_fdata()
     anat_norm = (anat_data / anat_data.max()) ** gamma
 
@@ -715,6 +721,7 @@ def plot_significance_mosaic(
     alpha: float = 0.05,
     cmap_name: str = "YlOrRd",
     atlas_name: str = "allen",
+    atlas=None,
     roi_opacity: float = 0.85,
     dpi: int = 300,
 ) -> Path:
@@ -742,7 +749,7 @@ def plot_significance_mosaic(
     atlas_name : str
         Atlas to load (default ``"allen"``).
     """
-    label_data, affine, roi_mapping, anat_norm = _load_atlas_and_anat(atlas_name)
+    label_data, affine, roi_mapping, anat_norm = _load_atlas_and_anat(atlas if atlas is not None else atlas_name)
 
     df = df.copy()
     df["_q_fdr"] = fdr_bh(df[p_col].values)
@@ -791,6 +798,7 @@ def plot_effect_size_mosaic(
     cmap_name: str = "RdBu_r",
     colorbar_label: str | None = None,
     atlas_name: str = "allen",
+    atlas=None,
     roi_opacity: float = 0.85,
     auto_slices: bool = True,
     dpi: int = 300,
@@ -845,7 +853,7 @@ def plot_effect_size_mosaic(
         a deep thalamic locus missing every panel). Set False to restore the
         legacy fixed planes.
     """
-    label_data, affine, roi_mapping, anat_norm = _load_atlas_and_anat(atlas_name)
+    label_data, affine, roi_mapping, anat_norm = _load_atlas_and_anat(atlas if atlas is not None else atlas_name)
 
     df = df.copy()
     if q_col is not None:
@@ -937,6 +945,7 @@ def render_posthoc_mosaics(
     colorbar_label: str = "Hedges' g",
     alpha: float = 0.05,
     auto_slices: bool = True,
+    atlas=None,
 ) -> list[Path]:
     """Render effect-size brain mosaics from a posthoc CSV.
 
@@ -976,6 +985,11 @@ def render_posthoc_mosaics(
         Pick the three mosaic planes from the data (coverage + maximin over the
         survivors) so no significant ROI is clipped out (MS1 revision). When
         False, fixed default planes are used.
+
+    atlas : AtlasSpec, atlas directory or registered name, optional
+        The atlas the data were extracted with. None keeps the old default
+        (``atlas_name="allen"``), which draws allen32's parcels whatever atlas
+        the data used.
 
     Returns
     -------
@@ -1051,7 +1065,7 @@ def render_posthoc_mosaics(
                 alpha=alpha,
                 cmap_name=cmap_name,
                 colorbar_label=colorbar_label,
-                auto_slices=auto_slices,
+                auto_slices=auto_slices,atlas=atlas
             )
             saved.append(out_path)
         except Exception as exc:
@@ -1149,7 +1163,7 @@ def plot_brain_roi(
     if views is None:
         views = VIEWS
 
-    atlas_dir_resolved = find_atlas_dir(atlas_dir)
+    atlas_dir_resolved = resolve_atlas(atlas_dir)
     label_data, affine = load_atlas(atlas_dir_resolved)
     roi_mapping = load_roi_mapping(atlas_dir_resolved)
     region_to_labels = _region_to_label_ids(roi_categories, roi_mapping)

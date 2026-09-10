@@ -329,7 +329,7 @@ class VertexCrossFreqAnalysis(BaseAnalysis):
 
     def summary(self) -> None:
         data_dir = self.output_dir / "data"
-        cfg = dict(self.config.raw)
+        cfg = self._r_config_data()
         if self._sfreq is not None:
             cfg["sfreq"] = self._sfreq
         with open(data_dir / "study_config.yaml", "w") as f:

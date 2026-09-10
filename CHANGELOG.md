@@ -7,6 +7,41 @@ found 24 defects plus a dozen false README claims. All verified and fixed here.
 
 ### Behaviour changes (read these before re-running a study)
 
+- **Atlases resolve by name to their own files.** `pipeline.atlas` is looked up in
+  source-localization's `registry.yaml`, so allen26 and allen64 no longer pick up
+  allen32's labels, mapping and `roi_categories.yaml` from the shared `allen/`
+  directory. For allen26 studies this changes every region-level table
+  (Frontal-Anterior and Olfactory were silently dropped; Deep Subcortical was built
+  from 4 of its 8 parcels) and every ROI mosaic (the six merged parcels drew blank).
+  ROI-level results are unchanged, and allen32/antwerp studies resolve to the same
+  files as before. An atlas name that cannot be resolved is now an error, not a guess.
+- **The R region tier uses the study's categories.** Every ROI R entry point replaced
+  the study's (or a profile's) `roi_categories` with the atlas-directory file whenever
+  one existed. Python now hands R the effective map and R prefers it
+  (`resolve_roi_categories` in `stats_utils.R`); the file is only a fallback for a
+  config that carries none.
+- **The 10x voxel convention is read from the NIfTI header**, as source-localization
+  does, not guessed from the filename. `Atlas_3DRoisLeftRight.Labels.nii` has stored
+  true units since source-localization 2026-03-12 but was still shrunk 10x on the
+  default-affine path. **No statistic changes**: ROI extraction and cluster/NBS region
+  labels use the raw affine, which was always right. The only visible effect is
+  cosmetic: the mm axis ranges and slice labels of `plot_brain_roi_mosaic` /
+  `plot_brain_roi` when drawn on Antwerp, and no analysis module draws them on Antwerp.
+  (`load_vertex_roi_labels`, the other default-affine consumer, has never run: it reads
+  the mapping file's top-level keys as label ids and raises on every atlas, and
+  `vertex_network` swallows the error and falls back to spatial node labels. Left for
+  the vertex split.)
+- **`electrode_signature` compares only within its own paradigm**, preferring
+  `roi_signature` over `vertex_signature`. It used to take the first
+  `vertex_signature_results.csv` anywhere under the results tree, which can be a
+  stale table from another run. `signature_source_vs_sensor.csv` gains a
+  `source_module` column.
+- **Signature fits run single-threaded** (`threadpoolctl`, installed with scikit-learn).
+  A run fits a tiny model LOOCV x (1 + n_permutations) times, and a multithreaded BLAS
+  spent that time synchronising threads: logistic fits ran 60-90x slower (FORGE
+  electrode features: 105-128 s vs 1.4-1.7 s per 21 LOOCV passes, same accuracy).
+  Results are unchanged; a signature module that took days now takes about an hour.
+
 - **Vertex `absolute` band power is now a density (dB/Hz)**, `10*log10(integral / bandwidth)`,
   matching the ROI/electrode definition. Previously `vertex_cluster` / `vertex_specparam`
   reported `10*log10(integral)`. Within-band group statistics are unaffected (a per-band
@@ -34,6 +69,14 @@ found 24 defects plus a dozen false README claims. All verified and fixed here.
 - Deprecated analysis names print/check the **canonical** output directory.
 
 ### Added
+
+- **`roi_signature`**: ROI-level neural signature (decoding on per-parcel relative band
+  power), the source-side counterpart of `electrode_signature` with the identical
+  feature estimator. It needs no vertex estimate, so it runs on any ROI output,
+  including Monte Carlo operators. `sensor_paradigm:` compares it against an
+  `electrode_signature` run in another paradigm.
+- **`resolve_atlas` / `AtlasSpec`**, and `atlas_files:` in the study config for atlases
+  that are not registered. Also `header_is_inflated` and `registered_atlases`.
 
 - **`<module>_subnetwork_edges.csv`** next to `roi_nbs_hypotheses.csv` (ROI edge modules):
   one row per supra-threshold edge of every NBS component (`hypothesis, band, dv,

@@ -295,7 +295,7 @@ class ROICrossFreqAnalysis(BaseAnalysis):
             return False
 
         config_path = data_dir / "study_config.yaml"
-        config_data = dict(self.config.raw)
+        config_data = self._r_config_data()
         if self._sfreq is not None:
             config_data["sfreq"] = self._sfreq
         with open(config_path, "w") as f:
@@ -355,5 +355,5 @@ class ROICrossFreqAnalysis(BaseAnalysis):
             analysis_name="roi_cross_freq",
             effect_col="hedges_g", roi_col="region",
             facet_cols=["contrast", "freq_pair"],
-            colorbar_label="Hedges' g",
+            colorbar_label="Hedges' g",atlas=self._atlas_dir
         )

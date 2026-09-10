@@ -1,11 +1,14 @@
 """Electrode (sensor-level) neural-signature classification analysis.
 
-The sensor-space counterpart of ``vertex_signature``: it runs the SAME
-classifiers (LOOCV + permutation testing) on per-electrode band power instead of
-per-vertex source power, so the two can be compared directly — does source
-localization buy us predictability over the raw sensor montage? When the sibling
-``vertex_signature`` results are present, a source-vs-sensor accuracy comparison
-(per contrast × band × classifier) is emitted.
+The sensor-space counterpart of the source signatures (``roi_signature``,
+``vertex_signature``): it runs the SAME classifiers (LOOCV + permutation testing)
+on per-electrode band power instead of source power, so the two can be compared
+directly — does source localization buy us predictability over the raw sensor
+montage? When a source signature ran in the SAME paradigm, a source-vs-sensor
+accuracy comparison (per contrast × band × classifier) is emitted. Only that
+paradigm is searched: a search of the whole results tree once matched a stale
+vertex table from an earlier study version and would have reported it as this
+run's source side.
 
 Reuses the level-agnostic ``stats/signature.py`` machinery unchanged.
 """
@@ -40,11 +43,98 @@ from .base import BaseAnalysis
 logger = logging.getLogger(__name__)
 
 
+def render_signature_comparison(
+    source_csv: Path, sensor_csv: Path, tbl_dir: Path, fig_dir: Path, *,
+    source_module: str,
+) -> None:
+    """Source vs sensor decoding accuracy per contrast × band × classifier.
+
+    Writes ``signature_source_vs_sensor.csv`` (+ ``_by_contrast``) into ``tbl_dir``
+    and one scatter per classifier into ``fig_dir``, recording which source module
+    was compared. Called by the sensor module when a source signature ran in its
+    paradigm, and by ``roi_signature`` when the sensor signature ran in another.
+    """
+    sensor = pd.read_csv(sensor_csv)
+    source = pd.read_csv(source_csv)
+    keys = ["contrast", "band", "classifier"]
+    if not all(k in source.columns for k in keys):
+        return
+    merged = source.merge(sensor, on=keys, suffixes=("_source", "_sensor"))
+    if merged.empty:
+        return
+    merged.insert(0, "source_module", source_module)
+    merged["accuracy_gain"] = merged["accuracy_source"] - merged["accuracy_sensor"]
+    for m in ("balanced_accuracy", "auc"):
+        cols = (f"{m}_source", f"{m}_sensor")
+        if all(c in merged.columns for c in cols):
+            merged[f"{m}_gain"] = merged[cols[0]] - merged[cols[1]]
+    # A cell is only INFORMATIVE about the two modalities if at least one of
+    # them actually decodes; contrasts where both sit at chance contribute
+    # noise, and averaging them into a headline gain hides real differences.
+    if {"p_value_source", "p_value_sensor"} <= set(merged.columns):
+        merged["either_significant"] = (
+            (merged["p_value_source"] < 0.05) | (merged["p_value_sensor"] < 0.05))
+    merged.to_csv(tbl_dir / "signature_source_vs_sensor.csv", index=False)
+
+    # Per-contrast breakdown — the global mean is dominated by underpowered
+    # treated-vs-treated contrasts, so report the split explicitly.
+    gain_cols = [c for c in merged.columns if c.endswith("_gain")]
+    by_contrast = merged.groupby("contrast")[gain_cols].mean().round(4)
+    by_contrast.to_csv(tbl_dir / "signature_source_vs_sensor_by_contrast.csv")
+
+    # One panel per classifier. Plot BALANCED accuracy when available (the
+    # unequal-n contrasts inflate raw accuracy), and mark the cells where at
+    # least one modality reached significance.
+    metric = ("balanced_accuracy"
+              if "balanced_accuracy_source" in merged.columns else "accuracy")
+    mlabel = "Balanced accuracy" if metric == "balanced_accuracy" else "Accuracy"
+    for clf in sorted(merged["classifier"].unique()):
+        sub = merged[merged["classifier"] == clf]
+        fig, ax = plt.subplots(figsize=(6, 6))
+        sig = sub.get("either_significant")
+        if sig is not None:
+            ax.scatter(sub.loc[~sig, f"{metric}_sensor"], sub.loc[~sig, f"{metric}_source"],
+                       c="#BDC3C7", s=45, alpha=0.7, edgecolors="white",
+                       label="neither significant")
+            ax.scatter(sub.loc[sig, f"{metric}_sensor"], sub.loc[sig, f"{metric}_source"],
+                       c="#8E44AD", s=70, alpha=0.9, edgecolors="white",
+                       label="≥1 significant")
+            ax.legend(fontsize=8, loc="lower right", frameon=False)
+        else:
+            ax.scatter(sub[f"{metric}_sensor"], sub[f"{metric}_source"],
+                       c="#8E44AD", s=60, alpha=0.8, edgecolors="white")
+        lo, hi = 0.3, 1.0
+        ax.plot([lo, hi], [lo, hi], "--", color="grey", linewidth=1)
+        ax.set_xlim(lo, hi); ax.set_ylim(lo, hi); ax.set_aspect("equal")
+        ax.set_xlabel(f"Sensor {mlabel.lower()} (electrode)")
+        ax.set_ylabel(f"Source {mlabel.lower()} ({source_module})")
+        ax.set_title(f"Source vs Sensor decoding — {classifier_label(clf)}\n"
+                     "(above line = source localization gains predictability)")
+        fig.tight_layout()
+        fig.savefig(fig_dir / f"signature_source_vs_sensor_{clf}.png", dpi=150)
+        plt.close(fig)
+    logger.info("Rendered source-vs-sensor comparison (%d matched cells)", len(merged))
+
+
 class ElectrodeSignatureAnalysis(BaseAnalysis):
     """Sensor-level whole-montage neural-signature (classification) analysis."""
 
     name = "electrode_signature"
     SELECTABLE = {"band": "frequency band"}
+
+    # Source-signature modules this sensor signature pairs with, in preference
+    # order. Looked for in THIS paradigm only (see _find_source_results).
+    _SOURCE_SIGNATURES = ("roi_signature", "vertex_signature")
+
+    _SUMMARY_TITLE = "Electrode Neural Signature Analysis Summary"
+    _SUMMARY_ANALYSIS = "Sensor-level (electrode) neural signature (classification)"
+    _SUMMARY_METHODS = (
+        "Each classifier, with LOOCV, was trained to distinguish groups from the "
+        "spatial pattern of per-electrode relative band power. Significance was "
+        "assessed by permutation testing. This is the sensor-space counterpart of "
+        "the source-localized neural signatures (roi_signature, vertex_signature); "
+        "the `signature_source_vs_sensor` table/figure compare them when one ran in "
+        "the same paradigm.")
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -60,7 +150,7 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
 
         # Classifiers: `classifiers:` (list) or `classifier:` (scalar), normalised
         # and deduped in config order — same contract as vertex_signature.
-        sig_cfg = config.raw.get("electrode_signature", {})
+        sig_cfg = config.raw.get(self.name, {})
         raw_clfs = sig_cfg.get("classifiers") or [sig_cfg.get("classifier", "svm_linear")]
         seen: set[str] = set()
         self._classifiers: list[str] = []
@@ -197,8 +287,8 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
         if feat_df.empty:
             logger.warning("No electrode signature feature data collected")
             return
-        feat_df.to_csv(data_dir / "electrode_signature_features.csv", index=False)
-        logger.info("Exported electrode_signature_features.csv (%d rows)", len(feat_df))
+        feat_df.to_csv(data_dir / f"{self.name}_features.csv", index=False)
+        logger.info(f"Exported {self.name}_features.csv (%d rows)", len(feat_df))
 
         # Persist the montage layout (channel, x, y, z) for topomap rendering —
         # the sensor analog of source_coords.csv.
@@ -272,8 +362,8 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
 
         if all_results:
             pd.DataFrame(all_results).to_csv(
-                tbl_dir / "electrode_signature_results.csv", index=False)
-            logger.info("Exported electrode_signature_results.csv (%d rows)", len(all_results))
+                tbl_dir / f"{self.name}_results.csv", index=False)
+            logger.info(f"Exported {self.name}_results.csv (%d rows)", len(all_results))
 
         if self._signature_results:
             data_dir = self.output_dir / "data"
@@ -292,12 +382,12 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
                     "n_permutations": r.n_permutations,
                     "classifier": r.classifier, "has_weights": r.has_weights,
                 }
-            with open(data_dir / "electrode_signature_results.pkl", "wb") as f:
+            with open(data_dir / f"{self.name}_results.pkl", "wb") as f:
                 pickle.dump(pkl_data, f)
 
     def _load_state_from_disk(self) -> bool:
         data_dir = self.output_dir / "data"
-        pkl_path = data_dir / "electrode_signature_results.pkl"
+        pkl_path = data_dir / f"{self.name}_results.pkl"
         if not pkl_path.exists():
             logger.warning("No saved electrode signature state at %s; skipping figures", pkl_path)
             return False
@@ -363,7 +453,7 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
             if getattr(result, "has_weights", True) and not np.all(np.isnan(result.feature_weights)):
                 self._plot_importance_topomap(
                     result.feature_weights, f"Feature Importance — {key}",
-                    fig_dir / f"electrode_signature_importance_{safe}.png")
+                    fig_dir / f"{self.name}_importance_{safe}.png")
 
             fig, ax = plt.subplots(figsize=(8, 5))
             ax.hist(result.null_distribution, bins=30, color="#3498DB",
@@ -373,7 +463,7 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
             ax.set_xlabel("Accuracy"); ax.set_ylabel("Count")
             ax.set_title(f"Signature Permutation Test — {key}")
             ax.legend(); fig.tight_layout()
-            fig.savefig(fig_dir / f"electrode_signature_null_{safe}.png", dpi=150)
+            fig.savefig(fig_dir / f"{self.name}_null_{safe}.png", dpi=150)
             plt.close(fig)
 
             fig, ax = plt.subplots(figsize=(5, 4))
@@ -388,106 +478,51 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
             ax.set_xticklabels(["Pred 0", "Pred 1"]); ax.set_yticklabels(["True 0", "True 1"])
             ax.set_title(f"Confusion Matrix — {key}")
             fig.tight_layout()
-            fig.savefig(fig_dir / f"electrode_signature_confusion_{safe}.png", dpi=150)
+            fig.savefig(fig_dir / f"{self.name}_confusion_{safe}.png", dpi=150)
             plt.close(fig)
 
         self._render_source_vs_sensor(fig_dir)
 
-    def _find_vertex_results(self) -> Path | None:
-        """Locate the sibling vertex_signature results table (best-effort)."""
-        # tbl_dir = .../results/tables/<paradigm>/electrode_signature
-        tables_root = self.tbl_dir.parent.parent
-        for cand in tables_root.glob("**/vertex_signature_results.csv"):
-            return cand
+    def _find_source_results(self) -> tuple[str, Path] | None:
+        """The source-signature results table in THIS paradigm, if one ran.
+
+        ``tbl_dir`` is ``.../tables/<paradigm>/<module>``, so its siblings are the
+        other modules of the same paradigm. Nothing outside it is searched: the
+        previous results-tree-wide glob returned the first
+        ``vertex_signature_results.csv`` anywhere, which was a stale table from an
+        earlier study version.
+        """
+        for mod in self._SOURCE_SIGNATURES:
+            cand = self.tbl_dir.parent / mod / f"{mod}_results.csv"
+            if cand.exists():
+                return mod, cand
         return None
 
     def _render_source_vs_sensor(self, fig_dir: Path) -> None:
-        """Source (vertex) vs sensor (electrode) decoding accuracy per
-        contrast × band × classifier — the headline comparison."""
-        sensor_csv = self.tbl_dir / "electrode_signature_results.csv"
-        vertex_csv = self._find_vertex_results()
-        if not sensor_csv.exists() or vertex_csv is None:
-            logger.info("Source-vs-sensor comparison skipped (need both "
-                        "vertex_signature and electrode_signature results).")
+        """Compare against the source signature of this paradigm, if one ran."""
+        sensor_csv = self.tbl_dir / f"{self.name}_results.csv"
+        found = self._find_source_results()
+        if not sensor_csv.exists() or found is None:
+            logger.info("Source-vs-sensor comparison skipped (no source signature in "
+                        "this paradigm; looked for %s).", ", ".join(self._SOURCE_SIGNATURES))
             return
-        sensor = pd.read_csv(sensor_csv)
-        source = pd.read_csv(vertex_csv)
-        keys = ["contrast", "band", "classifier"]
-        if not all(k in source.columns for k in keys):
-            return
-        merged = source.merge(sensor, on=keys, suffixes=("_source", "_sensor"))
-        if merged.empty:
-            return
-        merged["accuracy_gain"] = merged["accuracy_source"] - merged["accuracy_sensor"]
-        for m in ("balanced_accuracy", "auc"):
-            cols = (f"{m}_source", f"{m}_sensor")
-            if all(c in merged.columns for c in cols):
-                merged[f"{m}_gain"] = merged[cols[0]] - merged[cols[1]]
-        # A cell is only INFORMATIVE about the two modalities if at least one of
-        # them actually decodes; contrasts where both sit at chance contribute
-        # noise, and averaging them into a headline gain hides real differences.
-        if {"p_value_source", "p_value_sensor"} <= set(merged.columns):
-            merged["either_significant"] = (
-                (merged["p_value_source"] < 0.05) | (merged["p_value_sensor"] < 0.05))
-        merged.to_csv(self.tbl_dir / "signature_source_vs_sensor.csv", index=False)
-
-        # Per-contrast breakdown — the global mean is dominated by underpowered
-        # treated-vs-treated contrasts, so report the split explicitly.
-        gain_cols = [c for c in merged.columns if c.endswith("_gain")]
-        by_contrast = merged.groupby("contrast")[gain_cols].mean().round(4)
-        by_contrast.to_csv(self.tbl_dir / "signature_source_vs_sensor_by_contrast.csv")
-
-        # One panel per classifier. Plot BALANCED accuracy when available (the
-        # unequal-n contrasts inflate raw accuracy), and mark the cells where at
-        # least one modality reached significance.
-        metric = ("balanced_accuracy"
-                  if "balanced_accuracy_source" in merged.columns else "accuracy")
-        mlabel = "Balanced accuracy" if metric == "balanced_accuracy" else "Accuracy"
-        for clf in sorted(merged["classifier"].unique()):
-            sub = merged[merged["classifier"] == clf]
-            fig, ax = plt.subplots(figsize=(6, 6))
-            sig = sub.get("either_significant")
-            if sig is not None:
-                ax.scatter(sub.loc[~sig, f"{metric}_sensor"], sub.loc[~sig, f"{metric}_source"],
-                           c="#BDC3C7", s=45, alpha=0.7, edgecolors="white",
-                           label="neither significant")
-                ax.scatter(sub.loc[sig, f"{metric}_sensor"], sub.loc[sig, f"{metric}_source"],
-                           c="#8E44AD", s=70, alpha=0.9, edgecolors="white",
-                           label="≥1 significant")
-                ax.legend(fontsize=8, loc="lower right", frameon=False)
-            else:
-                ax.scatter(sub[f"{metric}_sensor"], sub[f"{metric}_source"],
-                           c="#8E44AD", s=60, alpha=0.8, edgecolors="white")
-            lo, hi = 0.3, 1.0
-            ax.plot([lo, hi], [lo, hi], "--", color="grey", linewidth=1)
-            ax.set_xlim(lo, hi); ax.set_ylim(lo, hi); ax.set_aspect("equal")
-            ax.set_xlabel(f"Sensor {mlabel.lower()} (electrode)")
-            ax.set_ylabel(f"Source {mlabel.lower()} (vertex)")
-            ax.set_title(f"Source vs Sensor decoding — {classifier_label(clf)}\n"
-                         "(above line = source localization gains predictability)")
-            fig.tight_layout()
-            fig.savefig(fig_dir / f"signature_source_vs_sensor_{clf}.png", dpi=150)
-            plt.close(fig)
-        logger.info("Rendered source-vs-sensor comparison (%d matched cells)", len(merged))
+        render_signature_comparison(found[1], sensor_csv, self.tbl_dir, fig_dir,
+                                    source_module=found[0])
 
     def summary(self) -> None:
         tbl_dir = self.tbl_dir
         models = ", ".join(classifier_label(c) for c in self._classifiers)
         lines = [
-            "# Electrode Neural Signature Analysis Summary", "",
+            f"# {self._SUMMARY_TITLE}", "",
             f"**Study**: {self.config.name}",
-            "**Analysis**: Sensor-level (electrode) neural signature (classification)",
+            f"**Analysis**: {self._SUMMARY_ANALYSIS}",
             f"**Classifiers**: {models}",
             f"**CV method**: {self._cv_method}",
             f"**Permutations**: {self._n_permutations}", "",
             "## Methods", "",
-            "Each classifier, with LOOCV, was trained to distinguish groups from the "
-            "spatial pattern of per-electrode relative band power. Significance was "
-            "assessed by permutation testing. This is the sensor-space counterpart of "
-            "the vertex (source-localized) neural signature; the "
-            "`signature_source_vs_sensor` table/figure compare the two.", "",
+            self._SUMMARY_METHODS, "",
         ]
-        results_csv = tbl_dir / "electrode_signature_results.csv"
+        results_csv = tbl_dir / f"{self.name}_results.csv"
         if results_csv.exists():
             df = pd.read_csv(results_csv)
             has_model = "model" in df.columns

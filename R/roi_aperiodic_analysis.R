@@ -119,12 +119,8 @@ if (!is.null(args$hypothesis) && length(diag_contrasts) > 0) {
 message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 
-# Load roi_categories from atlas file if provided
-if (!is.null(args$roi_categories) && file.exists(args$roi_categories)) {
-  config$roi_categories <- read_yaml(args$roi_categories)
-  message("Loaded roi_categories from: ", args$roi_categories,
-          " (", length(config$roi_categories), " regions)")
-}
+# Study-config categories win; the atlas file is only a fallback (stats_utils.R).
+config$roi_categories <- resolve_roi_categories(config$roi_categories, args$roi_categories)
 
 # ============================================================
 # Aperiodic-specific LMM functions (no band dimension)

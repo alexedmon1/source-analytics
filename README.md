@@ -104,7 +104,7 @@ the extra to install:
 | Extra | Pulls in | Needed by |
 |---|---|---|
 | `mne` | mne | `roi_evoked`, `vertex_evoked`, `electrode_evoked` (Morlet TFR) |
-| `mvpa` | scikit-learn | `vertex_signature`, `electrode_signature` |
+| `mvpa` | scikit-learn | `vertex_signature`, `electrode_signature`, `roi_signature` |
 | `network` | networkx | `roi_graph`, `vertex_graph`, `*_nbs`, `*_network` |
 | `atlas` | nibabel | atlas readers |
 | `all` | all of the above + dev tools | a full study |
@@ -322,6 +322,21 @@ circos_metrics: [imag_coherence, dwpli, pli, aec, coherence]   # gallery circos 
 
 jobs: -1                             # default worker count for --jobs (-1/0 = all but one core)
 
+# ── Atlas (optional) ───────────────────────────────────────────────
+# The parcellation the ROI data were extracted with. Resolved BY NAME to that
+# atlas's own files through source-localization's registry.yaml, so atlases that
+# share a directory (allen32 / allen26 / allen64 all live in allen/) never borrow
+# each other's labels or categories. An unknown name is an error, not a guess.
+pipeline:
+  atlas: allen26
+# An atlas that is not in the registry names its files instead (relative paths
+# are taken from atlas_dir, else from the source-localization atlas data):
+# atlas_files:
+#   brain_labels:   /path/to/labels.nii.gz
+#   roi_mapping:    /path/to/roi_mapping.json
+#   roi_categories: /path/to/roi_categories.yaml   # optional; the study's own
+#                                                  # roi_categories always win
+
 # ── Random epoch sampling (global default; per-analysis override below) ──
 # Code defaults when the block is absent: enabled: false, n_bootstrap: 1.
 epoch_sampling:
@@ -378,6 +393,8 @@ paradigms:
 | `hypotheses[]` `{name, kind, weights/groups/predictor}` | hypothesis layer | the declarative tests, run by name via `--hypothesis` |
 | `hypotheses[]` `{label, role}` | figures, gallery | readable labels + grouping tag (no gating) |
 | `bands` | all spectral/connectivity | frequency bands analysed |
+| `pipeline.atlas`, `atlas_files`, `atlas_dir` | atlas I/O, R region tier, mosaics | which parcellation the ROI data use: resolved by name through source-localization's `registry.yaml` to that atlas's own labels / mapping / categories / anatomy; `atlas_files` names the files of an unregistered atlas. The 10× voxel convention is read from each NIfTI header, never inferred from its filename |
+| `roi_categories` | region tier (Python + R), mosaics | category → ROI map. The study's map (or a profile's narrowing) always wins over the atlas default, on the Python and R sides alike |
 | `epoch_sampling` | spectral/connectivity, all levels | random-epoch resampling (`n_bootstrap: 0` = full timeseries). Precedence: global → `vertex.epoch_sampling` → per-analysis block |
 | `jobs` | `run --jobs` default | worker count when `--jobs` is not given |
 | `<profile>.{include_analyses, include_hypotheses, bands, rois}` | `run --profile` | a narrowed study written to its own tree (see below) |
@@ -535,7 +552,8 @@ directed families is tracked, equation-checked, in
 |---|---|---|---|
 | `electrode_comparison` *(suppl.)* | elec | `electrode_psd` **and** `roi_psd` (same paradigm) | source-vs-electrode band-power concordance + effect-size validation |
 | `fcd_comparison` *(suppl.)* | elec | `electrode_connectivity` **and** `vertex_connectivity` — normally in *different* paradigms; sibling paradigm dirs are searched, or set `fcd_comparison.{sensor_dir,source_dir}` | source-vs-sensor FCD comparison (mean + spatial CV) per band × metric |
-| `electrode_signature` *(suppl. of `electrode_psd`)* | elec | `electrode_psd` | sensor-level neural signature (decoding on electrode band power) — the source-vs-sensor counterpart of `vertex_signature` |
+| `electrode_signature` *(suppl. of `electrode_psd`)* | elec | `electrode_psd` | sensor-level neural signature (decoding on electrode band power) — the sensor counterpart of `roi_signature` / `vertex_signature`, compared when one ran in the same paradigm |
+| `roi_signature` | roi | — | ROI-level neural signature (decoding on per-parcel band power) — the source-side counterpart of `electrode_signature`; runs on any ROI output, including Monte Carlo operators. Set `sensor_paradigm:` to compare against an `electrode_signature` run in another paradigm |
 
 `ANALYSIS_METADATA` records these as `supplements` (the primary the gallery nests
 them under) plus `requires` (every upstream module, for run ordering).
@@ -700,6 +718,7 @@ $SA resting --analysis electrode_aperiodic
 $SA resting --analysis electrode_comparison    # ↳ after electrode_psd AND roi_psd
 $SA resting --analysis electrode_connectivity  # sensor FC comparator
 $SA resting --analysis electrode_signature     # ↳ after electrode_psd
+$SA resting --analysis roi_signature           # source side of the decoding comparison
 
 # Vertex paradigm — whole-brain
 $SA vertex  --analysis vertex_connectivity     # PRIMARY (slow; computes matrices)

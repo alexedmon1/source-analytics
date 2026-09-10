@@ -171,13 +171,8 @@ group_labels <- unlist(config$groups)
 group_order <- config$group_order
 message("Study: ", config$name)
 
-if (!is.null(args$roi_categories) && file.exists(args$roi_categories)) {
-  rc <- read_yaml(args$roi_categories)
-  if (length(rc) == 1 && identical(names(rc), "roi_categories")) rc <- rc[["roi_categories"]]
-  config$roi_categories <- rc
-  message("Loaded roi_categories from: ", args$roi_categories,
-          " (", length(config$roi_categories), " regions)")
-}
+# Study-config categories win; the atlas file is only a fallback (stats_utils.R).
+config$roi_categories <- resolve_roi_categories(config$roi_categories, args$roi_categories)
 
 metrics <- if (!is.null(args$metric)) trimws(strsplit(args$metric, ",")[[1]]) else EDGE_METRICS
 metrics <- intersect(EDGE_METRICS, metrics)

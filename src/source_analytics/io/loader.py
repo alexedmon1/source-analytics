@@ -241,7 +241,7 @@ class SubjectLoader:
             If True, use signed time courses; otherwise magnitude.
         atlas_dir : str or Path, optional
             Atlas directory for on-the-fly extraction. If None, auto-detected
-            via :func:`~source_analytics.atlas.find_atlas_dir`.
+            via :func:`~source_analytics.atlas.resolve_atlas`.
         method : str
             Source-to-ROI assignment: ``"nearest"`` or ``"proximity"``.
         proximity_radius_mm : float
@@ -273,13 +273,13 @@ class SubjectLoader:
             "No step6 ROI files in %s — extracting on-the-fly from step5",
             self.data_dir,
         )
-        from ..atlas.atlas_utils import extract_roi_timeseries, find_atlas_dir
+        from ..atlas.atlas_utils import extract_roi_timeseries, resolve_atlas
 
         stc_data = self.load_source_timecourses(magnitude=not signed)
         coords = self.load_source_coords()
 
         if atlas_dir is None:
-            atlas_dir = find_atlas_dir()
+            atlas_dir = resolve_atlas()
 
         result = extract_roi_timeseries(
             stc_data,

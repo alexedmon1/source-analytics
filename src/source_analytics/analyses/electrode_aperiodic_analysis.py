@@ -256,7 +256,7 @@ class ElectrodeAperiodicAnalysis(BaseAnalysis):
         config_path = data_dir / "study_config.yaml"
         import yaml
 
-        config_data = dict(self.config.raw)
+        config_data = self._r_config_data()
         if self._sfreq is not None:
             config_data["sfreq"] = self._sfreq
         with open(config_path, "w") as f:

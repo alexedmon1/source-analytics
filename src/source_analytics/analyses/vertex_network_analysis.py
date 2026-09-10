@@ -179,7 +179,9 @@ class _VertexNetworkBase(NetworkAnalysisBase):
                             len(self._vertex_indices))
             try:
                 from ..atlas import find_atlas_dir, load_vertex_roi_labels
-                atlas_labels = load_vertex_roi_labels(self._source_coords, find_atlas_dir())
+                atlas_labels = load_vertex_roi_labels(
+                    self._source_coords,
+                    self._atlas_dir if self._atlas_dir is not None else find_atlas_dir())
             except Exception:
                 atlas_labels = None
             self._vertex_labels = _generate_vertex_labels(self._source_coords, atlas_labels)
@@ -577,7 +579,7 @@ class VertexNetworkAnalysis(_VertexNetworkBase):
     def summary(self) -> None:
         data_dir = self.output_dir / "data"
         config_path = data_dir / "study_config.yaml"
-        config_data = dict(self.config.raw)
+        config_data = self._r_config_data()
         if self._sfreq is not None:
             config_data["sfreq"] = self._sfreq
         with open(config_path, "w") as f:
