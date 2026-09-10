@@ -185,3 +185,64 @@ def test_directed_script_uses_canonical_prefix_and_tests_every_dv(tmp_path, desi
         assert (tbl / name).exists(), name
     edges = pd.read_csv(tbl / "roi_directed_directed_edges_hypotheses.csv")
     assert set(edges["dv"]) == set(cols)
+
+
+# ---------------------------------------------------------------------------
+# ROI categories: the study config wins over the --roi-categories file.
+#
+# The file is looked up in the atlas *directory*, which several atlases share
+# (allen32/allen26/allen64 all live in allen/), so for an allen26 study it was
+# allen32's partition. It used to REPLACE the study's categories: two allen26
+# categories matched no parcel and vanished, and Deep Subcortical was built
+# from 4 of its 8 parcels.
+# ---------------------------------------------------------------------------
+
+def _psd_band_power_csv(data_dir: Path) -> None:
+    rng = np.random.default_rng(7)
+    rows = []
+    for subj, grp in _subjects():
+        for roi in ROIS:
+            for band in BANDS:
+                shift = 0.5 if (grp == "KO_VEH" and roi.startswith("Motor")) else 0.0
+                rows.append({"subject": subj, "group": grp, "roi": roi, "band": band,
+                             "absolute": float(rng.normal(-200.0 + shift, 1.0)),
+                             "relative": float(rng.uniform(0.1, 0.3))})
+    data_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(data_dir / "band_power.csv", index=False)
+
+
+def _psd_region_labels(out: Path) -> set[str]:
+    labels: set[str] = set()
+    for f in (out / "tables").glob("roi_psd*region*.csv"):
+        d = pd.read_csv(f)
+        for col in ("spatial", "region"):
+            if col in d.columns:
+                labels |= set(d[col].dropna().astype(str))
+    return labels
+
+
+def test_psd_region_tier_uses_study_categories_over_the_atlas_file(tmp_path, design_config):
+    other = tmp_path / "another_atlas_categories.yaml"
+    other.write_text(yaml.safe_dump({"Bogus": ["Motor_L", "Hipp_L"], "Absent": ["Not_A_Parcel"]}))
+    data, out = tmp_path / "data", tmp_path / "out"
+    _psd_band_power_csv(data)
+    log = _run("roi_psd_analysis.R", data, design_config, out, "--roi-categories", str(other))
+    assert "Using roi_categories from the study config" in log
+    labels = _psd_region_labels(out)
+    assert labels, "no region-level table was written"
+    assert labels <= {"Motor", "Hipp", "Thal"}, labels
+
+
+def test_psd_region_tier_falls_back_to_the_file_when_config_has_none(tmp_path, design_config):
+    cfg = yaml.safe_load(design_config.read_text())
+    cfg.pop("roi_categories")
+    bare = tmp_path / "bare.yaml"
+    bare.write_text(yaml.safe_dump(cfg))
+    cats = tmp_path / "cats.yaml"
+    cats.write_text(yaml.safe_dump({"Front": ROIS[:2], "Back": ROIS[2:]}))
+    data, out = tmp_path / "data", tmp_path / "out"
+    _psd_band_power_csv(data)
+    log = _run("roi_psd_analysis.R", data, bare, out, "--roi-categories", str(cats))
+    assert "Loaded roi_categories from:" in log
+    labels = _psd_region_labels(out)
+    assert labels and labels <= {"Front", "Back"}, labels

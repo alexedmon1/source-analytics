@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import warnings as _warnings
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -11,16 +13,27 @@ import numpy as np
 import yaml
 
 
-def _load_atlas_roi_categories(atlas_name: str | None) -> dict[str, list[str]]:
-    """Load canonical roi_categories from atlas package data, if available."""
-    if not atlas_name:
+def _load_atlas_roi_categories(
+    atlas_name: str | None,
+    atlas_dir: str | None = None,
+    atlas_files: dict | None = None,
+) -> dict[str, list[str]]:
+    """The atlas's own default categories, for a study that declares none.
+
+    Resolved by atlas NAME (``resolve_atlas``), so allen26 gets allen26's
+    partition, not whichever category file shares its directory.
+    """
+    if not (atlas_name or (atlas_files or {}).get("roi_categories")):
         return {}
     try:
-        from source_analytics.atlas import find_atlas_dir, load_roi_categories
+        from source_analytics.atlas import load_roi_categories, resolve_atlas
 
-        atlas_dir = find_atlas_dir(atlas_name=atlas_name)
-        return load_roi_categories(atlas_dir)
-    except Exception:
+        return load_roi_categories(
+            resolve_atlas(atlas_dir, atlas_name=atlas_name, files=atlas_files))
+    except FileNotFoundError:
+        return {}
+    except ValueError as exc:
+        logging.getLogger(__name__).warning("No atlas roi_categories: %s", exc)
         return {}
 
 
@@ -420,7 +433,9 @@ class StudyConfig:
             paradigms[pname] = pcopy
 
         roi_categories = data.get("roi_categories") or _load_atlas_roi_categories(
-            data.get("pipeline", {}).get("atlas")
+            data.get("pipeline", {}).get("atlas"),
+            data.get("atlas_dir"),
+            data.get("atlas_files"),
         )
 
         return cls(

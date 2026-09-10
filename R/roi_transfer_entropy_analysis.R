@@ -795,16 +795,8 @@ message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
 message("Bands: ", paste(names(config$bands), collapse = ", "))
 
-# Load roi_categories from atlas file if provided. The pipeline passes an
-# unwrapped file (categories at top level); the documented proposed file wraps
-# them under a single `roi_categories:` key — unwrap that so either form works.
-if (!is.null(args$roi_categories) && file.exists(args$roi_categories)) {
-  rc <- read_yaml(args$roi_categories)
-  if (length(rc) == 1 && identical(names(rc), "roi_categories")) rc <- rc[["roi_categories"]]
-  config$roi_categories <- rc
-  message("Loaded roi_categories from: ", args$roi_categories,
-          " (", length(config$roi_categories), " regions)")
-}
+# Study-config categories win; the atlas file is only a fallback (stats_utils.R).
+config$roi_categories <- resolve_roi_categories(config$roi_categories, args$roi_categories)
 
 # ===========================================================================
 # 1. Global TE analysis (needed for figures — always compute)

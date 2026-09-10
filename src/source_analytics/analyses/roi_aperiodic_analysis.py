@@ -168,7 +168,7 @@ class ROIAperiodicAnalysis(BaseAnalysis):
         config_path = data_dir / "study_config.yaml"
         import yaml
 
-        config_data = dict(self.config.raw)
+        config_data = self._r_config_data()
         if self._sfreq is not None:
             config_data["sfreq"] = self._sfreq
         with open(config_path, "w") as f:
@@ -244,5 +244,5 @@ class ROIAperiodicAnalysis(BaseAnalysis):
             correction_label="FDR",
             facet_cols=["hypothesis", "dv"],
             colorbar_label="Hedges' g",
-            auto_slices=True,
+            auto_slices=True,atlas=self._atlas_dir
         )

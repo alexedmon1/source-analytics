@@ -657,7 +657,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
         config_path = data_dir / "study_config.yaml"
         import yaml
 
-        config_data = dict(self.config.raw)
+        config_data = self._r_config_data()
         with open(config_path, "w") as f:
             yaml.dump(config_data, f, default_flow_style=False)
 

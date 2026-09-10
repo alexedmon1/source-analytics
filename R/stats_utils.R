@@ -783,3 +783,33 @@ tost_equivalent <- function(estimate, SE, df, margin, alpha = 0.05) {
   }
   NA_real_
 }
+
+
+#' Resolve the ROI category map an R entry point should use.
+#'
+#' The study config written by the Python side carries the EFFECTIVE categories:
+#' the study's own map, a profile's narrowing of it, or the atlas's default. It
+#' always wins. The --roi-categories file is only a fallback for a config that
+#' carries none (an R script run by hand). The file used to win, and because it
+#' was looked up per directory -- where allen32, allen26 and allen64 all live --
+#' an allen26 study got allen32's partition: two categories matched no parcel and
+#' vanished, and Deep Subcortical was built from 4 of its 8 parcels.
+#'
+#' @param config_categories named list from config$roi_categories (may be NULL)
+#' @param path optional path to a roi_categories YAML
+#' @return named list of ROI name vectors (possibly empty)
+resolve_roi_categories <- function(config_categories, path = NULL) {
+  if (length(config_categories) > 0) {
+    message("Using roi_categories from the study config (",
+            length(config_categories), " regions)")
+    return(config_categories)
+  }
+  if (!is.null(path) && file.exists(path)) {
+    rc <- yaml::read_yaml(path)
+    if (length(rc) == 1 && identical(names(rc), "roi_categories")) rc <- rc[["roi_categories"]]
+    rc[["deprecated_aliases"]] <- NULL
+    message("Loaded roi_categories from: ", path, " (", length(rc), " regions)")
+    return(rc)
+  }
+  config_categories
+}

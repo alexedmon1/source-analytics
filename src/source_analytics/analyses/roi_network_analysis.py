@@ -499,5 +499,5 @@ class ROINetworkAnalysis(_ROINetworkBase):
         data_dir = self.output_dir / "data"
         config_path = data_dir / "study_config.yaml"
         with open(config_path, "w") as f:
-            yaml.dump(dict(self.config.raw), f, default_flow_style=False)
+            yaml.dump(self._r_config_data(), f, default_flow_style=False)
         self._write_summary(graph=True, nbs=True)

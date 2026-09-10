@@ -74,14 +74,17 @@ class BaseAnalysis(ABC):
         self.fig_dir.mkdir(parents=True, exist_ok=True)
         self.tbl_dir.mkdir(parents=True, exist_ok=True)
 
-        # Resolve atlas directory for on-the-fly ROI extraction
-        from ..atlas.atlas_utils import find_atlas_dir
+        # Resolve the study's atlas to its OWN file set (labels, mapping,
+        # categories, anatomy). The attribute keeps its old name so every
+        # ``atlas_dir=self._atlas_dir`` call site passes the spec straight
+        # through: the atlas functions accept a spec wherever they took a dir.
+        from ..atlas.atlas_utils import AtlasSpec, resolve_atlas
 
-        atlas_name = config.raw.get("pipeline", {}).get("atlas")
-        atlas_dir_cfg = config.raw.get("atlas_dir")
         try:
-            self._atlas_dir: Path | None = find_atlas_dir(
-                atlas_dir_cfg, atlas_name=atlas_name,
+            self._atlas_dir: AtlasSpec | None = resolve_atlas(
+                config.raw.get("atlas_dir"),
+                atlas_name=config.raw.get("pipeline", {}).get("atlas"),
+                files=config.raw.get("atlas_files"),
             )
         except FileNotFoundError:
             self._atlas_dir = None
@@ -461,7 +464,7 @@ class BaseAnalysis(ABC):
         # over from a prior write when this run has no process step (figures-only).
         import yaml
         config_path = data_dir / "study_config.yaml"
-        config_data = dict(self.config.raw)
+        config_data = self._r_config_data()
         sfreq = getattr(self, "_sfreq", None)
         if sfreq is None and config_path.exists():
             try:
@@ -507,12 +510,30 @@ class BaseAnalysis(ABC):
             return False
 
     def _r_roi_categories_flags(self) -> list[str]:
-        """Return ['--roi-categories', path] if atlas roi_categories.yaml exists."""
-        if self._atlas_dir is not None:
-            cat_path = self._atlas_dir / "roi_categories.yaml"
-            if cat_path.exists():
-                return ["--roi-categories", str(cat_path)]
+        """``['--roi-categories', path]`` for the resolved atlas's own category file.
+
+        Only a fallback for R: ``_r_config_data`` already hands R the effective
+        categories, and the R side prefers them (``resolve_roi_categories``).
+        """
+        spec = self._atlas_dir
+        if spec is not None and spec.roi_categories is not None and spec.roi_categories.exists():
+            return ["--roi-categories", str(spec.roi_categories)]
         return []
+
+    def _r_config_data(self) -> dict:
+        """The config the R side reads (``study_config.yaml``).
+
+        ``raw`` plus the EFFECTIVE ``roi_categories``: the study's own map, a
+        profile's narrowing of it, or the atlas default. ``raw`` carries neither of
+        the last two, and R used to fill the gap from the category file in the
+        atlas *directory* -- in ``allen/``, allen32's -- so allen26 studies lost two
+        categories and built Deep Subcortical from 4 of its 8 parcels.
+        """
+        data = dict(self.config.raw)
+        if self.config.roi_categories:
+            data["roi_categories"] = {
+                cat: list(rois) for cat, rois in self.config.roi_categories.items()}
+        return data
 
     def _r_no_figures_flags(self) -> list[str]:
         """Return ['--no-figures'] if figure generation is disabled, else []."""
