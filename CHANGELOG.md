@@ -21,11 +21,16 @@ found 24 defects plus a dozen false README claims. All verified and fixed here.
   (`resolve_roi_categories` in `stats_utils.R`); the file is only a fallback for a
   config that carries none.
 - **The 10x voxel convention is read from the NIfTI header**, as source-localization
-  does, not guessed from the filename. `Atlas_3DRoisLeftRight.Labels.nii` stores true
-  units and was being shrunk 10x on the default-affine path (`load_atlas`,
-  `load_vertex_roi_labels`, the ROI mosaics); raw-affine extraction was unaffected.
-  **Antwerp-based studies' vertex ROI labels and mosaics move to their correct
-  positions.**
+  does, not guessed from the filename. `Atlas_3DRoisLeftRight.Labels.nii` has stored
+  true units since source-localization 2026-03-12 but was still shrunk 10x on the
+  default-affine path. **No statistic changes**: ROI extraction and cluster/NBS region
+  labels use the raw affine, which was always right. The only visible effect is
+  cosmetic: the mm axis ranges and slice labels of `plot_brain_roi_mosaic` /
+  `plot_brain_roi` when drawn on Antwerp, and no analysis module draws them on Antwerp.
+  (`load_vertex_roi_labels`, the other default-affine consumer, has never run: it reads
+  the mapping file's top-level keys as label ids and raises on every atlas, and
+  `vertex_network` swallows the error and falls back to spatial node labels. Left for
+  the vertex split.)
 - **`electrode_signature` compares only within its own paradigm**, preferring
   `roi_signature` over `vertex_signature`. It used to take the first
   `vertex_signature_results.csv` anywhere under the results tree, which can be a
