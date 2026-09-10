@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 2026-09 audit remediation
+## v0.7.0 — 2026-09-10 (audit remediation, per-atlas resolution, roi_signature)
 
 A repo audit (2026-09-04) compared the README/CLAUDE.md against the code and
 found 24 defects plus a dozen false README claims. All verified and fixed here.
