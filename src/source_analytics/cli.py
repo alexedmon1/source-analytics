@@ -11,6 +11,7 @@ import yaml
 
 from .config import StudyConfig
 from .core import StudyAnalyzer, ANALYSIS_REGISTRY, ANALYSIS_METADATA, canonical_analysis_name
+from .analyses.base import RStepFailed
 from .analyses.base import VALID_STEPS, BaseAnalysis
 
 
@@ -34,6 +35,20 @@ def _print_study_summary(config: StudyConfig, analyzer: StudyAnalyzer):
         if g in groups:
             print(f"  {config.get_group_label(g)} ({g}): n={len(groups[g])}")
     print()
+
+
+def _exit_if_failed(failures: list[str]) -> None:
+    """Exit 1 after listing the R statistics steps that failed.
+
+    A failed or timed-out R step used to be logged while the run exited 0, so a
+    batch reported success over tables that were never rewritten.
+    """
+    if not failures:
+        return
+    print(f"\n{len(failures)} R statistics step(s) failed; their tables were not (re)written:")
+    for failure in failures:
+        print(f"  - {failure}")
+    sys.exit(1)
 
 
 def _run_single(
@@ -218,27 +233,38 @@ def cmd_run(args):
                 # Scope to one paradigm + one analysis
                 aconfig = config.for_paradigm_analysis(args.paradigm, args.analysis)
                 _prepare_output(aconfig, args.analysis, strict=strict, force=force, steps=steps)
-                _run_single(aconfig, args.analysis, steps=steps, select=select, jobs=jobs)
+                try:
+                    _run_single(aconfig, args.analysis, steps=steps, select=select, jobs=jobs)
+                except RStepFailed as e:
+                    _exit_if_failed([str(e)])
             else:
                 # Run all analyses listed for this paradigm
                 analyses = config.get_paradigm_analyses(args.paradigm)
                 if not analyses:
                     print(f"No analyses listed for paradigm '{args.paradigm}'")
                     sys.exit(1)
+                # One module failing does not stop the rest; the run still exits 1.
+                failures: list[str] = []
                 for analysis_name in analyses:
                     print(f"{'='*60}")
                     print(f"Paradigm: {args.paradigm}  |  Analysis: {analysis_name}")
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(args.paradigm, analysis_name)
                     _prepare_output(aconfig, analysis_name, strict=strict, force=force, steps=steps)
-                    _run_single(aconfig, analysis_name, steps=steps, select=select, jobs=jobs)
+                    try:
+                        _run_single(aconfig, analysis_name, steps=steps, select=select, jobs=jobs)
+                    except RStepFailed as e:
+                        failures.append(str(e))
+                        print(f"FAILED: {e}")
                     print()
+                _exit_if_failed(failures)
         else:
             if args.analysis:
                 print("ERROR: --analysis without --paradigm is ambiguous in multi-paradigm mode.")
                 print("Specify --paradigm or omit --analysis to run everything.")
                 sys.exit(1)
             # Run all paradigms, all their analyses
+            failures: list[str] = []
             for pname in config.paradigms:
                 analyses = config.get_paradigm_analyses(pname) or []
                 if not analyses:
@@ -250,8 +276,13 @@ def cmd_run(args):
                     print(f"{'='*60}")
                     aconfig = config.for_paradigm_analysis(pname, analysis_name)
                     _prepare_output(aconfig, analysis_name, strict=strict, force=force, steps=steps)
-                    _run_single(aconfig, analysis_name, steps=steps, select=select, jobs=jobs)
+                    try:
+                        _run_single(aconfig, analysis_name, steps=steps, select=select, jobs=jobs)
+                    except RStepFailed as e:
+                        failures.append(f"{pname}/{e}")
+                        print(f"FAILED: {e}")
                     print()
+            _exit_if_failed(failures)
     else:
         # Legacy single-paradigm config
         if not args.analysis:
@@ -260,7 +291,10 @@ def cmd_run(args):
         _prepare_output(config, args.analysis, strict=strict, force=force, steps=steps)
         analyzer = StudyAnalyzer(config)
         _print_study_summary(config, analyzer)
-        analyzer.run_analysis(args.analysis, steps=steps, select=select, jobs=jobs)
+        try:
+            analyzer.run_analysis(args.analysis, steps=steps, select=select, jobs=jobs)
+        except RStepFailed as e:
+            _exit_if_failed([str(e)])
         print(f"\nDone. Output: {config.output_dir / canonical_analysis_name(args.analysis)}")
 
 

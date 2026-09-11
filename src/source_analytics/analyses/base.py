@@ -12,6 +12,14 @@ from ..io.discovery import SubjectInfo
 
 logger = logging.getLogger(__name__)
 
+
+class RStepFailed(RuntimeError):
+    """An R statistics step failed or timed out, so its tables were not (re)written.
+
+    Raised rather than logged: a failed or timed-out R step used to leave the run
+    exiting 0, so a batch reported success over tables that were never rewritten.
+    """
+
 VALID_STEPS = {"setup", "process", "aggregate", "statistics", "figures", "summary"}
 DEFAULT_RUN_STEPS = VALID_STEPS - {"figures"}
 
@@ -508,6 +516,24 @@ class BaseAnalysis(ABC):
         except subprocess.TimeoutExpired:
             logger.error("R figures-only timed out after 300s")
             return False
+
+    @property
+    def _r_timeout(self) -> float | None:
+        """Wall-clock limit for this module's R statistics step, in seconds, or None.
+
+        Set per module with ``r_timeout_sec`` in its config block. There is no
+        default: these steps are long -- roi_directed's directed-edge tier runs past
+        an hour on 26 parcels -- and a limit that silently kills them is worse than
+        waiting for them.
+        """
+        value = self.config.raw.get(self.name, {}).get("r_timeout_sec")
+        return float(value) if value else None
+
+    def _r_step_failed(self, msg: str, *args) -> None:
+        """Log an R statistics-step failure and raise :class:`RStepFailed`."""
+        text = msg % args if args else msg
+        logger.error(text)
+        raise RStepFailed(f"{self.name}: {text}")
 
     def _r_roi_categories_flags(self) -> list[str]:
         """``['--roi-categories', path]`` for the resolved atlas's own category file.

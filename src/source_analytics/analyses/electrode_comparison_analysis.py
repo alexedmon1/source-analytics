@@ -675,7 +675,7 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
         logger.info("Calling R: %s", " ".join(cmd))
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=600,
+                cmd, capture_output=True, text=True, timeout=self._r_timeout,
             )
             if result.stdout:
                 for line in result.stdout.strip().split("\n"):
@@ -685,8 +685,8 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                     if line.strip():
                         logger.info("[R] %s", line)
             if result.returncode != 0:
-                logger.error("R script failed with exit code %d", result.returncode)
+                self._r_step_failed("R script failed with exit code %d", result.returncode)
         except FileNotFoundError:
             logger.error("Rscript not found. Install R to enable comparison report.")
         except subprocess.TimeoutExpired:
-            logger.error("R script timed out after 600 seconds")
+            self._r_step_failed("R script timed out after %s s", self._r_timeout)

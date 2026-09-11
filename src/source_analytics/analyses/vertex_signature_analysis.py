@@ -389,7 +389,7 @@ class VertexSignatureAnalysis(BaseAnalysis):
                     "--tbl-dir", str(self.tbl_dir),
                 ]
                 cmd.extend(self._r_no_figures_flags())
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=self._r_timeout)
                 if result.returncode == 0:
                     return
         except (FileNotFoundError, subprocess.TimeoutExpired):
