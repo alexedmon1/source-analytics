@@ -395,6 +395,7 @@ paradigms:
 | `bands` | all spectral/connectivity | frequency bands analysed |
 | `pipeline.atlas`, `atlas_files`, `atlas_dir` | atlas I/O, R region tier, mosaics | which parcellation the ROI data use: resolved by name through source-localization's `registry.yaml` to that atlas's own labels / mapping / categories / anatomy; `atlas_files` names the files of an unregistered atlas. The 10× voxel convention is read from each NIfTI header, never inferred from its filename |
 | `roi_categories` | region tier (Python + R), mosaics | category → ROI map. The study's map (or a profile's narrowing) always wins over the atlas default, on the Python and R sides alike |
+| `<analysis>.r_timeout_sec` | R-backed analyses | wall-clock limit for that module's R statistics step; unset = no limit. A step that fails or times out fails the run (exit 1); a paradigm-wide run finishes its other modules first |
 | `epoch_sampling` | spectral/connectivity, all levels | random-epoch resampling (`n_bootstrap: 0` = full timeseries). Precedence: global → `vertex.epoch_sampling` → per-analysis block |
 | `jobs` | `run --jobs` default | worker count when `--jobs` is not given |
 | `<profile>.{include_analyses, include_hypotheses, bands, rois}` | `run --profile` | a narrowed study written to its own tree (see below) |

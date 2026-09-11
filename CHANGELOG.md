@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Behaviour changes (read these before re-running a study)
+
+- **A failed or timed-out R statistics step now fails the run** (exit 1). A run over a
+  whole paradigm still finishes its other modules first, then lists the failures. It
+  used to log the failure and exit 0: on the FORGE treatment re-run, roi_directed (all
+  three source arms) and roi_cross_freq's AAC/PPC tier were killed by a one-hour limit,
+  and region tables from the previous code version went on looking current.
+- **R statistics steps have no default time limit.** They were hard-coded to 3600 s
+  (roi_psd, roi_aperiodic, roi_connectivity, roi_directed, roi_cross_freq,
+  vertex_cluster) or 600 s (electrode and evoked modules). Set `r_timeout_sec` in a
+  module's config block to impose one. The three vertex modules with their own limit
+  lose it too; unlike the rest they still only log a failed step, which is left for
+  the vertex split.
+
+### Fixed
+
+- **roi_cross_freq draws its PAC mosaics.** The mosaic call named legacy columns
+  (`hedges_g`, `region`, `contrast`, `freq_pair`) that the native hypothesis table
+  does not have, so none was ever drawn. It now reads `effect_size` / `spatial` /
+  `hypothesis` / `band`, and the figures step draws them; `summary()` only did so
+  when figures were requested in the same run.
+
 ## v0.7.0 — 2026-09-10 (audit remediation, per-atlas resolution, roi_signature)
 
 A repo audit (2026-09-04) compared the README/CLAUDE.md against the code and

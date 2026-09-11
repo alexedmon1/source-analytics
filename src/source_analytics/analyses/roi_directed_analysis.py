@@ -234,7 +234,7 @@ class ROIDirectedAnalysis(BaseAnalysis):
         if wanted_hyp:
             cmd.extend(["--hypothesis", ",".join(sorted(wanted_hyp))])
 
-        r_timeout = 3600
+        r_timeout = self._r_timeout
         logger.info("Calling R: %s", " ".join(cmd))
         try:
             result = subprocess.run(
@@ -251,10 +251,10 @@ class ROIDirectedAnalysis(BaseAnalysis):
                     if line.strip():
                         logger.info("[R] %s", line)
             if result.returncode != 0:
-                logger.error("R script failed with exit code %d", result.returncode)
+                self._r_step_failed("R script failed with exit code %d", result.returncode)
         except FileNotFoundError:
             logger.error(
                 "Rscript not found. Install R to enable statistics and visualization."
             )
         except subprocess.TimeoutExpired:
-            logger.error("R script timed out after %d seconds", r_timeout)
+            self._r_step_failed("R script timed out after %s s", self._r_timeout)

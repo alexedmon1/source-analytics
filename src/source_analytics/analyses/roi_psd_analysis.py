@@ -231,7 +231,7 @@ class ROIPsdAnalysis(BaseAnalysis):
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=3600,
+                timeout=self._r_timeout,
             )
             if result.stdout:
                 for line in result.stdout.strip().split("\n"):
@@ -241,11 +241,11 @@ class ROIPsdAnalysis(BaseAnalysis):
                     if line.strip():
                         logger.info("[R] %s", line)
             if result.returncode != 0:
-                logger.error("R script failed with exit code %d", result.returncode)
+                self._r_step_failed("R script failed with exit code %d", result.returncode)
         except FileNotFoundError:
             logger.error("Rscript not found. Install R to enable statistics and visualization.")
         except subprocess.TimeoutExpired:
-            logger.error("R script timed out after 3600 seconds")
+            self._r_step_failed("R script timed out after %s s", self._r_timeout)
 
         # Render brain mosaics from posthoc effect sizes
         if self._generate_figures:
@@ -280,5 +280,5 @@ class ROIPsdAnalysis(BaseAnalysis):
             correction_label="FDR",
             facet_cols=["hypothesis", "band", "dv"],
             colorbar_label="Hedges' g",
-            auto_slices=True,atlas=self._atlas_dir
+            auto_slices=True, atlas=self._atlas_dir
         )

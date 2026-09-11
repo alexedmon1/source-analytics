@@ -251,34 +251,46 @@ class ROICrossFreqAnalysis(BaseAnalysis):
         for m in self._edge_metrics_on_disk():
             self._call_r_figures_only("roi_cross_freq_edges_analysis.R", f"{m}_edges.csv")
             break  # one call handles every edge CSV present
+        if "pac" in self._metrics:
+            # From the tables on disk, as roi_psd does: summary() drew these only
+            # when figures were requested in the same run, so a separate figures
+            # pass (the usual way to redraw) never did.
+            self._render_brain_mosaics()
 
     # -------------------------------------------------------------- summary
     def summary(self) -> None:
         """Statistics + figures + report via R (PAC first, then AAC/PPC)."""
-        if "pac" in self._metrics:
-            self._run_pac_r()
+        failed = []
+        if "pac" in self._metrics and not self._run_pac_r():
+            failed.append("PAC")
         edge_metrics = self._edge_metrics_on_disk()
-        if edge_metrics:
-            self._run_edges_r(edge_metrics)
+        if edge_metrics and not self._run_edges_r(edge_metrics):
+            failed.append("AAC/PPC")
+        if failed:
+            # Both tiers were attempted first, so one failing does not cost the
+            # other its tables.
+            self._r_step_failed("R step(s) failed: %s", ", ".join(failed))
 
-    def _run_edges_r(self, metrics: list[str]) -> None:
+    def _run_edges_r(self, metrics: list[str]) -> bool:
         """AAC/PPC hypotheses (global / cells / region pairs) via R."""
-        self._run_r_script(
+        return self._run_r_script(
             "roi_cross_freq_edges_analysis.R",
             extra_args=["--metric", ",".join(metrics)],
             label="AAC/PPC",
         )
 
-    def _run_pac_r(self) -> None:
+    def _run_pac_r(self) -> bool:
         data_dir = self.output_dir / "data"
         if not (data_dir / "pac_values.csv").exists():
             logger.error("pac_values.csv not found -- skipping PAC R analysis")
-            return
-        if self._run_r_script("roi_pac_analysis.R", label="PAC") and self._generate_figures:
+            return True   # nothing to test is a skip, not a failure
+        ok = self._run_r_script("roi_pac_analysis.R", label="PAC")
+        if ok and self._generate_figures:
             self._render_brain_mosaics()
+        return ok
 
     def _run_r_script(self, script_name: str, *, extra_args: list[str] | None = None,
-                      label: str = "R", timeout: int = 3600) -> bool:
+                      label: str = "R", timeout: float | None = None) -> bool:
         """Run one of this module's R scripts with the standard argument set.
 
         Returns True when the script exited 0.
@@ -320,9 +332,10 @@ class ROICrossFreqAnalysis(BaseAnalysis):
         if extra_args:
             cmd.extend(extra_args)
 
+        limit = timeout if timeout is not None else self._r_timeout
         logger.info("Calling R (%s): %s", label, " ".join(cmd))
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=limit)
             for stream in (result.stdout, result.stderr):
                 if stream:
                     for line in stream.strip().split("\n"):
@@ -335,7 +348,7 @@ class ROICrossFreqAnalysis(BaseAnalysis):
         except FileNotFoundError:
             logger.error("Rscript not found. Install R to enable %s statistics.", label)
         except subprocess.TimeoutExpired:
-            logger.error("%s R script timed out after %d seconds", label, timeout)
+            logger.error("%s R script timed out after %s s", label, limit)
         return False
 
     def _render_brain_mosaics(self) -> None:
@@ -353,7 +366,11 @@ class ROICrossFreqAnalysis(BaseAnalysis):
         render_posthoc_mosaics(
             posthoc_csv, roi_cats, self.fig_dir,
             analysis_name="roi_cross_freq",
-            effect_col="hedges_g", roi_col="region",
-            facet_cols=["contrast", "freq_pair"],
-            colorbar_label="Hedges' g",atlas=self._atlas_dir
+            # The native hypothesis schema: `spatial` holds the region and `band`
+            # the frequency pair. The legacy names (hedges_g / region / contrast /
+            # freq_pair) matched no column, so no PAC mosaic was ever drawn.
+            effect_col="effect_size", roi_col="spatial",
+            p_col="p_value", q_col="q_value", correction_label="FDR",
+            facet_cols=["hypothesis", "band"],
+            colorbar_label="Hedges' g", atlas=self._atlas_dir,
         )
