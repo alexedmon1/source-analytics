@@ -11,8 +11,18 @@ import yaml
 
 from .config import StudyConfig
 from .core import StudyAnalyzer, ANALYSIS_REGISTRY, ANALYSIS_METADATA, canonical_analysis_name
+from .plugins import missing_analysis_hint
 from .analyses.base import RStepFailed
 from .analyses.base import VALID_STEPS, BaseAnalysis
+
+
+def _analysis_name(name: str) -> str:
+    """argparse type for --analysis: a registered name, or an error saying where it went."""
+    if name not in ANALYSIS_REGISTRY:
+        raise argparse.ArgumentTypeError(
+            f"unknown analysis '{name}' (see `source-analytics list`).{missing_analysis_hint(name)}"
+        )
+    return name
 
 
 def setup_logging(verbose: bool = False):
@@ -660,7 +670,9 @@ def cmd_init(args):
     analyses = [a.strip() for a in args.analyses.split(",") if a.strip()]
     unknown = [a for a in analyses if a not in ANALYSIS_REGISTRY]
     if unknown:
-        print(f"ERROR: unknown analyses: {', '.join(unknown)} (see `source-analytics list`)", file=err)
+        hints = "".join(missing_analysis_hint(a) for a in unknown)
+        print(f"ERROR: unknown analyses: {', '.join(unknown)} (see `source-analytics list`).{hints}",
+              file=err)
         sys.exit(1)
 
     paradigm_block: dict = {
@@ -738,7 +750,8 @@ def main():
     p_run = subparsers.add_parser("run", help="Run an analysis")
     p_run.add_argument("--study", required=True, type=Path, help="Path to study YAML config")
     p_run.add_argument("--paradigm", help="Paradigm name (multi-paradigm configs)")
-    p_run.add_argument("--analysis", choices=list(ANALYSIS_REGISTRY.keys()), help="Analysis to run")
+    p_run.add_argument("--analysis", type=_analysis_name,
+                       help="Analysis to run (see `source-analytics list`)")
     p_run.add_argument(
         "--profile", metavar="NAME",
         help="Run under the top-level '<NAME>:' profile block, which narrows bands, "

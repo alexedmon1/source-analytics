@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.8.0 — unreleased (the vertex analyses move to a plugin)
+
+### Behaviour changes (read these before upgrading)
+
+- **The vertex analyses are no longer part of source-analytics.** vertex_cluster,
+  vertex_connectivity, vertex_cross_freq, vertex_directed, vertex_evoked, vertex_graph,
+  vertex_nbs, vertex_network, vertex_signature, vertex_spatial, vertex_specparam, and
+  fcd_comparison (which reads vertex_connectivity's output) moved to the private
+  `source-analytics-vertex` package. So did `spectral.vertex`, `spectral.vertex_aperiodic`,
+  the five `R/vertex_*.R` scripts, the vertex figure-registry schemas and the glass-brain
+  summary figures. A config or `--analysis` that names one of them now fails with a
+  message naming the plugin. To keep running them, install the plugin, or pin v0.7.1.
+  Vertex maps depend on where one set of sources sits. The ROI analyses on Monte Carlo
+  source operators replace them.
+- `source_analytics.analyses` no longer exports the vertex classes or their old aliases
+  (`WholebrainAnalysis`, `MVPAAnalysis`, `VertexMVPAAnalysis`, `SpecparamVertexAnalysis`,
+  `SpatialLMMAnalysis`). The plugin exports them.
+
+### Added
+
+- **Analysis plugins** (`source_analytics.plugins`). A package adds analyses through the
+  `source_analytics.plugins` entry-point group. It provides `ANALYSES`, `METADATA` and
+  `ALIASES`, and optionally `register_figures(registry)`. `source-analytics run`/`list`/
+  `figure` and `analysis_meta()` pick plugin analyses up. A plugin that fails to import
+  is logged and skipped. One that reuses an existing analysis name raises.
+
+### Unchanged
+
+- Kept in core because core modules use them: `spectral.vertex_connectivity`
+  (electrode_connectivity's kernels), `viz.glass_brain`, `analyses._network_base`, the
+  cluster-permutation statistics, and the `BaseAnalysis` helpers the vertex modules call
+  (`_vertex_epoch_config`, `_label_vertex_regions`, cluster-state persistence).
+- electrode_signature still compares against a `vertex_signature` table in its own
+  paradigm, if the plugin wrote one.
+
 ## v0.7.1 — 2026-09-11 (R step failures fail the run; PAC mosaics)
 
 ### Behaviour changes (read these before re-running a study)

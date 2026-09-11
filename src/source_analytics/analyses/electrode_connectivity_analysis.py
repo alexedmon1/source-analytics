@@ -2,7 +2,8 @@
 
 Computes all-to-all functional connectivity between the raw scalp electrodes
 (the 30-channel MEA) and derives per-channel Functional Connectivity Density
-(FCD), mirroring :class:`VertexConnectivityAnalysis` at the sensor level.
+(FCD), mirroring vertex_connectivity (now in the source-analytics-vertex plugin)
+at the sensor level.
 
 This is the **comparator** for the MS2 connectivity-methods thesis: source-
 localized (vertex) connectivity recovers spatial structure that sensor-level
