@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.7.1 — 2026-09-11 (R step failures fail the run; PAC mosaics)
 
 ### Behaviour changes (read these before re-running a study)
 
