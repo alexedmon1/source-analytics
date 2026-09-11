@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **nibabel is a core dependency.** `viz/__init__` imports `viz.brain_roi`, which
+  imports nibabel at module level. Without the `atlas` extra, `import
+  source_analytics.core` (and so the CLI) failed, although pyproject said the
+  package imports without any extra. The ROI modules' atlas readers need it anyway.
+  The `atlas` extra is kept, so existing install commands still work.
+
 ## v0.7.1 — 2026-09-11 (R step failures fail the run; PAC mosaics)
 
 ### Behaviour changes (read these before re-running a study)
