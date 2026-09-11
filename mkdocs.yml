@@ -39,6 +39,8 @@ nav:
       - Connectivity metrics: methods/CONNECTIVITY_METHODS.md
       - Hypothesis layer (usage): methods/HYPOTHESIS.md
       - Hypothesis layer (design): methods/DESIGN_SPEC.md
+  - Pending changes:
+      - Vertex split + source naming: plans/SOURCE_NAMING_AND_VERTEX_PLAN.md
   - Archive (historical plans):
       - About the archive: archive/README.md
       - Profile provenance: archive/PROFILE_PROVENANCE_PLAN.md
