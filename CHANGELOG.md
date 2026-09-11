@@ -26,6 +26,14 @@
   `figure` and `analysis_meta()` pick plugin analyses up. A plugin that fails to import
   is logged and skipped. One that reuses an existing analysis name raises.
 
+### Fixed
+
+- **nibabel is a core dependency.** `viz/__init__` imports `viz.brain_roi`, which
+  imports nibabel at module level. Without the `atlas` extra, `import
+  source_analytics.core` (and so the CLI) failed, although pyproject said the
+  package imports without any extra. The ROI modules' atlas readers need it anyway.
+  The `atlas` extra is kept, so existing install commands still work.
+
 ### Unchanged
 
 - Kept in core because core modules use them: `spectral.vertex_connectivity`

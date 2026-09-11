@@ -23,6 +23,9 @@ dependencies = [
     # Figures (matplotlib glass brains, comparison plots) are part of the core
     # lifecycle, so matplotlib is a core dependency, not an extra.
     "matplotlib>=3.7",
+    # Atlas NIfTI reading (atlas resolution, ROI brain figures) is on every ROI
+    # run, and viz imports it at package import, so it is core, not an extra.
+    "nibabel>=5.0",
 ]
 
 # Optional extras. The package imports without any of them; the modules that
@@ -30,7 +33,7 @@ dependencies = [
 #   mne     -> the evoked / TFR modules (roi_evoked, electrode_evoked)
 #   mvpa    -> roi_signature / electrode_signature (scikit-learn)
 #   network -> roi_graph / roi_nbs / roi_network (networkx)
-#   atlas   -> nibabel atlas readers
+#   atlas   -> (kept so old install commands work; nibabel is now core)
 [project.optional-dependencies]
 mne = ["mne>=1.5"]
 atlas = ["nibabel>=5.0"]
