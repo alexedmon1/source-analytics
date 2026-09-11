@@ -90,57 +90,12 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
         q_col="q_value",
         estimate_label="Difference",
     ),
-    "vertex_cluster": TableSchema(
-        posthoc_file="cluster_results.csv",
-        estimate_col="cluster_stat",
-        label_col="metric",
-        band_col="band",
-        effect_col="peak_t",
-        p_col="p_corrected",
-        q_col="p_corrected",
-        sig_col="p_corrected",
-        contrast_col="contrast",
-        estimate_label="Cluster Stat",
-    ),
-    "vertex_spatial": TableSchema(
-        posthoc_file="vertex_spatial_results.csv",
-        estimate_col="coefficient",
-        label_col="metric",
-        band_col="band",
-        effect_col="t_value",
-        p_col="p_value",
-        q_col="q_value",
-        estimate_label="Coefficient",
-    ),
-    "vertex_specparam": TableSchema(
-        posthoc_file="vertex_specparam_stats.csv",
-        estimate_col=None,
-        label_col="parameter",
-        band_col=None,
-        effect_col="hedges_g",
-        p_col="p",
-        q_col="p",
-        estimate_label="Hedges g",
-    ),
-    "vertex_signature": TableSchema(
-        posthoc_file="vertex_signature_results.csv",
-        estimate_col="accuracy",
-        label_col="band",
-        band_col="band",
-        effect_col="accuracy",
-        p_col="p_value",
-        q_col="p_value",
-        estimate_label="Accuracy",
-    ),
 }
 
 # Backward-compatible aliases for old analysis names
 for _old, _new in [
     ("psd", "roi_psd"), ("aperiodic", "roi_aperiodic"), ("evoked", "roi_evoked"),
     ("pac", "roi_cross_freq"), ("roi_pac", "roi_cross_freq"),
-    ("wholebrain", "vertex_cluster"), ("spatial_lmm", "vertex_spatial"),
-    ("specparam_vertex", "vertex_specparam"),
-    ("mvpa", "vertex_signature"), ("vertex_mvpa", "vertex_signature"),
 ]:
     if _new in TABLE_SCHEMAS:
         TABLE_SCHEMAS[_old] = TABLE_SCHEMAS[_new]
@@ -235,11 +190,9 @@ def _register_all() -> None:
     # Analyses that support the standard heatmap + volcano
     heatmap_analyses = [
         "roi_psd", "roi_aperiodic", "roi_evoked", "roi_connectivity", "roi_cross_freq",
-        "vertex_spatial",
     ]
     volcano_analyses = [
         "roi_psd", "roi_aperiodic", "roi_evoked", "roi_connectivity", "roi_cross_freq",
-        "vertex_spatial",
     ]
 
     for a in heatmap_analyses:
@@ -249,10 +202,6 @@ def _register_all() -> None:
 
     # Connectivity gets circos
     register("roi_connectivity", "circos", sf.plot_summary_circos)
-
-    # Vertex-level analyses get glass_brain
-    for a in ("vertex_cluster", "vertex_spatial", "vertex_specparam"):
-        register(a, "glass_brain", sf.plot_summary_glass_brain)
 
 
 _register_all()

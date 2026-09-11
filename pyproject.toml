@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "source-analytics"
-version = "0.7.1"
+version = "0.8.0"
 description = "Statistical analysis toolkit for source-localized EEG data (Python + R)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,9 +30,9 @@ dependencies = [
 
 # Optional extras. The package imports without any of them; the modules that
 # need one raise a clear ImportError naming the extra to install:
-#   mne     -> the evoked / TFR modules (roi_evoked, vertex_evoked, electrode_evoked)
-#   mvpa    -> vertex_signature / electrode_signature (scikit-learn)
-#   network -> roi_graph / vertex_graph / *_network / *_nbs (networkx)
+#   mne     -> the evoked / TFR modules (roi_evoked, electrode_evoked)
+#   mvpa    -> roi_signature / electrode_signature (scikit-learn)
+#   network -> roi_graph / roi_nbs / roi_network (networkx)
 #   atlas   -> (kept so old install commands work; nibabel is now core)
 [project.optional-dependencies]
 mne = ["mne>=1.5"]

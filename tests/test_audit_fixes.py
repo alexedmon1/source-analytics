@@ -13,8 +13,6 @@ import yaml
 
 from source_analytics.config import StudyConfig
 from source_analytics.core import canonical_analysis_name, ANALYSIS_METADATA
-from source_analytics.spectral.band_power import extract_band_power
-from source_analytics.spectral.vertex import extract_band_power_vertices
 from source_analytics.spectral.epoch_sampler import sample_epochs
 
 
@@ -38,18 +36,6 @@ def test_tfr_raises_clear_error_without_mne(monkeypatch):
         tfr.tfr_array_morlet(np.zeros((1, 1, 10)), sfreq=100.0, freqs=[5.0], n_cycles=2)
 
 
-# ---- #9: ROI and vertex `absolute` share one definition (dB/Hz density) -----
-def test_vertex_absolute_matches_roi_density():
-    freqs = np.linspace(1, 100, 397)
-    psd_1d = 1e-12 / freqs  # 1/f
-    bands = {"Alpha": (8, 13), "Beta": (13, 30)}
-    roi = extract_band_power(freqs, psd_1d, bands)
-    vtx = extract_band_power_vertices(freqs, psd_1d[np.newaxis, :], bands, noise_exclude=None)
-    for b in bands:
-        assert vtx[b]["absolute"][0] == pytest.approx(roi[b]["absolute"], rel=1e-9)
-        assert vtx[b]["relative"][0] == pytest.approx(roi[b]["relative"], rel=1e-9)
-
-
 # ---- #12: n_bootstrap: 0 means "full timeseries" on the vertex sampler too --
 def test_sample_epochs_n_bootstrap_zero_returns_full_data():
     data = np.random.default_rng(0).standard_normal((3, 5000))
@@ -60,76 +46,15 @@ def test_sample_epochs_n_bootstrap_zero_returns_full_data():
     assert sampled.shape == (4, 3, 500)
 
 
-# ---- #19: vertex modules see global + per-analysis epoch_sampling ----------
-def test_vertex_epoch_config_merges_global_vertex_and_analysis():
-    from source_analytics.analyses.vertex_cluster_analysis import VertexClusterAnalysis
-
-    class _Cfg:
-        raw = {
-            "epoch_sampling": {"enabled": True, "n_epochs": 40, "n_bootstrap": 5},
-            "vertex_cluster": {"epoch_sampling": {"n_bootstrap": 0}},
-        }
-        vertex = {"epoch_sampling": {"n_epochs": 60}}
-
-    a = VertexClusterAnalysis.__new__(VertexClusterAnalysis)
-    a.config = _Cfg()
-    merged = a._vertex_epoch_config()
-    assert merged == {"enabled": True, "n_epochs": 60, "n_bootstrap": 0}
-
-    class _Off:
-        raw = {"epoch_sampling": {"n_epochs": 40}}
-        vertex = {}
-
-    a.config = _Off()
-    assert a._vertex_epoch_config() is None
-
-
 # ---- #17: deprecated names resolve to the canonical output dir -------------
 def test_canonical_analysis_name():
     assert canonical_analysis_name("psd") == "roi_psd"
-    assert canonical_analysis_name("vertex_mvpa") == "vertex_signature"
     assert canonical_analysis_name("roi_psd") == "roi_psd"
 
 
 # ---- #4/#5: dependency metadata is honest --------------------------------
 def test_comparison_modules_declare_requires():
-    assert ANALYSIS_METADATA["fcd_comparison"]["requires"] == [
-        "electrode_connectivity", "vertex_connectivity"]
-    assert ANALYSIS_METADATA["fcd_comparison"]["supplements"] == "electrode_connectivity"
     assert ANALYSIS_METADATA["electrode_comparison"]["requires"] == ["electrode_psd", "roi_psd"]
-
-
-# ---- #4: fcd_comparison finds its primaries across paradigm dirs ----------
-def test_fcd_comparison_cross_paradigm_lookup(tmp_path):
-    from source_analytics.analyses.fcd_comparison_analysis import FCDComparisonAnalysis
-
-    analytics = tmp_path / "analytics"
-    (analytics / "resting" / "electrode_connectivity" / "data").mkdir(parents=True)
-    (analytics / "vertex" / "vertex_connectivity" / "data").mkdir(parents=True)
-    rows = "subject,group,band,metric,fcd\ns1,A,Alpha,pli,0.5\ns2,B,Alpha,pli,0.4\n"
-    (analytics / "resting" / "electrode_connectivity" / "data" / "electrode_fcd.csv").write_text(rows)
-    (analytics / "vertex" / "vertex_connectivity" / "data" / "vertex_fcd.csv").write_text(rows)
-
-    class _Cfg:
-        raw = {}
-        output_dir = analytics / "resting"
-        paradigm_name = "resting"
-        results_dir = tmp_path / "results"
-        vertex = {}
-        rois = None
-        roi_categories = {}
-        atlas_dir = None
-
-    a = FCDComparisonAnalysis.__new__(FCDComparisonAnalysis)
-    a.config = _Cfg()
-    a._sensor_df = a._source_df = None
-    a._selection = {}
-    src = a._find_upstream_csv("vertex_connectivity", "vertex_fcd.csv", "source_dir")
-    assert src == analytics / "vertex" / "vertex_connectivity" / "data" / "vertex_fcd.csv"
-    sen = a._find_upstream_csv("electrode_connectivity", "electrode_fcd.csv", "sensor_dir")
-    assert sen.parent.parent.parent.name == "resting"
-    with pytest.raises(FileNotFoundError, match="run 'vertex_connectivity' first"):
-        a._find_upstream_csv("vertex_connectivity", "nope.csv", "source_dir")
 
 
 # ---- #1: init writes a parseable design/hypotheses/paradigms config --------
@@ -230,38 +155,6 @@ def test_prepare_output_force_wipes_published_and_working_dirs(tmp_path):
     # --strict-output without --force errors on existing output
     with pytest.raises(SystemExit):
         _prepare_output(_Cfg, "roi_psd", strict=True, force=False, steps=None)
-
-
-# ---- #8: vertex_spatial is retired end to end ------------------------------
-def test_vertex_spatial_processes_nothing(tmp_path):
-    from source_analytics.analyses.vertex_spatial_analysis import VertexSpatialAnalysis
-
-    class _Cfg:
-        raw = {}
-        vertex = {}
-        name = "t"
-        results_dir = tmp_path / "results"
-        paradigm_name = None
-        roi_categories = {}
-        atlas_dir = None
-
-    a = VertexSpatialAnalysis.__new__(VertexSpatialAnalysis)
-    a.config = _Cfg()
-    a.output_dir = tmp_path / "vertex_spatial"
-    a.output_dir.mkdir()
-    a._warned = False
-    a.setup()
-    a.process_subject(object())  # must not touch a loader
-    a.statistics()
-    a.summary()
-    assert (tmp_path / "results" / "tables" / "vertex_spatial" / "vertex_spatial_results.csv").exists()
-    assert "RETIRED" in (a.output_dir / "ANALYSIS_SUMMARY.md").read_text()
-
-
-# ---- #13: vertex_evoked is on the hypothesis contract ----------------------
-def test_vertex_evoked_selectable_hypothesis():
-    from source_analytics.analyses.vertex_evoked_analysis import VertexEvokedAnalysis
-    assert "hypothesis" in VertexEvokedAnalysis.SELECTABLE
 
 
 # ---- #7: R scripts are discoverable from an installed prefix --------------
