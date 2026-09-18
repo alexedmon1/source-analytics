@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.8.0 — unreleased (the vertex analyses move to a plugin)
+## v0.8.0 — 2026-09-18 (the vertex analyses move to a plugin; Monte Carlo runs recognised)
 
 ### Behaviour changes (read these before upgrading)
 
