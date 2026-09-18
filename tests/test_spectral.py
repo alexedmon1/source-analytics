@@ -5,11 +5,6 @@ import numpy as np
 
 from source_analytics.spectral.psd import compute_psd, compute_psd_multiroi
 from source_analytics.spectral.band_power import extract_band_power
-from source_analytics.spectral.vertex import (
-    compute_falff,
-    compute_spectral_slope,
-    extract_band_power_vertices,
-)
 from source_analytics.stats.cluster_permutation import hedges_g
 
 
@@ -52,87 +47,6 @@ def test_extract_band_power():
     # `relative` is still an integral ratio, so it does scale with bandwidth.
     assert 0 < result["Alpha"]["relative"] < 1
     assert result["Gamma"]["relative"] > result["Alpha"]["relative"]
-
-
-def test_extract_band_power_vertices_small_scale():
-    """Regression test: relative power must not collapse to ~0 for PSDs whose
-    integrated total falls below np.finfo(float).eps (~2.2e-16).
-
-    Source-localized PSDs commonly integrate to ~1e-18; an over-aggressive
-    np.maximum(total, eps) clamp on the denominator silently rescaled every
-    band's relative metric by ~100x and inverted some inter-group directions.
-    See FORGE manuscript 2 RERUN_PROPOSAL.md, May 2026.
-    """
-    freqs = np.linspace(0.5, 110, 220)
-    # Flat spectrum at amplitude well below eps — mimics source-localized scale.
-    psd = np.full((4, len(freqs)), 1e-20)  # 4 "vertices"
-
-    bands = {"Delta": (1, 4), "Alpha": (8, 13), "Gamma": (30, 55)}
-    result = extract_band_power_vertices(freqs, psd, bands, noise_exclude=None)
-
-    # For a flat PSD of amplitude A, band power = A * band_width, total = A * total_width.
-    # Relative = band_width / total_width — independent of A.
-    total_width = freqs[-1] - freqs[0]
-    for band_name, (fmin, fmax) in bands.items():
-        rel = result[band_name]["relative"]
-        expected = (fmax - fmin) / total_width
-        assert np.all(
-            np.abs(rel - expected) < 0.01
-        ), f"{band_name} relative {rel.mean():.4f} != expected {expected:.4f} — eps-clamp bug regression"
-
-
-def test_extract_band_power_vertices_sums_to_one():
-    """A spectrum entirely covered by named bands should produce relative
-    powers summing to 1.0 (allowing small numerical slack)."""
-    freqs = np.linspace(1, 100, 200)
-    psd = np.ones((3, len(freqs))) * 1e-18  # below-eps amplitude
-
-    # Bands exactly covering 1-100 Hz without gaps
-    bands = {"A": (1, 25), "B": (25, 50), "C": (50, 75), "D": (75, 100)}
-    result = extract_band_power_vertices(freqs, psd, bands, noise_exclude=None)
-    total_rel = sum(result[b]["relative"] for b in bands)
-    # Tolerance accounts for trapezoid integration at sub-bin boundaries; the
-    # regression test catches the eps-clamp collapse (~0.005), which is two
-    # orders of magnitude away from this assertion.
-    assert np.all(total_rel > 0.95), (
-        f"Relative powers across gap-free bands should sum to ~1.0, got {total_rel}"
-    )
-
-
-def test_compute_falff_small_scale():
-    """fALFF must not collapse to ~0 when total integrated power is below eps."""
-    freqs = np.linspace(1, 100, 200)
-    psd = np.ones((3, len(freqs))) * 1e-18
-
-    # Flat spectrum: gamma (65-100) / total (1-100) = 35 / 99 ≈ 0.354
-    falff = compute_falff(freqs, psd, gamma_range=(65, 100), total_range=(1, 100))
-    expected = 35 / 99
-    assert np.all(np.abs(falff - expected) < 0.01), (
-        f"fALFF should be ~{expected:.3f} for flat spectrum, got {falff}"
-    )
-
-
-def test_compute_spectral_slope_small_scale():
-    """Spectral slope must recover the true 1/f^alpha exponent even when PSD
-    values are below np.finfo(float).eps.
-
-    Pre-fix, np.maximum(psd, eps) floored every value in the log10 spectrum
-    to log10(eps) ≈ -15.66, collapsing slope to ~0. Source-localized PSDs
-    typically integrate to ~1e-18 with per-bin values 1e-19 to 1e-22 — well
-    below eps.
-    """
-    freqs = np.logspace(0, 2, 200)  # 1 to 100 Hz, log-spaced
-    # Construct PSD = scale * f^(-1.5), small absolute scale
-    scale = 1e-22
-    true_alpha = 1.5
-    psd_1d = scale * freqs ** (-true_alpha)
-    psd = np.tile(psd_1d, (5, 1))  # 5 vertices, identical
-
-    slope = compute_spectral_slope(freqs, psd, fit_range=(2, 50))
-    # Slope should be -true_alpha. Without fix it would be ~0.
-    assert np.all(np.abs(slope - (-true_alpha)) < 0.1), (
-        f"Slope should recover {-true_alpha:.2f}; got {slope.mean():.3f}"
-    )
 
 
 def test_hedges_g_small_scale():
@@ -271,14 +185,6 @@ def test_fit_aperiodic_carries_window_provenance():
 
 # --- Two-fit peak detection / fit-window justification -----------------------
 
-def _synthetic_psd(freqs, peaks=((6.0, 0.9, 1.5), (22.0, 0.5, 3.0)), exponent=1.0):
-    """1/f spectrum with Gaussian peaks; one below 12 Hz, one inside 12-45."""
-    psd = 10 ** (1.2 - exponent * np.log10(freqs))
-    for cf, pw, sd in peaks:
-        psd += 10 ** pw * np.exp(-((freqs - cf) ** 2) / (2 * sd ** 2)) * 1e-1
-    return psd
-
-
 BANDS = {
     "Delta": (1, 4), "Theta": (4, 10), "Alpha": (10, 13), "Beta": (13, 30),
     "Low Gamma": (30, 55), "High Gamma": (65, 80), "Epsilon": (80, 150),
@@ -299,71 +205,3 @@ def test_band_reachability_marks_unreachable_and_censored():
     # Partial overlap -> reachable but censored (rates are a lower bound)
     assert reach["Low Gamma"]["reachable"] and reach["Low Gamma"]["censored"]
     assert 0.0 < reach["Low Gamma"]["frac_visible"] < 1.0
-
-
-def test_unreachable_bands_emit_no_peak_columns():
-    """A band the window cannot see must be ABSENT, never a False.
-
-    Emitting has_delta_peak=False for a window that starts at 12 Hz fabricates
-    a measured null: downstream chi-squared tests then report p=1.0 at every
-    vertex for a comparison the data never had power to make.
-    """
-    from source_analytics.spectral.vertex_aperiodic import fit_aperiodic_vertices
-
-    freqs = np.arange(1, 101, 0.5)
-    psd = np.array([_synthetic_psd(freqs) for _ in range(3)])
-
-    out = fit_aperiodic_vertices(freqs, psd, freq_range=(12, 45), bands=BANDS)
-
-    for band in ("delta", "theta", "high_gamma", "epsilon"):
-        assert f"has_{band}_peak" not in out
-    assert "has_beta_peak" in out
-
-
-def test_two_fit_recovers_peaks_the_aperiodic_window_cannot_see():
-    """The wide peak fit finds the 6 Hz peak; the narrow fit still sets exponent."""
-    from source_analytics.spectral.vertex_aperiodic import fit_aperiodic_vertices
-
-    freqs = np.arange(1, 101, 0.5)
-    psd = np.array([_synthetic_psd(freqs) for _ in range(3)])
-
-    narrow = fit_aperiodic_vertices(freqs, psd, freq_range=(12, 45), bands=BANDS)
-    two = fit_aperiodic_vertices(
-        freqs, psd, freq_range=(12, 45), bands=BANDS, peak_freq_range=(2, 50),
-    )
-
-    # Theta is now measurable, and the 6 Hz peak is actually found
-    assert "has_theta_peak" not in narrow
-    assert "has_theta_peak" in two
-    assert two["has_theta_peak"].all()
-    assert np.allclose(two["theta_peak_freq"], 6.0, atol=1.0)
-
-    # Aperiodic estimates still come from the NARROW window, unchanged
-    assert np.allclose(two["exponent"], narrow["exponent"])
-    assert two["aperiodic_window"] == (12, 45)
-    assert two["peak_window"] == (2, 50)
-    # n_peaks stays the narrow fit's QC count; the inventory is n_peaks_wide
-    assert (two["n_peaks_wide"] > two["n_peaks"]).all()
-
-
-def test_peak_inventory_supports_border_crossing_check():
-    """peaks_all carries the bandwidth needed to test Gerster's border rule."""
-    from source_analytics.spectral.vertex_aperiodic import fit_aperiodic_vertices
-
-    freqs = np.arange(1, 101, 0.5)
-    psd = np.array([_synthetic_psd(freqs) for _ in range(2)])
-
-    out = fit_aperiodic_vertices(
-        freqs, psd, freq_range=(12, 45), bands=BANDS, peak_freq_range=(2, 50),
-    )
-
-    peaks = out["peaks_all"][0]
-    assert len(peaks) >= 2
-    for pk in peaks:
-        assert {"center_frequency", "power", "bandwidth"} <= set(pk)
-        assert np.isfinite(pk["bandwidth"])
-    # The 6 Hz peak sits well clear of the 12 Hz border on this synthetic data
-    cf = np.array([p["center_frequency"] for p in peaks])
-    bw = np.array([p["bandwidth"] for p in peaks])
-    crossing = ((cf - bw / 2 < 12) & (cf + bw / 2 > 12))
-    assert not crossing.any()

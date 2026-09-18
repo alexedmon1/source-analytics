@@ -142,5 +142,5 @@ def test_parse_dim_not_selectable_for_target_analysis_exits():
 
 
 def test_parse_valid_dim_for_target_analysis():
-    sel = _parse_selection(_args(metric="pli", analysis="vertex_connectivity"))
+    sel = _parse_selection(_args(metric="pli", analysis="roi_connectivity"))
     assert sel == {"metric": frozenset({"pli"})}

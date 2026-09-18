@@ -13,15 +13,9 @@ from .analyses.roi_psd_analysis import ROIPsdAnalysis
 from .analyses.roi_aperiodic_analysis import ROIAperiodicAnalysis
 from .analyses.roi_connectivity_analysis import ConnectivityAnalysis
 from .analyses.roi_cross_freq_analysis import ROICrossFreqAnalysis
-from .analyses.vertex_cross_freq_analysis import VertexCrossFreqAnalysis
-from .analyses.vertex_cluster_analysis import VertexClusterAnalysis
 from .analyses.electrode_analysis import ElectrodeAnalysis
 from .analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
 from .analyses.electrode_connectivity_analysis import ElectrodeConnectivityAnalysis
-from .analyses.fcd_comparison_analysis import FCDComparisonAnalysis
-from .analyses.vertex_connectivity_analysis import VertexConnectivityAnalysis
-from .analyses.vertex_specparam_analysis import VertexSpecparamAnalysis
-from .analyses.vertex_signature_analysis import VertexSignatureAnalysis
 from .analyses.electrode_signature_analysis import ElectrodeSignatureAnalysis
 from .analyses.roi_signature_analysis import ROISignatureAnalysis
 from .analyses.roi_network_analysis import (
@@ -29,50 +23,32 @@ from .analyses.roi_network_analysis import (
     ROIGraphAnalysis,
     ROINBSAnalysis,
 )
-from .analyses.vertex_network_analysis import (
-    VertexNetworkAnalysis,
-    VertexGraphAnalysis,
-    VertexNBSAnalysis,
-)
-from .analyses.vertex_spatial_analysis import VertexSpatialAnalysis
 from .analyses.roi_directed_analysis import ROIDirectedAnalysis
-from .analyses.vertex_directed_analysis import VertexDirectedAnalysis
 from .analyses.roi_evoked_analysis import ROIEvokedAnalysis
-from .analyses.vertex_evoked_analysis import VertexEvokedAnalysis
 from .analyses.electrode_evoked_analysis import ElectrodeEvokedAnalysis
 from .analyses.electrode_aperiodic_analysis import ElectrodeAperiodicAnalysis
+from .plugins import install_plugins, missing_analysis_hint
 
 logger = logging.getLogger(__name__)
 
-# Registry of available analyses
+# Registry of the built-in analyses. Installed plugins add theirs (plugins.py);
+# the vertex analyses moved to the source-analytics-vertex plugin in v0.8.0.
 ANALYSIS_REGISTRY: dict[str, type[BaseAnalysis]] = {
     "roi_psd": ROIPsdAnalysis,
     "roi_aperiodic": ROIAperiodicAnalysis,
     "roi_connectivity": ConnectivityAnalysis,
     "roi_cross_freq": ROICrossFreqAnalysis,
-    "vertex_cluster": VertexClusterAnalysis,
     "electrode_psd": ElectrodeAnalysis,
     "electrode_aperiodic": ElectrodeAperiodicAnalysis,
     "electrode_comparison": ElectrodeComparisonAnalysis,
     "electrode_connectivity": ElectrodeConnectivityAnalysis,
-    "fcd_comparison": FCDComparisonAnalysis,
-    "vertex_connectivity": VertexConnectivityAnalysis,
-    "vertex_cross_freq": VertexCrossFreqAnalysis,
-    "vertex_specparam": VertexSpecparamAnalysis,
-    "vertex_signature": VertexSignatureAnalysis,
     "electrode_signature": ElectrodeSignatureAnalysis,
     "roi_signature": ROISignatureAnalysis,
     "roi_graph": ROIGraphAnalysis,
     "roi_nbs": ROINBSAnalysis,
-    "vertex_graph": VertexGraphAnalysis,
-    "vertex_nbs": VertexNBSAnalysis,
     "roi_network": ROINetworkAnalysis,      # combined alias (graph + NBS)
-    "vertex_network": VertexNetworkAnalysis,  # combined alias (graph + NBS)
-    "vertex_spatial": VertexSpatialAnalysis,
     "roi_directed": ROIDirectedAnalysis,
-    "vertex_directed": VertexDirectedAnalysis,
     "roi_evoked": ROIEvokedAnalysis,
-    "vertex_evoked": VertexEvokedAnalysis,
     "electrode_evoked": ElectrodeEvokedAnalysis,
 }
 
@@ -82,20 +58,11 @@ _DEPRECATED_NAMES: dict[str, str] = {
     "aperiodic": "roi_aperiodic",
     "pac": "roi_cross_freq",
     "roi_pac": "roi_cross_freq",
-    "wholebrain": "vertex_cluster",
-    "spatial_lmm": "vertex_spatial",
-    "specparam_vertex": "vertex_specparam",
-    "mvpa": "vertex_signature",
-    "vertex_mvpa": "vertex_signature",
     "transfer_entropy": "roi_directed",
     "roi_transfer_entropy": "roi_directed",
     "evoked": "roi_evoked",
     "electrode": "electrode_psd",
 }
-
-# Register aliases so old YAML configs still work
-for _old, _new in _DEPRECATED_NAMES.items():
-    ANALYSIS_REGISTRY[_old] = ANALYSIS_REGISTRY[_new]
 
 
 def canonical_analysis_name(name: str) -> str:
@@ -140,28 +107,11 @@ ANALYSIS_METADATA: dict[str, dict] = {
                              "about": "Graph-theoretic summaries of the ROI connectivity network, per band and connectivity metric. Each subject's ROI-by-ROI matrix is thresholded to a fixed connection density (proportional, default 15% of edges kept) and turned into a graph, from which it computes nodal metrics per ROI (degree, clustering coefficient, betweenness centrality) and whole-network metrics (global efficiency, modularity, small-worldness). Groups are compared per ROI/metric with a Welch t-test, effect sizes are Hedges' g, and p-values are FDR-corrected (Benjamini-Hochberg, q < 0.05). Read it as: which ROIs act as more/less connected hubs (degree, betweenness) or more clustered (clustering), and whether whole-network integration/segregation shifts between groups (an up arrow means the first-listed group is higher). It asks how the connectivity is organized as a network, beyond individual edge strengths."},
     "roi_nbs":              {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level Network-Based Statistic (sub-network test)",
                              "about": "The Network-Based Statistic (Zalesky et al. 2010) applied to the ROI connectivity network, per band and metric -- a connected-subnetwork test that has more power than edge-by-edge correction when a group effect is distributed across many connected edges. Every ROI-pair edge gets a group Welch t-statistic; edges exceeding a primary threshold (default t = 2.5) are retained and grouped into connected components; each component's size (edge count) is compared to a permutation null built by relabeling groups and tracking the largest component per permutation, giving component-level family-wise (FWE) control. Read it as: significant sub-networks -- clusters of ROI connections that jointly differ between groups (a component with p < 0.05), rather than any single edge. It complements roi_graph (network topology) and roi_connectivity (individual edges)."},
-    "vertex_graph":         {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level multi-density AUC graph metrics",
-                             "about": "Whole-brain graph-theoretic organization of the vertex connectivity network, per band and connectivity metric. To avoid picking one arbitrary connection density, each subject's vertex network is thresholded across a range of densities (default 0.05-0.40 in 0.01 steps) and each global metric is integrated over that range as an area-under-the-curve (AUC) value: global efficiency, characteristic path length, mean clustering, transitivity, modularity, assortativity, mean local efficiency, and small-worldness. Groups are compared on each AUC metric with a permutation test (5000 permutations of group labels), with Hedges' g effect sizes; permutation p-values are reported per metric (raw, marked significant at p < 0.05). Read it as: whole-brain shifts in network integration (efficiency, path length), segregation (clustering, modularity), or small-world balance between groups (an up arrow means the first-listed group is higher). It is the unparcellated, density-integrated counterpart of roi_graph."},
-    "vertex_nbs":           {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level Network-Based Statistic (sub-network test)",
-                             "about": "The Network-Based Statistic (Zalesky et al. 2010) applied to the whole-brain vertex connectivity network, per band and metric -- the unparcellated counterpart of roi_nbs. Every vertex-pair edge gets a group Welch t-statistic; edges above a primary threshold (default t = 3.0) are grouped into connected components, and each component's size is compared to a permutation null (5000 relabelings, largest-component-per-permutation) for component-level family-wise (FWE) control. Read it as: significant sub-networks -- spatially distributed sets of vertex connections that jointly differ between groups (a component with p < 0.05), rather than any single vertex pair. It complements vertex_graph (network topology) and vertex_connectivity (per-vertex FCD)."},
     "roi_network":          {"category": "resting", "level": "roi",        "domain": "Connectivity",    "supplements": "roi_connectivity",    "description": "ROI-level graph theory + NBS (combined alias of roi_graph + roi_nbs)"},
-    "vertex_network":       {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "supplements": "vertex_connectivity", "description": "Vertex-level graph theory + NBS (combined alias of vertex_graph + vertex_nbs)"},
     "roi_directed":         {"category": "resting", "level": "roi",        "domain": "Directed",        "description": "Directed connectivity (transfer entropy + DTF)",
                              "about": "Directional (who-drives-whom) connectivity between ROIs, in two flavors. Transfer entropy (TE, Schreiber 2000) is a model-free information-theoretic measure -- a binned lag-1 estimator of how much one ROI's past reduces uncertainty about another's future -- computed for every directed ROI pair (callosal tracts excluded); its net asymmetry (te - te-transpose) gives the dominant direction. The optional Directed Transfer Function (DTF, Kaminski & Blinowska 1991) derives directed influence from a multivariate autoregressive (MVAR) model fit with ridge regularization (order 8) -- a deviation from ordinary-least-squares DTF used to stabilize the fit against collinear channels. Groups are compared on TE three ways: a global per-pair Welch t-test (Hedges' g), a within-group one-sample test of net TE against zero (is the driving direction consistent within a group), and a region-pair linear mixed model (te ~ group * region_pair + (1|subject)). Read it as: which ROI pairs show a group difference in directed influence, and which region drives which (an up arrow means the first-listed group is higher). DTF, when selected, currently emits directed edges without the R group stats."},
-    "vertex_directed":      {"category": "resting", "level": "vertex",     "domain": "Directed",        "description": "Vertex DTF outflow/inflow/netflow (ridge-MVAR, cluster-corrected)",
-                             "about": "Whole-brain directed connectivity on the dorsal source surface via the Directed Transfer Function (DTF, Kaminski & Blinowska 1991) from a multivariate autoregressive model. Because source vertices are strongly collinear (mean inter-vertex |r| ~ 0.64), the MVAR is fit with ridge regularization (order 8) rather than ordinary least squares, and the fit's stability (spectral radius) is checked. The full all-to-all directed DTF matrix is reduced to three per-vertex maps: outflow (mean directed influence a vertex sends to all others), inflow (mean it receives), and netflow (outflow minus inflow -- net source vs sink). Group differences in each map are tested with a cluster-based permutation test (per-vertex t-statistics clustered by spatial adjacency, cluster-extent FWE from a permutation null; Maris & Oostenveld 2007), with per-vertex Hedges' g. Read it as: spatially-contiguous clusters where the groups differ in how strongly a region drives (outflow), is driven by (inflow), or net-drives (netflow) the rest of the brain -- a cluster with p_corrected < 0.05 marks a region of difference, the sign of its t-values gives direction."},
     "electrode_signature": {"category": "resting", "level": "electrode", "domain": "Source vs Sensor", "display_name": "Neural signature", "description": "Sensor-level neural signature (classification/decoding on electrode band power) — the sensor counterpart of roi_signature / vertex_signature"},
     "roi_signature":        {"category": "resting", "level": "roi",        "domain": "Source vs Sensor", "display_name": "Neural signature", "description": "ROI-level neural signature (classification/decoding on per-parcel band power) — the source-side counterpart of electrode_signature; runs on any ROI output"},
-    "vertex_signature":     {"category": "resting", "level": "vertex",     "domain": "Multivariate",    "display_name": "Neural signature", "description": "Multivariate/ML neural signature (classification, decoding; PCA-reduced with back-projection)"},
-    "vertex_cluster":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Vertex-level cluster permutation",
-                             "about": "Whole-brain resting spectral maps on the dorsal source surface: per vertex it computes band power (absolute as mean density in dB/Hz, the same definition as roi_psd, and relative), the 1/f spectral slope, and the peak alpha frequency, then tests where the groups differ. Inference is a cluster-based permutation test -- per-vertex t-statistics are threshold-clustered over neighbouring vertices and each cluster's extent is compared to a permutation null, giving family-wise (FWE) control (Maris & Oostenveld 2007); a threshold-free TFCE variant (Smith & Nichols 2009) is available. Effect sizes are per-vertex Hedges' g. Read it as: spatially-contiguous clusters where the groups differ in a spectral measure -- a cluster with p_corrected < 0.05 marks a region of difference, and the sign of its t-values gives the direction. This is the whole-brain, unparcellated counterpart to the ROI spectral analyses."},
-    "vertex_spatial":       {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "RETIRED — was: spatial GLS robustness check; exits with empty tables (use vertex_cluster / vertex_nbs)"},
-    "vertex_specparam":     {"category": "resting", "level": "vertex",     "domain": "Spectral",        "description": "Vertex-level spectral parameterization",
-                             "about": "The aperiodic (1/f) spectrum fit per vertex across the dorsal source surface with specparam/FOOOF -- exponent, offset, and per-band oscillatory peaks (presence, frequency, power). Group differences in the exponent and offset maps, and in per-band peak power, are tested with a cluster-based permutation test (threshold-clustered vertex t-statistics with cluster-extent FWE correction by permutation); band peak presence is compared with a per-vertex chi-square test. Effect sizes are per-vertex Hedges' g. Read it as: spatially-contiguous clusters of vertices where the groups differ in spectral slope, broadband power, or an oscillatory peak -- a cluster with p_corrected < 0.05 marks a region of difference, the sign of its t-values gives direction. This is the whole-brain, unparcellated version of roi_aperiodic (plus peaks)."},
-    "vertex_connectivity":  {"category": "resting", "level": "vertex",     "domain": "Connectivity",    "description": "Vertex pairwise connectivity",
-                             "about": "Whole-brain resting connectivity between source vertices -- the unparcellated counterpart of roi_connectivity. Per band it computes all-to-all vertex coupling with the same kernels (coherence, imaginary coherence, PLI/wPLI/dwPLI, dPLI, AEC, partial correlation) and condenses each vertex's connectivity to a functional connectivity density (FCD) map: the fraction of other vertices it couples to above a threshold (degree/(n-1), Tomasi & Volkow 2010). Group differences in the FCD maps are tested with a cluster-based permutation test -- per-vertex t-statistics are clustered over neighbouring vertices (adjacency by distance) and cluster extents compared to a permutation null for family-wise (FWE) control (Maris & Oostenveld 2007). Effect sizes are per-vertex Hedges' g. Read it as: spatially-contiguous clusters where the groups differ in how densely a region is functionally connected -- a cluster with p_corrected < 0.05 marks a region of difference, the sign of its t-values gives direction. This whole-brain FCD map is the source-side input to the source-vs-sensor comparison (fcd_comparison)."},
-    "vertex_cross_freq":    {"category": "resting", "level": "vertex",     "domain": "Cross-frequency", "description": "Vertex cross-frequency coupling (local PAC, AAC, n:m PPC)",
-                             "about": "Whole-brain cross-frequency coupling on the dorsal source surface -- the unparcellated counterpart of roi_cross_freq, using the same kernels for each valid slow-phase x fast-amplitude band pair. Phase-amplitude coupling (PAC, Tort et al. 2010 modulation index, surrogate z-scored) is computed locally -- the slow phase and fast amplitude come from the same vertex -- yielding a whole-brain coupling map. Amplitude-amplitude coupling (AAC, power-envelope correlation) and n:m phase-phase coupling (PPC, Palva et al. 2005 phase-locking factor) are computed all-to-all across vertices and summarized to a per-vertex node strength (mean off-diagonal coupling). Group differences in these maps are tested with a cluster-based permutation test (per-vertex t-statistics clustered by spatial adjacency, cluster-extent FWE from a permutation null; Maris & Oostenveld 2007), with per-vertex Hedges' g. Read it as: spatially-contiguous clusters where the groups differ in cross-frequency coupling -- a cluster with p_corrected < 0.05 marks a region of difference, the sign of its t-values gives direction. PAC here is the primary source-spatial-advantage measure (local, no leakage between nodes)."},
     "electrode_psd":        {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "description": "Sensor-level PSD analysis",
                              "about": "Resting band power at each scalp electrode -- the sensor-space counterpart of roi_psd. Per channel and band, power is reported as absolute power density in dB/Hz (10*log10 of the band's integrated power divided by its bandwidth, as in roi_psd) and relative power (the band's fraction of total 1-100 Hz power). Groups are compared per channel and band with a linear mixed model (dv ~ group * channel, subject as a random effect), with an optional region-nested model over the configured electrode regions (channels as replicates); per-contrast effects come from the hypothesis layer as Hedges' g with band-wise Benjamini-Hochberg FDR. Read it as: which electrodes/regions differ in band power, in which bands and direction (up = the first-listed group is higher) -- the sensor-level check against the source (ROI) result."},
     "electrode_aperiodic":  {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "description": "Sensor-level aperiodic (1/f) analysis",
@@ -170,12 +120,16 @@ ANALYSIS_METADATA: dict[str, dict] = {
                              "about": "A source-versus-sensor check on resting band power: for each subject and band, electrode power (averaged over channels) is compared to source power (averaged over ROIs). It reports (1) the cross-subject concordance between sensor and source power (Pearson r per band) and (2) whether the group effect agrees at both levels -- per contrast, Hedges' g with 95% CIs at the electrode level and the source (ROI/region) level, plus an 'exceeds_electrode' flag where a region's effect is larger than the global sensor effect. There is no cluster/FWE correction here; significance is read from whether the 95% CI excludes zero. Read it as: does the source reconstruction recover the same spectral group effect the scalp shows, and does it localize it more sharply than the sensor average?"},
     "electrode_connectivity": {"category": "resting", "level": "electrode",  "domain": "Sensor-level",    "description": "Sensor pairwise connectivity + FCD (source-vs-sensor comparator)",
                              "about": "Resting connectivity between the 30 scalp electrodes -- the sensor-space comparator for vertex_connectivity. Per band it computes all-to-all channel coupling with the leakage/volume-conduction-robust subset of the same kernels (AEC, imaginary coherence, PLI, wPLI, dwPLI, dPLI) and the per-channel functional connectivity density (FCD; degree/(n-1) above threshold, Tomasi & Volkow 2010). Groups are compared per channel with a Welch t-test and Benjamini-Hochberg FDR across the 30 channels (effect sizes Hedges' g), plus a hypothesis-layer cluster-permutation test over the sensor montage (adjacency from channel coordinates). Read it as: which electrodes differ in connectivity/FCD, in which band and direction (up = the first-listed group is higher) -- the scalp-level check on whether the source FCD effect is also visible without source reconstruction. Because sensor space is blurred by volume conduction, the volume-conduction-sensitive metrics are omitted here."},
-    "fcd_comparison":       {"category": "resting", "level": "electrode",  "domain": "Source vs Sensor", "display_name": "Connectivity", "supplements": "electrode_connectivity", "requires": ["electrode_connectivity", "vertex_connectivity"], "description": "Source vs sensor FCD comparison (mean + spatial CV; needs electrode_connectivity AND vertex_connectivity, cross-paradigm)",
-                             "about": "A source-versus-sensor check on functional connectivity density (FCD), pairing the whole-brain vertex FCD maps (vertex_connectivity) against the scalp channel FCD (electrode_connectivity). FCD is each node's fraction of supra-threshold connections (degree/(n-1), threshold 0.05; for dPLI the deviation from its 0.5 no-lag center; Tomasi & Volkow 2010). Per subject and band it summarizes each map two ways -- mean FCD (overall coupling density) and spatial coefficient of variation (CV = SD/mean, how heterogeneous the map is) -- then reports (1) cross-subject concordance between source and sensor summaries (Pearson r per band) and (2) whether the group effect agrees at both levels: per contrast, Hedges' g with 95% CIs at each level plus a sign-concordance flag. There is no cluster/FWE correction here; significance is read from whether a 95% CI excludes zero. Read it as: does source-space recover the same connectivity-density group effect the scalp shows, and is the spatial pattern preserved?"},
     "roi_evoked":           {"category": "evoked",  "level": "roi",        "domain": "Evoked",          "description": "ITC, ERSP, STP for trial-based paradigms"},
-    "vertex_evoked":        {"category": "evoked",  "level": "vertex",     "domain": "Evoked",          "description": "Vertex-level ITC, ERSP, STP (cluster-corrected) for trial-based paradigms"},
     "electrode_evoked":     {"category": "evoked",  "level": "electrode",  "domain": "Evoked",          "description": "Electrode-level ITC, ERSP, STP for trial-based paradigms"},
 }
+
+# Plugins add their analyses, metadata, aliases and figure types.
+install_plugins(ANALYSIS_REGISTRY, ANALYSIS_METADATA, _DEPRECATED_NAMES)
+
+# Register aliases so old YAML configs still work
+for _old, _new in _DEPRECATED_NAMES.items():
+    ANALYSIS_REGISTRY[_old] = ANALYSIS_REGISTRY[_new]
 
 # Add metadata entries for deprecated aliases (point to same metadata)
 for _old, _new in _DEPRECATED_NAMES.items():
@@ -261,7 +215,10 @@ class StudyAnalyzer:
             available = ", ".join(
                 k for k in ANALYSIS_REGISTRY.keys() if k not in _DEPRECATED_NAMES
             )
-            raise ValueError(f"Unknown analysis '{analysis_name}'. Available: {available}")
+            raise ValueError(
+                f"Unknown analysis '{analysis_name}'. Available: {available}."
+                + missing_analysis_hint(analysis_name)
+            )
 
         # Resolve deprecated name (with warning) and use canonical output dir
         canonical_name = resolve_analysis_name(analysis_name)
