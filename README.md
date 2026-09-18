@@ -39,6 +39,7 @@ manual R step.
 - [Study configuration](#study-configuration)
 - [The CLI](#the-cli)
 - [Analysis catalog — what exists](#analysis-catalog--what-exists)
+- [Retired: the vertex level](#retired-the-vertex-level)
 - [Hypothesis testing](#hypothesis-testing)
 - [Selecting metrics, bands & hypotheses](#selecting-metrics-bands--hypotheses)
 - [Output structure](#output-structure)
@@ -84,7 +85,7 @@ Each run writes per-subject data + `ANALYSIS_SUMMARY.md` under `paths.analytics`
 and the published `tables/` + `figures/` under `paths.results` (see
 [Output structure](#output-structure)). **Figures are not produced by a default
 run** — add `--steps …,figures` or use `source-analytics figure`.
-`source-analytics list` shows every analysis you can run.
+`source-analytics list` shows every analysis you can run; `--atlases`, `--plugins` and `--all` widen it to what else this install offers.
 
 ---
 
@@ -103,9 +104,9 @@ the extra to install:
 
 | Extra | Pulls in | Needed by |
 |---|---|---|
-| `mne` | mne | `roi_evoked`, `vertex_evoked`, `electrode_evoked` (Morlet TFR) |
-| `mvpa` | scikit-learn | `vertex_signature`, `electrode_signature`, `roi_signature` |
-| `network` | networkx | `roi_graph`, `vertex_graph`, `*_nbs`, `*_network` |
+| `mne` | mne | `roi_evoked`, `electrode_evoked` (Morlet TFR) |
+| `mvpa` | scikit-learn | `electrode_signature`, `roi_signature` |
+| `network` | networkx | `roi_graph`, `roi_nbs`, `roi_network` |
 | `atlas` | nibabel | atlas readers |
 | `all` | all of the above + dev tools | a full study |
 
@@ -154,8 +155,7 @@ install.packages(c(
 ```
 
 (`ggsignif` draws the significance brackets in the PSD/aperiodic/evoked figures;
-`optparse` is used by the vertex report scripts, `argparse` by the ROI/electrode
-scripts.)
+`argparse` is used by the ROI/electrode report scripts.)
 
 ---
 
@@ -166,9 +166,10 @@ Five ideas explain the whole toolkit.
 **1. Levels × Domains.** Every analysis sits at one **level** (the data it reads)
 and in one **domain** (what it measures).
 
-- **Level** — **ROI** (atlas ROIs: 32 for Allen32, 46 for the legacy Antwerp atlas),
-  **vertex** (whole-brain source vertices), or **electrode** (raw scalp channels,
-  for validation / source-vs-sensor comparison).
+- **Level** — **ROI** (atlas parcels: 32 for Allen32, 26 for Allen26, 46 for the
+  legacy Antwerp atlas) or **electrode** (raw scalp channels, for validation /
+  source-vs-sensor comparison). There is no vertex level: the vertex analyses
+  were retired in v0.8.0 (see [Retired: the vertex level](#retired-the-vertex-level)).
 - **Domain** — **Spectral**, **Connectivity**, **Cross-frequency**, **Directed**,
   **Sensor-level**, or **Evoked**.
 
@@ -176,19 +177,17 @@ and in one **domain** (what it measures).
 `source-lightbox` reads it to group the gallery.
 
 **2. Paradigms.** A study config groups analyses under `paradigms:` keys (e.g.
-`resting`, `vertex`, `evoked`). A paradigm names *where the reconstruction data
-lives* and *which analyses run on it* — it is **not** the same as level. In the
-canonical FORGE setup the `resting` paradigm holds the ROI + electrode analyses
-(they read `rest_roi/derivatives`) and the `vertex` paradigm holds the vertex
-analyses (they read `rest_shell/derivatives`, a different reconstruction).
-`--paradigm` selects the block; the analysis must also be listed in that block's
-`analyses:`.
+`resting`, `evoked`). A paradigm names *where the reconstruction data lives* and
+*which analyses run on it* — it is **not** the same as level. Two paradigms can
+read two different reconstructions of the same recordings (e.g. a shell and a
+surface localization), which is how one study compares them. `--paradigm` selects
+the block; the analysis must also be listed in that block's `analyses:`.
 
 **3. Primary vs supplementary.** Most analyses are **primary** — they read
 reconstructions directly. A few are **supplementary**: they consume another
 analysis's output and must run *after* it. The graph-theory modules are the main
-case — `roi_graph`/`roi_nbs` need `roi_connectivity`; `vertex_graph`/`vertex_nbs`
-need `vertex_connectivity`; `electrode_comparison` needs `electrode_psd`. The
+case — `roi_graph`/`roi_nbs` need `roi_connectivity`; `electrode_comparison`
+needs `electrode_psd`. The
 toolkit does **not** auto-run dependencies — run the primary first or you get a
 "missing edges CSV" error. The dependency is recorded as `supplements` in
 `ANALYSIS_METADATA`.
@@ -200,14 +199,14 @@ each module tests them with whichever adapter matches how it computes its statis
 - **emmeans** (R LMM modules — `roi_psd`, `roi_aperiodic`, `roi_cross_freq`,
   `roi_directed`, `electrode_psd`, `electrode_aperiodic`): a **tabular** result —
   per-cell estimate / CI / p, effect size, declarative-scope FDR.
-- **permutation** (vertex & sensor map modules — `vertex_cluster`,
-  `vertex_connectivity`, `vertex_directed`, `vertex_specparam`,
-  `electrode_connectivity`): a **map + clusters** result — per-unit statistic map
-  with cluster extent/mass and cluster-p (max-stat or TFCE).
+- **permutation** (sensor map modules — `electrode_connectivity`): a **map +
+  clusters** result — per-unit statistic map with cluster extent/mass and
+  cluster-p (max-stat or TFCE).
 
-Because the *declaration* is shared, `vertex_connectivity` (source FCD) and
-`electrode_connectivity` (sensor FCD) test the **same** hypothesis with the **same**
-cluster adapter — a clean source-vs-sensor comparison.
+The declaration is shared across adapters, so a tabular and a map module can test
+the *same* hypothesis. (Until v0.8.0 that was how `vertex_connectivity` and
+`electrode_connectivity` gave a source-vs-sensor comparison; the vertex side has
+since been retired.)
 
 **5. Declare once, run by name.** Nothing auto-fires. You declare the hypotheses,
 then run them one (or a few) at a time with `--hypothesis NAME`. There is no gating
@@ -231,14 +230,41 @@ What it looks for depends on the level:
 | `step6_roi_timeseries_signed.pkl` | pickle | `Dict[str, ndarray]` — ROI timeseries, **signed** (connectivity/PAC/directed need phase) |
 | `roi_timeseries_magnitude.set` | EEGLAB | same data + metadata (sfreq) |
 
-**Vertex-level** (`vertex_cluster`, `vertex_connectivity`, `vertex_cross_freq`,
-`vertex_directed`, `vertex_specparam`, `vertex_signature`, `vertex_evoked`):
+A run with no `step6_*` files falls back to extracting the parcel series on the
+fly from `step5_stc_*.pkl` + `step3_source_coords_mm.npy` using the atlas.
+
+**Run provenance** (every level):
 
 | File | Format | Contents |
 |------|--------|----------|
-| `step5_stc_signed.pkl` | pickle | MNE `SourceEstimate` `(n_vertices, n_times)`, signed. **No fallback**: phase-based modules refuse to read a magnitude file as signed |
-| `step5_stc_magnitude.pkl` | pickle | rectified variant; only `magnitude=True` readers use it, and only they fall back to the legacy unsuffixed `step5_stc.pkl` (which is magnitude-only) |
-| `step3_source_coords_mm.npy` | NumPy | source coordinates `(n_vertices, 3)` in mm |
+| `config_resolved.yaml` | YAML | The fully resolved source-localization config, written from 0.4.2 on: atlas, head model, source space, inverse method, orientation, sampling mode. Read via `io.run_manifest.read_run_manifest`; absent for older runs, which read as *unknown*, never as fixed |
+| `monte_carlo_report.json` | JSON | Monte Carlo runs only. Per parcel: SNR `gain` over a single draw, `coverage`, and `collinear_with` |
+
+**An analysis refuses a cohort that was not localized the same way.** Pooling a
+fixed-grid subject with a Monte Carlo one, or two atlases, is a group statistic
+over two different measurements, and is otherwise silent — the arrays have the
+same shape and the parcel names line up. Subjects with no manifest are skipped
+rather than guessed at.
+
+### Monte Carlo runs
+
+source-localization 0.5.0 added `source_space.source_sampling: monte_carlo`,
+which averages the ROI operator over many sparse source draws instead of solving
+one arbitrary grid. Its parcel series need nothing special here — same
+`step6_roi_timeseries_signed.pkl`, same epoch-major layout, and every analysis
+asks for `signed=True`. Two things do follow from it:
+
+- **It is ROI-only by construction.** No single grid is solved, so there is no
+  `step5_stc_*.pkl` and no source coordinates. Asking for them raises
+  `MonteCarloRunError` naming the method, rather than a `FileNotFoundError`
+  suggesting a re-run that would produce the same absence.
+- **Two per-parcel flags must be read before the tables are.** A parcel
+  near-collinear with another has no meaningful *individual* value — the inverse
+  splits their shared signal arbitrarily, and the split moves with the draw. A
+  parcel with `coverage < 0.5` has its amplitude scaled down, so a low value
+  there means "rarely sampled", not "quiet source". Both are logged before the
+  analysis produces anything; `SubjectLoader.parcel_caveats()` returns them.
+
 
 **Electrode-level** (`electrode_psd`, `electrode_aperiodic`,
 `electrode_connectivity`, `electrode_comparison`, `electrode_evoked`):
@@ -368,20 +394,7 @@ paradigms:
       electrode_psd: {}
       electrode_comparison: {}                         # needs electrode_psd AND roi_psd
       electrode_connectivity: {}
-      fcd_comparison: {}                               # needs electrode_connectivity (here)
-                                                       # AND vertex_connectivity (vertex paradigm)
-
-  vertex:
-    data_dir:    ./localization/rest_shell/derivatives
-    data_subdir: pipeline/data
-    analyses:
-      vertex_connectivity:                             # PRIMARY for the vertex graph theory
-        vertex_filter: {z_min: 0.0}
-        metrics: [imag_coherence, dwpli, pli, aec, coherence]   # all share one STFT pass
-      vertex_graph:     {connectivity_metrics: [imag_coherence, dwpli, pli, aec, coherence]}
-      vertex_nbs:       {nbs_threshold: 3.0, nbs_permutations: 5000}
-      vertex_cluster: {}
-      vertex_specparam: {}
+      roi_signature: {}
 ```
 
 ### What each key feeds
@@ -396,7 +409,7 @@ paradigms:
 | `pipeline.atlas`, `atlas_files`, `atlas_dir` | atlas I/O, R region tier, mosaics | which parcellation the ROI data use: resolved by name through source-localization's `registry.yaml` to that atlas's own labels / mapping / categories / anatomy; `atlas_files` names the files of an unregistered atlas. The 10× voxel convention is read from each NIfTI header, never inferred from its filename |
 | `roi_categories` | region tier (Python + R), mosaics | category → ROI map. The study's map (or a profile's narrowing) always wins over the atlas default, on the Python and R sides alike |
 | `<analysis>.r_timeout_sec` | R-backed analyses | wall-clock limit for that module's R statistics step; unset = no limit. A step that fails or times out fails the run (exit 1); a paradigm-wide run finishes its other modules first |
-| `epoch_sampling` | spectral/connectivity, all levels | random-epoch resampling (`n_bootstrap: 0` = full timeseries). Precedence: global → `vertex.epoch_sampling` → per-analysis block |
+| `epoch_sampling` | spectral/connectivity, all levels | random-epoch resampling (`n_bootstrap: 0` = full timeseries). Precedence: global → `<paradigm>.epoch_sampling` → per-analysis block |
 | `jobs` | `run --jobs` default | worker count when `--jobs` is not given |
 | `<profile>.{include_analyses, include_hypotheses, bands, rois}` | `run --profile` | a narrowed study written to its own tree (see below) |
 | `paths.{analytics, results}` | I/O + gallery | working vs published output trees |
@@ -405,15 +418,15 @@ paradigms:
 
 The per-analysis block is merged into `config.raw[<analysis>]` by
 `config.for_paradigm_analysis()`, so any analysis-specific key (`connectivity_metrics`,
-`nbs_permutations`, `vertex_filter`, …) **must live under
+`nbs_permutations`, …) **must live under
 `paradigms.<paradigm>.analyses.<analysis>`**, not at the top level.
 
 > **Connectivity metrics.** Graph/NBS supplements run on every metric in their
-> `connectivity_metrics`. At the vertex level, set `vertex_connectivity.metrics` to
-> the same list so the primary precomputes all of them in one shared-STFT pass;
-> `vertex_graph`/`vertex_nbs` then load them per metric instead of recomputing.
-> `aec` is computed outside the shared STFT and is the slow one — drop it if
-> runtime matters more than completeness.
+> `connectivity_metrics`. Set `roi_connectivity.metrics` to the same list so the
+> primary precomputes all of them in one shared-STFT pass; `roi_graph`/`roi_nbs`
+> then load them per metric instead of recomputing. `aec` is computed outside the
+> shared STFT and is the slow one — drop it if runtime matters more than
+> completeness.
 
 ---
 
@@ -425,7 +438,7 @@ Everything runs through one entry point with five subcommands.
 |---|---|
 | `run` | run an analysis (the workhorse) |
 | `validate` | check config + subject discovery without running |
-| `list` | list available analyses (+ selectable dims; paradigm-aware with `--study`) |
+| `list` | what this install can run. Analyses by default (+ selectable dims; paradigm-aware with `--study`); `--atlases` the registered parcellations with parcel counts and coverage; `--plugins` installed plugins and the analyses that left core; `--all` everything |
 | `figure` | regenerate on-demand summary figures from existing tables |
 | `init` | scaffold a study config from a reconstruction directory |
 
@@ -441,7 +454,7 @@ source-analytics run --study study.yaml --paradigm resting --analysis roi_psd [o
 | `--paradigm NAME` | paradigm block under `paradigms:`. Omit it (and `--analysis`) on a multi-paradigm config to run **every** listed analysis of every paradigm; `--analysis` without `--paradigm` is an error |
 | `--analysis NAME` | analysis to run (see [catalog](#analysis-catalog--what-exists)). Omit it with `--paradigm` to run everything listed for that paradigm |
 | `--steps a,b,…` | lifecycle steps to run. Valid: `setup, process, aggregate, statistics, figures, summary` |
-| `--jobs N`, `-j N` | worker processes for the per-subject `process` step. `0`/`-1` = all but one core. Explicit `N` wins over the YAML `jobs:`; omitted = YAML value, else serial. Used by the vertex modules, `roi_connectivity`, `electrode_connectivity`; results are identical to serial |
+| `--jobs N`, `-j N` | worker processes for the per-subject `process` step. `0`/`-1` = all but one core. Explicit `N` wins over the YAML `jobs:`; omitted = YAML value, else serial. Used by `roi_connectivity`, `electrode_connectivity`; results are identical to serial |
 | `--profile NAME` | run under the top-level `<NAME>:` profile block (narrowed bands / ROIs / hypotheses / analyses) and write to a separate tree, `analytics/<NAME>/…` + `results/<NAME>/…`. Narrowing ROIs changes the FDR family, so profile q-values are not comparable to the default run's |
 | `--metric m,…` | restrict a module's metrics (shorthand for `--select metric=…`) |
 | `--band b,…` | restrict bands, case/format-insensitive (shorthand for `--select band=…`) |
@@ -467,15 +480,18 @@ source-analytics run --study study.yaml --paradigm resting --analysis roi_psd \
 
 `--steps` re-runs a subset against the on-disk `data/` of an earlier run; the
 `figures` step clears the module's figure dir before regenerating so stale images
-never linger. Deprecated analysis names (`psd`, `pac`, `vertex_mvpa`, …) still
+never linger. Deprecated analysis names (`psd`, `pac`, …) still
 resolve, and their output always lands under the **canonical** name (`roi_psd/`,
-`roi_cross_freq/`, `vertex_signature/`).
+`roi_cross_freq/`, `roi_signature/`).
 
 ### `validate`, `list`, `figure`, `init`
 
 ```bash
 source-analytics validate --study study.yaml [--paradigm resting]
 source-analytics list [--study study.yaml]          # paradigm-aware when --study given
+source-analytics list --atlases                     # parcellations, from source-localization's registry
+source-analytics list --plugins                     # plugins, and what left core in v0.8.0
+source-analytics list --all                         # analyses + atlases + plugins
 source-analytics figure --study study.yaml --paradigm resting --analysis roi_psd --list
 source-analytics figure --study study.yaml --paradigm resting --analysis roi_psd \
     --type effect_heatmap [--contrast disease_effect --band low_gamma]
@@ -491,8 +507,8 @@ catalog by paradigm category and level, tagging each module's `--select` dims.
 
 ## Analysis catalog — what exists
 
-Grouped by **domain** (what they measure). Levels: ROI / vertex (vtx) /
-electrode (elec). *Supplementary* analyses are indented under their primary and
+Grouped by **domain** (what they measure). Levels: ROI / electrode (elec).
+*Supplementary* analyses are indented under their primary and
 must run after it. Method provenance for the connectivity / cross-frequency /
 directed families is tracked, equation-checked, in
 [`docs/methods/CONNECTIVITY_METHODS.md`](docs/methods/CONNECTIVITY_METHODS.md).
@@ -502,46 +518,36 @@ directed families is tracked, equation-checked, in
 | Analysis | Level | Computes | Reference |
 |---|---|---|---|
 | `roi_psd`, `electrode_psd` | ROI, elec | band power (Welch PSD). CSV columns: `absolute` = mean power density in dB/Hz, `relative` = fraction of total; optional `delta_ref` under a profile. There is no separate `dB` column | Welch 1967 |
-| `roi_aperiodic`, `electrode_aperiodic`, `vertex_specparam` | ROI, elec, vtx | 1/f aperiodic (offset, exponent) + oscillatory peaks; default fit window **12–45 Hz** | Donoghue 2020 (specparam) |
-| `vertex_cluster` | vtx | per-vertex band power (same dB/Hz `absolute` as `roi_psd`) / fALFF / slope / peak-α, cluster-corrected maps; honours `epoch_sampling` | Maris & Oostenveld 2007 |
-| `vertex_signature` (alias `vertex_mvpa`) | vtx | whole-brain neural signature: multi-model decoding (PCA-reduced, back-projected), permutation p | — |
-| `vertex_spatial` *(RETIRED)* | vtx | was: spatial-covariance GLS robustness check | — |
-
-> `vertex_spatial` is **retired** (it produced a spatial-covariance robustness
-> table, never a manuscript result, and did not survive the design-spec migration).
-> Spatially-resolved vertex inference is `vertex_cluster` (glass-brain clusters) +
-> `vertex_nbs` (network-based statistic). The module processes no subjects and
-> calls no R: it writes empty result tables + a retirement note and exits.
+| `roi_aperiodic`, `electrode_aperiodic` | ROI, elec | 1/f aperiodic (offset, exponent) + oscillatory peaks; default fit window **12–45 Hz** | Donoghue 2020 (specparam) |
+| `roi_signature` | ROI | per-parcel neural signature: multi-model decoding on band power, permutation p | — |
 
 ### Connectivity (same-frequency functional connectivity)
 
 | Analysis | Level | Computes | Reference |
 |---|---|---|---|
-| `roi_connectivity`, `vertex_connectivity` | ROI, vtx | FC-six + more: coherence, imaginary coherence, PLI, wPLI, dwPLI, dPLI, AEC, partial correlation | Nolte 2004; Stam 2007; Vinck 2011; Stam & van Straaten 2012; Hipp 2012; Marrelec 2006 |
-| ↳ `roi_graph`, `vertex_graph` *(suppl.)* | ROI, vtx | graph-theoretic nodal metrics (degree/clustering/betweenness; vtx: multi-density AUC) | Rubinov & Sporns 2010 |
-| ↳ `roi_nbs`, `vertex_nbs` *(suppl.)* | ROI, vtx | Network-Based Statistic (sub-network test) | Zalesky 2010 |
+| `roi_connectivity` | ROI | FC-six + more: coherence, imaginary coherence, PLI, wPLI, dwPLI, dPLI, AEC, partial correlation | Nolte 2004; Stam 2007; Vinck 2011; Stam & van Straaten 2012; Hipp 2012; Marrelec 2006 |
+| ↳ `roi_graph` *(suppl.)* | ROI | graph-theoretic nodal metrics (degree/clustering/betweenness) | Rubinov & Sporns 2010 |
+| ↳ `roi_nbs` *(suppl.)* | ROI | Network-Based Statistic (sub-network test) | Zalesky 2010 |
 | `electrode_connectivity` | elec | FC-six all-pairs + per-channel FCD — the **source-vs-sensor comparator** | as above |
 
-> `roi_network` / `vertex_network` are **combined aliases** that run graph + NBS
-> together and write a Python summary (there is no R report for them); the split
-> modules (`*_graph`, `*_nbs`) are preferred for the gallery. `dpli` is directed
-> and is auto-excluded from the undirected graph/NBS layer. `roi_connectivity`
-> takes an optional `metrics:` list in its config block (like
-> `vertex_connectivity`); the R report adapts to whichever metric columns the
-> edge CSV carries, so `--metric aec` alone is fine.
+> `roi_network` is a **combined alias** that runs graph + NBS together and writes
+> a Python summary (there is no R report for it); the split modules (`roi_graph`,
+> `roi_nbs`) are preferred for the gallery. `dpli` is directed and is
+> auto-excluded from the undirected graph/NBS layer. `roi_connectivity` takes an
+> optional `metrics:` list in its config block; the R report adapts to whichever
+> metric columns the edge CSV carries, so `--metric aec` alone is fine.
 
 ### Cross-frequency
 
 | Analysis | Level | Computes | Reference |
 |---|---|---|---|
-| `roi_cross_freq`, `vertex_cross_freq` | ROI, vtx | PAC (Modulation Index, surrogate-z); cross-frequency AAC; n:m PPC. ROI: PAC hypotheses via `roi_pac_analysis.R`; AAC/PPC via `roi_cross_freq_edges_analysis.R`, three tiers each: `roi_cross_freq_{aac,ppc}_{global,directed_edges,region}_hypotheses.csv` (PPC has DVs `ppc` + `ppc_z`) | Tort 2010; Bruns 2000 / Masimore 2004; Tass 1998 / Palva 2005 |
+| `roi_cross_freq` | ROI | PAC (Modulation Index, surrogate-z); cross-frequency AAC; n:m PPC. ROI: PAC hypotheses via `roi_pac_analysis.R`; AAC/PPC via `roi_cross_freq_edges_analysis.R`, three tiers each: `roi_cross_freq_{aac,ppc}_{global,directed_edges,region}_hypotheses.csv` (PPC has DVs `ppc` + `ppc_z`) | Tort 2010; Bruns 2000 / Masimore 2004; Tass 1998 / Palva 2005 |
 
 ### Directed
 
 | Analysis | Level | Computes | Reference |
 |---|---|---|---|
 | `roi_directed` | ROI | transfer entropy (`te`, `net_te`); DTF (`dtf`, ridge-MVAR). `--metric te,dtf`; hypothesis tables `roi_directed_{global,directed_edges,region}_hypotheses.csv` carry a `dv` column covering every exported DV (`te`, `net_te`, `dtf`) | Schreiber 2000; Kamiński & Blinowska 1991 |
-| `vertex_directed` | vtx | DTF outflow / inflow / netflow (ridge-MVAR), cluster-corrected. Filter with `--select measure=outflow,…` (not `--metric`) | Kamiński & Blinowska 1991 |
 
 > Source ROIs/vertices are strongly collinear (mean inter-node |corr| ≈ 0.64), so
 > DTF uses a **ridge-regularized** MVAR — plain LS-MVAR is non-stationary; the
@@ -552,8 +558,7 @@ directed families is tracked, equation-checked, in
 | Analysis | Level | Reads | Computes |
 |---|---|---|---|
 | `electrode_comparison` *(suppl.)* | elec | `electrode_psd` **and** `roi_psd` (same paradigm) | source-vs-electrode band-power concordance + effect-size validation |
-| `fcd_comparison` *(suppl.)* | elec | `electrode_connectivity` **and** `vertex_connectivity` — normally in *different* paradigms; sibling paradigm dirs are searched, or set `fcd_comparison.{sensor_dir,source_dir}` | source-vs-sensor FCD comparison (mean + spatial CV) per band × metric |
-| `electrode_signature` *(suppl. of `electrode_psd`)* | elec | `electrode_psd` | sensor-level neural signature (decoding on electrode band power) — the sensor counterpart of `roi_signature` / `vertex_signature`, compared when one ran in the same paradigm |
+| `electrode_signature` *(suppl. of `electrode_psd`)* | elec | `electrode_psd` | sensor-level neural signature (decoding on electrode band power) — the sensor counterpart of `roi_signature`, compared when one ran in the same paradigm |
 | `roi_signature` | roi | — | ROI-level neural signature (decoding on per-parcel band power) — the source-side counterpart of `electrode_signature`; runs on any ROI output, including Monte Carlo operators. Set `sensor_paradigm:` to compare against an `electrode_signature` run in another paradigm |
 
 `ANALYSIS_METADATA` records these as `supplements` (the primary the gallery nests
@@ -563,7 +568,27 @@ them under) plus `requires` (every upstream module, for run ordering).
 
 | Analysis | Level | Computes |
 |---|---|---|
-| `roi_evoked`, `vertex_evoked`, `electrode_evoked` | ROI, vtx, elec | ITC (raw + debiased), ERSP, single-trial power, induced power, ERP amplitude/latency. ROI/electrode: descriptive `group × unit` LMM in R plus declared hypotheses (`_evoked_hypotheses.py`, measure as facet); vertex: cluster permutation plus declared hypotheses via the permutation adapter (`vertex_evoked_hypotheses.csv`, band = measure name, dv = measure type) |
+| `roi_evoked`, `electrode_evoked` | ROI, elec | ITC (raw + debiased), ERSP, single-trial power, induced power, ERP amplitude/latency. Descriptive `group × unit` LMM in R plus declared hypotheses (`_evoked_hypotheses.py`, measure as facet) |
+
+### Retired: the vertex level
+
+The 12 vertex analyses — `vertex_cluster`, `vertex_connectivity`,
+`vertex_cross_freq`, `vertex_directed`, `vertex_evoked`, `vertex_graph`,
+`vertex_nbs`, `vertex_network`, `vertex_signature`, `vertex_spatial`,
+`vertex_specparam`, and `fcd_comparison` (which read `vertex_connectivity`'s
+output) — **left this package in v0.8.0**, along with `spectral.vertex`,
+`spectral.vertex_aperiodic`, the five `R/vertex_*.R` scripts and the glass-brain
+summary figures.
+
+A vertex map describes one arbitrary placement of the source grid. The ROI
+analyses over Monte Carlo source operators integrate over placement instead, and
+match what a 30-channel dorsal array can actually resolve, so they replaced them.
+
+- A config or `--analysis` naming one now fails with a message naming the plugin.
+- `source-analytics list --plugins` prints them, and what provides them.
+- They live in the unmaintained `source-analytics-vertex` plugin. Installing it
+  registers them again through the `source_analytics.plugins` entry point.
+- **v0.7.1 reproduces published vertex results** and stays available.
 
 **Renames (2026-06).** `roi_pac` → `roi_cross_freq` (now also AAC + PPC);
 `roi_transfer_entropy` → `roi_directed`. Old names still work as deprecated aliases
@@ -645,9 +670,9 @@ want **without losing the shared STFT/Hilbert compute pass**:
 
 ```bash
 # two connectivity metrics only
-source-analytics run … --analysis vertex_connectivity --metric dwpli,wpli
+source-analytics run … --analysis roi_connectivity --metric dwpli,wpli
 # one band, one cross-frequency measure
-source-analytics run … --analysis vertex_cross_freq --metric ppc --band low_gamma
+source-analytics run … --analysis roi_cross_freq --metric ppc --band low_gamma
 # one declared hypothesis
 source-analytics run … --analysis roi_psd --hypothesis disease_effect
 # generic form (repeatable)
@@ -721,22 +746,8 @@ $SA resting --analysis electrode_connectivity  # sensor FC comparator
 $SA resting --analysis electrode_signature     # ↳ after electrode_psd
 $SA resting --analysis roi_signature           # source side of the decoding comparison
 
-# Vertex paradigm — whole-brain
-$SA vertex  --analysis vertex_connectivity     # PRIMARY (slow; computes matrices)
-$SA vertex  --analysis vertex_graph            # ↳ after vertex_connectivity
-$SA vertex  --analysis vertex_nbs              # ↳ after vertex_connectivity
-$SA vertex  --analysis vertex_cluster
-$SA vertex  --analysis vertex_specparam
-$SA vertex  --analysis vertex_signature
-$SA vertex  --analysis vertex_cross_freq        # local PAC + AAC + PPC
-$SA vertex  --analysis vertex_directed         # vertex DTF (outflow/inflow/netflow)
-
-# Source-vs-sensor FCD: reads electrode_connectivity (resting) + vertex_connectivity (vertex)
-$SA resting --analysis fcd_comparison
-
 # Evoked paradigm (trial-based data only)
 $SA evoked  --analysis roi_evoked
-$SA evoked  --analysis vertex_evoked
 $SA evoked  --analysis electrode_evoked
 ```
 
@@ -751,15 +762,15 @@ Python                                         R
 2. Load reconstructions (pickle/.set/.npy)
 3. Signal processing (scipy/mne/sklearn)
 4. Export per-subject CSVs ───────────────►    5. Read CSVs + config
-   (vertex/sensor: also do cluster-perm        6. LMMs (lme4/lmerTest), emmeans
-    stats + glass-brain figures in Python)     7. Hypothesis layer: effect sizes, FDR
+   (sensor maps: also do cluster-perm          6. LMMs (lme4/lmerTest), emmeans
+    stats in Python)                           7. Hypothesis layer: effect sizes, FDR
                                                8. ggplot2 figures
                                                9. Markdown ANALYSIS_SUMMARY.md
 ```
 
 Python calls `Rscript` automatically. ROI/electrode LMM modules delegate stats +
-figures to R; vertex/sensor map modules do statistics and glass-brain figures in
-Python and use R only for the report.
+figures to R; sensor map modules do statistics in Python and use R only for the
+report.
 
 ---
 

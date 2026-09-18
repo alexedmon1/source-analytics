@@ -52,6 +52,18 @@
   analyses that left core. `--all` prints everything.
 - `atlas.atlas_meta(name)` exposes a registry entry's descriptive `meta:` block.
 
+### Documentation
+
+- **The README no longer advertises the vertex analyses.** They were removed from the
+  package but left in the catalog tables, the study-config example, the core-concepts
+  levels, the run-in-order script and the extras table — twelve modules documented as
+  available that fail at `--analysis`. It now has a "Retired: the vertex level" section
+  instead, naming the plugin and the version that reproduces published results.
+  `tests/test_readme_catalog.py` asserts both directions: every registered analysis is
+  documented, and no retired one appears outside the section explaining the retirement.
+- The handoff section documents `config_resolved.yaml`, `monte_carlo_report.json`, and
+  what a Monte Carlo run does and does not carry.
+
 - **Analysis plugins** (`source_analytics.plugins`). A package adds analyses through the
   `source_analytics.plugins` entry-point group. It provides `ANALYSES`, `METADATA` and
   `ALIASES`, and optionally `register_figures(registry)`. `source-analytics run`/`list`/
