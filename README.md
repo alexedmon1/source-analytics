@@ -703,6 +703,7 @@ inside the analysis working directory.
 <results>/[<profile>/]tables/<paradigm>/<analysis>/
     <analysis>_hypotheses.csv  # the hypothesis-layer result (one row per band×cell)
     <analysis>_subnetwork_edges.csv  # roi_nbs only: per-edge membership of each NBS component
+    provenance.json            # what produced these tables (see below)
     …                          # any module-specific diagnostic tables
 <results>/[<profile>/]figures/<paradigm>/<analysis>/
     *.png                      # ggplot2 / glass-brain / matplotlib figures (figures step only)
@@ -719,6 +720,54 @@ column aliases during the migration).
 > Figures are **render-on-demand** — they are not auto-regenerated when data
 > changes. Re-run the `figures` step (or `source-analytics figure …`) before
 > rebuilding a manuscript/gallery from updated tables.
+
+### `provenance.json` — what produced these tables
+
+A stats CSV cannot say what made it, and the numbers depend on more than the
+config: on the source-analytics version that computed them, on the plugin that
+provided the analysis if it was not built in, and above all on **how the
+recordings were localized**. A different atlas, inverse method or source-sampling
+mode is a different measurement, not a different view of the same one.
+
+Every run writes one next to its tables, carrying forward what source-localization
+recorded in each subject's `config_resolved.yaml`:
+
+```json
+{
+  "schema": 1,
+  "written": "2026-09-18T13:56:19-04:00",
+  "analysis": "roi_psd",
+  "paradigm": "resting",
+  "source_analytics": {"version": "v0.8.2", "git_describe": "v0.8.2"},
+  "steps": ["aggregate", "process", "setup", "statistics", "summary"],
+  "subjects": {"n": 3, "groups": {"KO": 1, "WT": 2}, "ids": ["sub-901", "…"]},
+  "localization": {
+    "n_with_manifest": 3, "n_unrecorded": 0,
+    "description": "ellipsoid_surface_anatomical, allen26, ellipsoid/surface/anatomical, sLORETA (fixed), Monte Carlo (K=100, 160 sources/draw)",
+    "version": "0.5.1", "atlas": "allen26", "source_sampling": "monte_carlo",
+    "inverse_method": "sLORETA", "orientation": "fixed",
+    "monte_carlo": {"n_draws": 100, "n_sources": 160, "seed": 20260821}
+  },
+  "parcel_caveats": {
+    "Thalamus": "sampled in 31% of draws; amplitude is scaled down accordingly; …"
+  }
+}
+```
+
+Three things worth noting:
+
+- **`parcel_caveats` outlives the log.** A Monte Carlo run flags parcels it
+  rarely sampled and parcels it cannot separate from a neighbour. Those warnings
+  are printed when the analysis runs, but a log is not what someone reading the
+  table six months later has.
+- **`n_unrecorded` counts subjects localized before source-localization 0.4.2**,
+  which left no manifest. They are counted, never guessed at — a record that
+  quietly claimed settings for them would be worse than one that says how many
+  are unaccounted for.
+- **Writing it cannot fail a run.** It is a record *about* a run, written last,
+  and both assembling and writing it swallow errors. Nothing downstream requires
+  the file to exist; `provenance.read_provenance(tbl_dir)` returns `None` when it
+  is absent or corrupt.
 
 ---
 

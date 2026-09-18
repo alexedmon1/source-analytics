@@ -621,6 +621,33 @@ class BaseAnalysis(ABC):
         labels = [vertex_rois[i] for i in idx if i < len(vertex_rois)]
         return format_region_coverage(labels)
 
+    def _write_provenance(self, subjects, manifests, steps) -> None:
+        """Record what produced this analysis's tables, beside the tables.
+
+        A stats CSV cannot say which source-analytics computed it or how the
+        recordings were localized, and those decide the numbers. `provenance.json`
+        answers both next to the output, rather than requiring the reader to find
+        the study config, the localization tree and the installed versions.
+        """
+        from ..provenance import build_provenance, write_provenance
+
+        try:
+            record = build_provenance(
+                analysis=self.name,
+                paradigm=self.config.paradigm_name,
+                profile=self.config.profile_name,
+                study_config=getattr(self.config, "name", None),
+                subjects=subjects,
+                manifests=manifests,
+                steps=steps,
+            )
+        except Exception as exc:  # noqa: BLE001 - never fail a finished run
+            logger.warning("Could not assemble provenance for %s: %s", self.name, exc)
+            return
+        path = write_provenance(self.tbl_dir, record)
+        if path is not None:
+            logger.info("Provenance: %s", path)
+
     _COHORT_FIELDS = (
         ("atlas", "atlas"),
         ("bem_type", "BEM"),
@@ -632,8 +659,11 @@ class BaseAnalysis(ABC):
         ("orientation", "orientation"),
     )
 
-    def _check_cohort_homogeneous(self, subjects: list[SubjectInfo]) -> None:
+    def _check_cohort_homogeneous(self, subjects: list[SubjectInfo]) -> dict:
         """Refuse to pool subjects that were localized differently.
+
+        Returns the manifests it read, keyed by subject id, so the provenance
+        record does not re-read them.
 
         Every number this package produces is conditioned on the forward model
         and the inverse that made the parcel series. Averaging a fixed-grid
@@ -653,7 +683,7 @@ class BaseAnalysis(ABC):
                 manifests[subject.subject_id] = m
         if len(manifests) < 2:
             self._log_monte_carlo_caveats(manifests)
-            return
+            return manifests
 
         disagreements = []
         for attr, label in self._COHORT_FIELDS:
@@ -679,6 +709,7 @@ class BaseAnalysis(ABC):
             )
 
         self._log_monte_carlo_caveats(manifests)
+        return manifests
 
     def _log_monte_carlo_caveats(self, manifests: dict) -> None:
         """Say once, up front, which parcels this cohort cannot resolve.
@@ -733,7 +764,7 @@ class BaseAnalysis(ABC):
             every configured sub-output.
         """
         logger.info("=== %s Analysis ===", self.name)
-        self._check_cohort_homogeneous(subjects)
+        manifests = self._check_cohort_homogeneous(subjects)
         if select:
             self._selection = select
         if steps is None:
@@ -789,6 +820,11 @@ class BaseAnalysis(ABC):
             self.summary()
         else:
             logger.info("Step 6/6: Summary — skipped")
+
+        # Written last, so `steps` records what actually ran. A record about a
+        # run must not be able to fail the run, so write_provenance swallows I/O
+        # errors; nothing downstream requires the file to exist.
+        self._write_provenance(subjects, manifests, steps)
 
         logger.info("=== %s complete ===", self.name)
 

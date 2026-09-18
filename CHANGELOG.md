@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.8.2 — 2026-09-18 (results record what produced them)
+
+### Added
+
+- **`provenance.json`, written beside every analysis's tables.** `_version.py`'s
+  docstring said the git-describe string was stamped into run manifests and compute
+  keys; nothing consumed it, so `__version__` was resolved carefully and then thrown
+  away. It is now recorded where it matters — next to the numbers it describes.
+
+  The record carries the source-analytics version and git-describe string, the
+  installed plugins (marking which provided the analysis), the paradigm/profile, the
+  lifecycle steps that actually ran, the subjects and group counts, and the
+  **localization settings the cohort shares** — source-localization version, preset,
+  atlas, BEM, source space, spacing, inverse method, orientation, sampling mode, and
+  the Monte Carlo draw parameters — carried forward from each subject's
+  `config_resolved.yaml`. A different atlas, inverse or sampling mode is a different
+  measurement, and a CSV cannot say which it was.
+
+  - **Monte Carlo parcel caveats are copied in**, so the parcels a run rarely sampled
+    or could not separate from a neighbour stay attached to the tables rather than
+    only appearing in the log that produced them.
+  - **Subjects localized before source-localization 0.4.2** carry no manifest and are
+    counted as `n_unrecorded`, never guessed at.
+  - **It cannot fail a run.** Written last, after the numbers exist; assembling and
+    writing both swallow errors. `provenance.read_provenance(tbl_dir)` returns `None`
+    when it is absent or corrupt.
+  - It is `.json`, so source-lightbox's `*.csv` table glob does not mistake it for a
+    stats table (verified against a real gallery build).
+
 ## v0.8.1 — 2026-09-18 (the version string stops borrowing a neighbour's repo)
 
 ### Fixed
