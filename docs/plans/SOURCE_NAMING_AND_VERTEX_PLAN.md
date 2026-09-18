@@ -1,15 +1,17 @@
-# Pending: settle the vertex split, then rename the ROI analyses to "source"
+# Pending: rename the ROI analyses to "source"
 
-**Status:** pending, not started. Written 2026-09-11.
+**Status:** Decision 1 settled 2026-09-18 (option C, retire). Decision 2 still
+open. Written 2026-09-11.
 
-v0.7.1 works as it is, and nothing on this page changes it. When this work is
-done or dropped, move this page to the [archive](../archive/README.md).
+v0.7.1 works as it is. When Decision 2 is done or dropped, move this page to the
+[archive](../archive/README.md).
 
 ## Current state
 
 - **v0.7.1 (tagged):** the vertex analyses are in core, and the ROI analyses are
-  named `roi_*`.
-- **`main`:** v0.7.1, plus nibabel as a core dependency.
+  named `roi_*`. This is the version that reproduces published vertex results.
+- **v0.8.0 (unreleased):** PR #5 is merged. The vertex analyses are gone from
+  core and the ROI analyses are still named `roi_*`.
 - **PR #5** (`feat/vertex-plugin`,
   [alexedmon1/source-analytics#5](https://github.com/alexedmon1/source-analytics/pull/5))
   makes three changes:
@@ -20,9 +22,16 @@ done or dropped, move this page to the [archive](../archive/README.md).
   - It adds the `source_analytics.plugins` entry-point hook.
   - It bumps the version to 0.8.0.
 
-  The PR is open and mergeable. **It is on hold until Decision 1.**
+  **Merged into v0.8.0.**
 
-## Decision 1: where the vertex analyses live
+## Decision 1: where the vertex analyses live — settled, option C
+
+**Retired.** The vertex analyses live in `source-analytics-vertex`, which is not
+maintained. No vertex-against-Monte-Carlo comparison will be published, so the
+plugin repository does not have to be made public; v0.7.1 stays public and
+reproduces earlier vertex results if one is ever needed.
+
+The reasoning, kept for the record:
 
 Vertex maps depend on one fixed placement of sources. They are being replaced by
 ROI analyses on Monte Carlo source operators, which average over many source
@@ -39,6 +48,10 @@ published.
 PR #5 works whether a comparison is published (A) or not (C); only B requires
 closing it. Either way, v0.7.1 stays available to reproduce earlier vertex
 results.
+
+Chosen: **C**. Vertex maps describe one arbitrary source placement. ROI analyses
+over Monte Carlo operators integrate over placement instead, and match what a
+30-channel dorsal array can actually resolve.
 
 ## Decision 2: rename `roi_*` to `source_*`
 

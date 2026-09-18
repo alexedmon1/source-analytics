@@ -20,6 +20,38 @@
 
 ### Added
 
+- **Monte Carlo runs are recognised, not just tolerated.**
+  source-localization 0.5.0 added `source_space.source_sampling: monte_carlo`, which
+  averages the ROI operator over many sparse source draws instead of solving one
+  arbitrary grid. Its parcel series were already readable here — same
+  `step6_roi_timeseries_signed.pkl`, same epoch-major layout, and every remaining
+  analysis asks for `signed=True` — but nothing could tell such a run apart from a
+  fixed-grid one. Now:
+  - `source_analytics.io.run_manifest` reads `data/config_resolved.yaml`, the manifest
+    source-localization 0.4.2+ writes beside its outputs: atlas, BEM, source space,
+    inverse method, orientation and sampling mode. Absent for older runs, which read as
+    unknown rather than as fixed.
+  - `SubjectLoader.manifest`, `.is_monte_carlo`, `.monte_carlo_report` and
+    `.parcel_caveats()`.
+  - **`BaseAnalysis.run` refuses a cohort that was not localized the same way.** Pooling
+    a fixed-grid subject with a Monte Carlo one, or two atlases, is a group statistic
+    over two different measurements, and is otherwise silent: the arrays have the same
+    shape and the parcel names line up. Subjects with no manifest are skipped, not
+    guessed at.
+  - **The Monte Carlo parcel caveats are logged before the numbers are produced.** A run
+    flags parcels whose sensor topography it cannot separate from a neighbour's, and
+    parcels it sampled in under half the draws. Both yield ordinary-looking table rows,
+    so the warning is repeated where someone reads it.
+  - Asking a Monte Carlo run for source-level data raises `MonteCarloRunError` naming the
+    method, instead of `FileNotFoundError` advising a re-run that would produce the same
+    absence. No grid is solved, so there is nothing below the parcels — by construction.
+- **`source-analytics list` answers "what can this install run?"**, not only "which
+  analyses". `--atlases` lists the registered parcellations with their parcel counts and
+  brain coverage, read from source-localization's `registry.yaml` so the listing cannot
+  drift from what is selectable. `--plugins` lists installed plugins and names the
+  analyses that left core. `--all` prints everything.
+- `atlas.atlas_meta(name)` exposes a registry entry's descriptive `meta:` block.
+
 - **Analysis plugins** (`source_analytics.plugins`). A package adds analyses through the
   `source_analytics.plugins` entry-point group. It provides `ANALYSES`, `METADATA` and
   `ALIASES`, and optionally `register_figures(registry)`. `source-analytics run`/`list`/

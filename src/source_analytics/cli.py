@@ -420,8 +420,74 @@ def cmd_validate(args):
             print("\nValidation passed.")
 
 
+def _print_atlases():
+    """The parcellations source-localization can label a run with.
+
+    Read from its ``registry.yaml``, so this listing cannot drift from what is
+    actually selectable: adding an atlas there makes it appear here.
+    """
+    try:
+        from .atlas import atlas_meta, registered_atlases
+        names = registered_atlases()
+    except Exception as exc:                      # nibabel/source-localization absent
+        print(f"Atlases: unavailable ({exc})\n")
+        return
+    if not names:
+        print("Atlases: no registry reachable (install source-localization)\n")
+        return
+
+    print("Atlas parcellations (source-localization registry):\n")
+    print(f"    {'name':<10s} {'parcels':>7s}  {'brain coverage':>14s}  notes")
+    for name in names:
+        meta = atlas_meta(name)
+        parcels = meta.get("parcels")
+        coverage = meta.get("brain_mask_coverage_pct")
+        notes = []
+        if meta.get("derived_from"):
+            notes.append(f"derived from {meta['derived_from']}")
+        if meta.get("bilateral_parcels"):
+            notes.append(f"{meta['bilateral_parcels']} bilateral pairs merged")
+        print(f"    {name:<10s} {parcels if parcels is not None else '?':>7}  "
+              f"{(f'{coverage}%' if coverage is not None else '?'):>14s}  "
+              f"{', '.join(notes)}")
+    print("\n    An analysis reports over the atlas the *localization* used; it is "
+          "recorded\n    per run in data/config_resolved.yaml and is not chosen here.\n")
+
+
+def _print_plugins():
+    """Installed packages that add analyses, and the ones that left core."""
+    from .plugins import MOVED_CANONICAL, load_plugins
+
+    loaded = load_plugins()
+    print("Analysis plugins:\n")
+    if loaded:
+        for name, module in loaded:
+            added = sorted(getattr(module, "ANALYSES", {}) or {})
+            version = getattr(module, "__version__", "?")
+            print(f"    {name} ({version}): {', '.join(added) or 'no analyses'}")
+    else:
+        print("    none installed")
+
+    absent = sorted(n for n in MOVED_CANONICAL if n not in ANALYSIS_REGISTRY)
+    if absent:
+        print("\n    Not available in this install — these moved out of core:")
+        by_plugin: dict[str, list[str]] = {}
+        for n in absent:
+            by_plugin.setdefault(MOVED_CANONICAL[n], []).append(n)
+        for plugin, names in sorted(by_plugin.items()):
+            print(f"      {plugin}: {', '.join(names)}")
+    print()
+
+
 def cmd_list(args):
-    """List available analyses."""
+    """List available analyses, atlases and plugins."""
+    show_all = getattr(args, "all", False)
+    if getattr(args, "atlases", False) and not show_all:
+        _print_atlases()
+        return
+    if getattr(args, "plugins", False) and not show_all:
+        _print_plugins()
+        return
     # If --study provided with paradigms, show paradigm-aware listing
     if hasattr(args, "study") and args.study:
         config = StudyConfig.from_yaml(args.study)
@@ -484,6 +550,12 @@ def cmd_list(args):
             for name, desc in items:
                 print(f"    {name:<24s} {desc}")
             print()
+
+    if show_all:
+        _print_atlases()
+        _print_plugins()
+    else:
+        print("  Also: `list --atlases`, `list --plugins`, `list --all`.\n")
 
 
 def cmd_figure(args):
@@ -825,8 +897,15 @@ def main():
     p_val.set_defaults(func=cmd_validate)
 
     # list
-    p_list = subparsers.add_parser("list", help="List available analyses")
+    p_list = subparsers.add_parser(
+        "list", help="List what this install can run: analyses, atlases, plugins")
     p_list.add_argument("--study", type=Path, help="Study YAML (shows paradigm-aware listing)")
+    p_list.add_argument("--atlases", action="store_true",
+                        help="List the registered atlas parcellations instead")
+    p_list.add_argument("--plugins", action="store_true",
+                        help="List installed analysis plugins and what they add")
+    p_list.add_argument("--all", action="store_true",
+                        help="Analyses, atlases and plugins in one listing")
     p_list.set_defaults(func=cmd_list)
 
     # figure

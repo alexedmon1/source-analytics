@@ -11,7 +11,25 @@ from typing import Any
 import numpy as np
 from scipy.io import loadmat
 
+from .run_manifest import (
+    RunManifest,
+    parcel_caveats,
+    read_monte_carlo_report,
+    read_run_manifest,
+)
+
 logger = logging.getLogger(__name__)
+
+_UNREAD = object()   # "not looked for yet", distinct from "looked for, absent"
+
+
+class MonteCarloRunError(RuntimeError):
+    """Source-level data was asked of a run that has none, by construction.
+
+    Monte Carlo sampling integrates over source placement instead of committing
+    to one grid, so it produces parcel time series and nothing below them. This
+    is a property of the method, not a missing file, and no re-run fixes it.
+    """
 
 
 class SubjectLoader:
@@ -29,6 +47,10 @@ class SubjectLoader:
             raise FileNotFoundError(f"Subject data directory not found: {self.data_dir}")
         # Cache for on-the-fly ROI extraction (avoids re-extracting per analysis)
         self._roi_cache: dict[str, dict[str, np.ndarray]] = {}
+        # Run provenance, read once. Sentinel rather than None, because None is
+        # itself a meaningful result ("this run predates config_resolved.yaml").
+        self._manifest: Any = _UNREAD
+        self._mc_report: Any = _UNREAD
 
     def _load_pkl(self, filename: str) -> Any:
         path = self.data_dir / filename
@@ -101,7 +123,20 @@ class SubjectLoader:
         return self._load_pkl("step1_info.pkl")
 
     def load_source_coords(self) -> np.ndarray:
-        """Load source coordinates in mm (n_sources, 3)."""
+        """Load source coordinates in mm (n_sources, 3).
+
+        Raises
+        ------
+        MonteCarloRunError
+            The run drew its sources fresh per draw, so no one set of
+            coordinates describes it.
+        """
+        if self.is_monte_carlo and not self.has_file("step3_source_coords_mm.npy"):
+            raise MonteCarloRunError(
+                f"{self.data_dir} is a Monte Carlo run "
+                f"({self.manifest.describe()}): its sources are redrawn every "
+                f"draw, so there is no single set of source coordinates."
+            )
         return self._load_npy("step3_source_coords_mm.npy")
 
     def load_band_power(self) -> dict[str, dict[str, float]] | None:
@@ -118,6 +153,41 @@ class SubjectLoader:
 
     def has_file(self, filename: str) -> bool:
         return (self.data_dir / filename).exists()
+
+    @property
+    def manifest(self) -> RunManifest | None:
+        """What source-localization run produced this subject, if it recorded it.
+
+        None for a run written before source-localization 0.4.2, which did not
+        leave a ``config_resolved.yaml``. Treat that as unknown, not as fixed.
+        """
+        if self._manifest is _UNREAD:
+            self._manifest = read_run_manifest(self.data_dir)
+        return self._manifest
+
+    @property
+    def is_monte_carlo(self) -> bool:
+        """True when the ROI series came from a Monte Carlo operator.
+
+        False when the run is fixed-grid *or* unrecorded, so this is safe to
+        branch on but is not evidence that a run is fixed-grid.
+        """
+        m = self.manifest
+        return bool(m and m.is_monte_carlo)
+
+    @property
+    def monte_carlo_report(self) -> dict | None:
+        """The per-parcel Monte Carlo report, or None for a fixed-grid run."""
+        if self._mc_report is _UNREAD:
+            self._mc_report = read_monte_carlo_report(self.data_dir)
+        return self._mc_report
+
+    def parcel_caveats(self) -> dict[str, str]:
+        """Parcel -> why its individual value should not be read at face value.
+
+        Empty for a fixed-grid run, so callers apply it unconditionally.
+        """
+        return parcel_caveats(self.monte_carlo_report)
 
     def load_roi_epochs(
         self,
@@ -327,6 +397,19 @@ class SubjectLoader:
             # Legacy pipeline output: step5_stc.pkl was saved as a magnitude
             # duplicate. Safe to read only when magnitude is requested.
             stc = self._load_pkl("step5_stc.pkl")
+        elif self.is_monte_carlo:
+            # Not a missing file: a Monte Carlo run never solves a single grid,
+            # so there is no source-level estimate to load. Saying so beats
+            # telling the caller to re-run a pipeline that would produce the
+            # same absence.
+            raise MonteCarloRunError(
+                f"{self.data_dir} is a Monte Carlo run "
+                f"({self.manifest.describe()}), which averages the ROI operator "
+                f"over many source draws and so has no single source grid. "
+                f"Source-level time courses do not exist for it. Use the parcel "
+                f"time series (load_roi_timeseries), or localize with "
+                f"source_sampling='fixed' if you need per-source output."
+            )
         else:
             raise FileNotFoundError(
                 f"{primary} not found in {self.data_dir}. "

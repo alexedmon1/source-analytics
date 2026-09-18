@@ -210,6 +210,20 @@ def registered_atlases(base_dir: str | Path | None = None) -> list[str]:
     return sorted(_read_registry(str(reg))) if reg else []
 
 
+def atlas_meta(name: str, base_dir: str | Path | None = None) -> dict:
+    """The registry's ``meta:`` block for *name* — descriptive only.
+
+    Parcel counts, coverage and the tier scheme live beside the file paths in
+    source-localization's ``registry.yaml``, and are never copied into a config.
+    Empty dict when the atlas or the registry is not reachable.
+    """
+    reg = _registry_path(Path(base_dir) if base_dir is not None else find_atlas_dir())
+    if reg is None:
+        return {}
+    canonical = _LEGACY_ATLAS_ALIASES.get(name, name)
+    return dict((_read_registry(str(reg)).get(canonical) or {}).get("meta") or {})
+
+
 def _normalise_files(files: dict | None, base: Path | None) -> dict:
     out: dict[str, Path] = {}
     for key, value in (files or {}).items():

@@ -2,6 +2,7 @@
 
 from .atlas_utils import (
     AtlasSpec,
+    atlas_meta,
     find_atlas_dir,
     header_is_inflated,
     registered_atlases,
@@ -15,6 +16,7 @@ from .atlas_utils import (
 
 __all__ = [
     "AtlasSpec",
+    "atlas_meta",
     "find_atlas_dir",
     "header_is_inflated",
     "registered_atlases",

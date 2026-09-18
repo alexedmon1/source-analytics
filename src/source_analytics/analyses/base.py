@@ -621,6 +621,94 @@ class BaseAnalysis(ABC):
         labels = [vertex_rois[i] for i in idx if i < len(vertex_rois)]
         return format_region_coverage(labels)
 
+    _COHORT_FIELDS = (
+        ("atlas", "atlas"),
+        ("bem_type", "BEM"),
+        ("source_type", "source space"),
+        ("surface_method", "surface method"),
+        ("spacing_mm", "spacing_mm"),
+        ("source_sampling", "source sampling"),
+        ("inverse_method", "inverse method"),
+        ("orientation", "orientation"),
+    )
+
+    def _check_cohort_homogeneous(self, subjects: list[SubjectInfo]) -> None:
+        """Refuse to pool subjects that were localized differently.
+
+        Every number this package produces is conditioned on the forward model
+        and the inverse that made the parcel series. Averaging a fixed-grid
+        subject with a Monte Carlo one, or two different atlases, is a group
+        statistic over two different measurements. It is silent otherwise: the
+        arrays have the same shape and the parcel names line up.
+
+        Subjects whose run predates ``config_resolved.yaml`` carry no manifest
+        and are skipped rather than guessed at.
+        """
+        from ..io.run_manifest import read_run_manifest
+
+        manifests = {}
+        for subject in subjects:
+            m = read_run_manifest(subject.data_dir)
+            if m is not None:
+                manifests[subject.subject_id] = m
+        if len(manifests) < 2:
+            self._log_monte_carlo_caveats(manifests)
+            return
+
+        disagreements = []
+        for attr, label in self._COHORT_FIELDS:
+            values = {}
+            for sid, m in manifests.items():
+                values.setdefault(getattr(m, attr), []).append(sid)
+            if len(values) > 1:
+                shown = "; ".join(
+                    f"{v!r}: {', '.join(sorted(sids)[:3])}"
+                    + (f" (+{len(sids) - 3} more)" if len(sids) > 3 else "")
+                    for v, sids in sorted(values.items(), key=lambda kv: str(kv[0]))
+                )
+                disagreements.append(f"  {label} — {shown}")
+
+        if disagreements:
+            raise ValueError(
+                f"{self.name}: the subjects in this cohort were not localized the "
+                f"same way, so pooling them would average different measurements:\n"
+                + "\n".join(disagreements)
+                + "\n\nRe-localize the odd ones out, or split them into separate "
+                "studies. Each run records what built it in "
+                "data/config_resolved.yaml."
+            )
+
+        self._log_monte_carlo_caveats(manifests)
+
+    def _log_monte_carlo_caveats(self, manifests: dict) -> None:
+        """Say once, up front, which parcels this cohort cannot resolve.
+
+        A Monte Carlo run flags parcels the montage cannot separate from a
+        neighbour and parcels it rarely sampled. Both produce ordinary-looking
+        rows in every table downstream, so the warning belongs where someone
+        reads it, not only in the localization log.
+        """
+        if not any(m.is_monte_carlo for m in manifests.values()):
+            return
+
+        from ..io.run_manifest import parcel_caveats, read_monte_carlo_report
+
+        sample = next(iter(manifests.values()))
+        logger.info("Monte Carlo cohort: %s", sample.describe())
+
+        caveats: dict[str, set[str]] = {}
+        for subject_dir in {m.path.parent for m in manifests.values() if m.path}:
+            for parcel, why in parcel_caveats(
+                    read_monte_carlo_report(subject_dir)).items():
+                caveats.setdefault(parcel, set()).add(why)
+        if not caveats:
+            return
+        logger.warning(
+            "%d parcel(s) carry a Monte Carlo caveat — their individual values "
+            "are not interpretable on their own:", len(caveats))
+        for parcel in sorted(caveats):
+            logger.warning("    %s: %s", parcel, "; ".join(sorted(caveats[parcel])))
+
     def run(
         self,
         subjects: list[SubjectInfo],
@@ -645,6 +733,7 @@ class BaseAnalysis(ABC):
             every configured sub-output.
         """
         logger.info("=== %s Analysis ===", self.name)
+        self._check_cohort_homogeneous(subjects)
         if select:
             self._selection = select
         if steps is None:

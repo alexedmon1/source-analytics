@@ -37,16 +37,25 @@ ENTRY_POINT_GROUP = "source_analytics.plugins"
 
 # Analyses that left the core package, and the plugin that now provides them.
 # Only used to turn "unknown analysis" into an instruction.
-MOVED_TO_PLUGIN: dict[str, str] = {
+#: Canonical names of the analyses that left core, by plugin. Listed to a user.
+MOVED_CANONICAL: dict[str, str] = {
     name: "source-analytics-vertex"
     for name in (
         "vertex_cluster", "vertex_connectivity", "vertex_cross_freq", "vertex_directed",
         "vertex_evoked", "vertex_graph", "vertex_nbs", "vertex_network",
         "vertex_signature", "vertex_spatial", "vertex_specparam", "fcd_comparison",
-        # and their deprecated aliases
-        "wholebrain", "spatial_lmm", "specparam_vertex", "mvpa", "vertex_mvpa",
     )
 }
+
+#: Their deprecated aliases. Resolved for hints so an old config gets the same
+#: instruction, but kept out of listings, where they would read as extra
+#: analyses rather than as old spellings of the ones above.
+MOVED_ALIASES: dict[str, str] = {
+    name: "source-analytics-vertex"
+    for name in ("wholebrain", "spatial_lmm", "specparam_vertex", "mvpa", "vertex_mvpa")
+}
+
+MOVED_TO_PLUGIN: dict[str, str] = {**MOVED_CANONICAL, **MOVED_ALIASES}
 
 
 @cache
