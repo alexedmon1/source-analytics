@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.8.1 — 2026-09-18 (the version string stops borrowing a neighbour's repo)
+
+### Fixed
+
+- **`source_analytics.__version__` could report another project's version.**
+  `_version.py` prefers `git describe` over installed metadata, because the dev
+  workflow runs from a checkout where the metadata goes stale. It derived the repo
+  root as `Path(__file__).parents[2]` and ran `git -C` there — but `git -C` does not
+  fail on a directory that is not a repository, it walks *up* until it finds one. For
+  an installed (non-editable) package that root is `<venv>/lib/pythonX.Y`, so any
+  virtualenv sitting inside a git repository made source-analytics describe *that*
+  repository. Observed while verifying the v0.8.0 re-pin: the source-analytics-vertex
+  venv reported the plugin's commit, `76d899d-dirty`, as the source-analytics version.
+
+  `git describe` is now run only when `rev-parse --show-toplevel` is the derived root
+  itself. A real checkout (and a git worktree, whose toplevel is the worktree root)
+  still describes itself; an installed copy falls through to installed metadata, which
+  is the correct answer for it. `tests/test_version.py` covers both, and the
+  enclosing-repo case fails without the check.
+
 ## v0.8.0 — 2026-09-18 (the vertex analyses move to a plugin; Monte Carlo runs recognised)
 
 ### Behaviour changes (read these before upgrading)
