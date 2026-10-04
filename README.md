@@ -821,6 +821,21 @@ Python calls `Rscript` automatically. ROI/electrode LMM modules delegate stats +
 figures to R; sensor map modules do statistics in Python and use R only for the
 report.
 
+### Brain maps from ROI effects
+
+`viz/` draws ROI effects on atlas slices two ways, both from a per-ROI table (`roi`,
+`hedges_g`, p or a significance flag) and the data's own atlas:
+
+- **`plot_effect_size_mosaic`** (`viz/brain_roi.py`): each parcel filled with its effect.
+- **`plot_attribution_mosaic`** (`viz/attribution_map.py`): the published MS1 figures'
+  display. Each parcel's effect is spread by a Gaussian whose sigma is that parcel's
+  measured **peak displacement** for the operator that produced the data, combined as a
+  unit-integral weighted average, with bold outlines on parcels that passed the test. It
+  needs a `roi, displacement_mm` table measured for *that* operator and atlas; one
+  pipeline's table does not apply to another. Give a set of maps one colour scale with
+  `shared_limit(attribution_field_range(...))`, and put `attribution_caption(...)` in the
+  caption: the value at a point is not the tested effect.
+
 ---
 
 ## Extending: add an analysis

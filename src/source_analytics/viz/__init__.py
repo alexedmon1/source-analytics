@@ -24,6 +24,13 @@ from .connectivity_plots import (
     plot_connectivity_comparison,
     plot_significance_circos,
 )
+from .attribution_map import (
+    attribution_caption,
+    attribution_field_range,
+    attribution_volume,
+    plot_attribution_mosaic,
+    shared_limit,
+)
 from .brain_roi import (
     fdr_bh,
     plot_brain_roi,
@@ -68,6 +75,11 @@ __all__ = [
     "plot_connectivity_heatmap",
     "plot_connectivity_comparison",
     "plot_significance_circos",
+    "attribution_caption",
+    "attribution_field_range",
+    "attribution_volume",
+    "plot_attribution_mosaic",
+    "shared_limit",
     "fdr_bh",
     "plot_brain_roi",
     "plot_brain_roi_mosaic",

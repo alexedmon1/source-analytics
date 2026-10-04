@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Attribution maps, `viz/attribution_map.py`.** The display behind the published MS1
+  brain figures (NIMG-26-1224, Figures 4-6), which lived only in that revision's
+  `figures/brainmap.py` and was hard-wired to Allen-32 and one operator's error table. Each
+  parcel's Hedges' g is spread by a Gaussian whose sigma is its measured peak displacement,
+  overlapping parcels combine as a unit-integral weighted average (values never exceed the
+  tested range; opposite signs cancel), and significant parcels get a bold outline. Look,
+  colour map and slices are the paper's.
+  - The atlas and the displacement table are parameters, so any atlas and any operator can
+    use it; the 10x affine convention is read from the header by `atlas.load_atlas`.
+  - `attribution_field_range` + `shared_limit` set one colour scale for a set of maps from
+    what the maps reach, as the paper did. A fixed limit picked from the raw effects left
+    most maps using a fraction of the ramp.
+  - A map that exceeds its limit raises instead of clipping; a parcel absent from the atlas
+    or the displacement table raises instead of silently vanishing (the original skipped it).
+  - `attribution_caption` returns the paper's caption wording with the table's range.
+
 ## v0.8.2 — 2026-09-18 (results record what produced them)
 
 ### Added
