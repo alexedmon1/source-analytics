@@ -57,8 +57,10 @@ def compute_transfer_entropy(
 
         A fixed lag can reverse the inferred direction for oscillatory signals:
         on simulated MEA30 data, ``lag=5`` (10 ms) gave the wrong direction for
-        58% of planted short-lag low-gamma couplings, and the band rule removed
-        those reversals (probability-atlas Phase 10/10b; see
+        58% of planted short-lag low-gamma couplings and the band rule 13%. With
+        longer true lags every fixed lag, the band rule included, was wrong for
+        19-39% in beta and low gamma, so TE's direction stays unreliable on that
+        array (probability-atlas Phase 10/10b; see
         ``docs/methods/CONNECTIVITY_METHODS.md``). Up to v0.8.2 the default was
         ``lag=1``; pass ``lag=1`` to reproduce older results.
     n_bins : int

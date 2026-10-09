@@ -8,8 +8,11 @@
   lag per band to one eighth of the band-centre period, `round(fs / (8 f_c))` (at 500 Hz: theta 9, beta 3, low
   gamma 2 samples); `roi_directed` reads it from `te_lag` (default `band`). The previous default, `lag=1`, is
   one call away (`te_lag: 1`). On simulated MEA30 data a fixed lag that is a large fraction of the period
-  reversed the inferred direction (lag 5 at 500 Hz: wrong for 58% of short-lag low-gamma couplings); the band
-  rule gave ≤ 1% wrong. **`te` / `net_te` values change; re-run `roi_directed` to update them.**
+  reversed the inferred direction: lag 5 at 500 Hz was wrong for 58% of short-lag low-gamma couplings, the band
+  rule 13%. With longer true lags every fixed lag, the band rule included, was wrong for 19-39% in beta and low
+  gamma, so the change removes the worst case but does not make TE's direction reliable. (Corrected 2026-10-09:
+  this entry first said "≤ 1% wrong", which held only for the conditions that passed.)
+  **`te` / `net_te` values change; re-run `roi_directed` to update them.**
 
 ### Added
 

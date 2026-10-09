@@ -114,9 +114,16 @@ Conventions: `S_xy(f)` = cross-spectral density, `S_xx` = auto-spectrum,
 - **Lag (changed 2026-10-09):** `lag="band"` (default) sets `L = round(fs / (8·f_c))` per band, one eighth of the
   band-centre period (45° at `f_c`; at 500 Hz: theta 9, beta 3, low gamma 2 samples). Up to v0.8.2 the default
   was `L = 1`; `roi_directed: {te_lag: 1}` reproduces it. Reason: on band-limited signals a fixed lag that is a
-  large fraction of the period can reverse the inferred direction (MEA30 validation: `L = 5` at 500 Hz, i.e.
-  10 ms = 0.4 cycle at 40 Hz, gave the wrong direction for 58% of planted short-lag low-gamma couplings; the
-  band rule gave ≤ 1% wrong).
+  large fraction of the period can reverse the inferred direction. MEA30 validation, R-parcel, exact pair, +5 dB:
+  - `L = 5` at 500 Hz (10 ms = 0.4 cycle at 40 Hz) was wrong for 58% of planted short-lag (2-5 ms) low-gamma
+    couplings; the band rule, 13%.
+  - **With longer true lags no fixed lag avoids reversals:** wrong 19% (beta) and 38% (low gamma) for the band
+    rule, against 22% and 39% for `L = 1` and 12% and 27% for `L = 5`.
+  - Elsewhere the band rule performs about like `L = 1`.
+
+  The band rule removes the worst case and scales with the band and sampling rate. It does not make TE's direction
+  reliable: see § Validation on MEA30. (Corrected 2026-10-09: an earlier version of this entry said the band rule
+  gave ≤ 1% wrong; that held only for the few conditions that passed the readability test.)
 - **Note:** equal-probability binning + the lag are estimator choices; TE has positive finite-sample bias (significance normally vs surrogates — not yet wired). Confidence: high (Schreiber primary PDF read directly).
 
 ### Directed transfer function — `dtf`
