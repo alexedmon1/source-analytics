@@ -390,7 +390,7 @@ paradigms:
       roi_graph:        {connectivity_metrics: [imag_coherence, dwpli, pli, aec, coherence]}
       roi_nbs:          {nbs_threshold: 2.5, nbs_permutations: 5000}
       roi_cross_freq: {}
-      roi_directed: {}
+      roi_directed: {}                                 # te_lag: band (default) | samples; 1 = pre-0.9 behaviour
       electrode_psd: {}
       electrode_comparison: {}                         # needs electrode_psd AND roi_psd
       electrode_connectivity: {}
@@ -547,7 +547,7 @@ directed families is tracked, equation-checked, in
 
 | Analysis | Level | Computes | Reference |
 |---|---|---|---|
-| `roi_directed` | ROI | transfer entropy (`te`, `net_te`); DTF (`dtf`, ridge-MVAR). `--metric te,dtf`; hypothesis tables `roi_directed_{global,directed_edges,region}_hypotheses.csv` carry a `dv` column covering every exported DV (`te`, `net_te`, `dtf`) | Schreiber 2000; Kamiński & Blinowska 1991 |
+| `roi_directed` | ROI | transfer entropy (`te`, `net_te`; history lag `te_lag`, default band-matched); DTF (`dtf`, ridge-MVAR; **asymmetries not interpretable as direction on volume-conducted EEG**, see CONNECTIVITY_METHODS). `--metric te,dtf`; hypothesis tables `roi_directed_{global,directed_edges,region}_hypotheses.csv` carry a `dv` column covering every exported DV (`te`, `net_te`, `dtf`) | Schreiber 2000; Kamiński & Blinowska 1991 |
 
 > Source ROIs/vertices are strongly collinear (mean inter-node |corr| ≈ 0.64), so
 > DTF uses a **ridge-regularized** MVAR — plain LS-MVAR is non-stationary; the

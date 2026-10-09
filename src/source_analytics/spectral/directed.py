@@ -26,6 +26,14 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Logged once by analyses that emit DTF. Simulation on the MEA30 array (probability-atlas Phase 10).
+DTF_DIRECTION_NOTE = (
+    "DTF: asymmetries are not interpretable as direction on volume-conducted EEG. On simulated MEA30 data, "
+    "zero-lag coupling of unequal strength produced false directions pointing from the stronger to the "
+    "weaker source ~80% of the time, with false-direction rates up to 0.64 (cf. Haufe et al. 2013 for "
+    "Granger-type measures). See docs/methods/CONNECTIVITY_METHODS.md (Validation on MEA30)."
+)
+
 DEFAULT_ORDER = 8      # higher orders destabilize the collinear source MVAR
 DEFAULT_RIDGE = 0.05   # Tikhonov penalty as a fraction of mean Gram diagonal
 

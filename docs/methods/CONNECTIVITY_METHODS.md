@@ -53,6 +53,14 @@ Conventions: `S_xy(f)` = cross-spectral density, `S_xx` = auto-spectrum,
 - **Equation:** `dPLI_ij = (1/N) Σ_t H(Δφ_ij(t))`, H Heaviside with `H(0)=0.5`. Range 0–1; **asymmetric**. `dPLI_ij > 0.5` ⇒ i phase-leads j; `dPLI_ij + dPLI_ji = 1`. Relation: `PLI = 2·|dPLI − 0.5|`.
 - **Our code:** `0.5·(sign(ℑ(S_ij)) + 1)` averaged → maps ℑ>0/=0/<0 to 1/0.5/0 = `H(ℑ(S_ij))`. `S_ij = Z_i·conj(Z_j)` so `phase(S_ij)=φ_i−φ_j`; ℑ>0 ⇒ i leads j ⇒ dPLI>0.5. ✅ **Matches**, convention = "row leads column" (same as dyconnmap). `dpli[j,i]=1−dpli[i,j]`.
 - **Note:** directed; **excluded from the undirected graph/NBS layer** (`_DIRECTED_METRICS` guard). Confidence: high for `(1/N)ΣH(Δφ)`; the `H(0)=0.5` micro-detail is standard Heaviside (medium — not re-printed in open sources).
+- **⚠ Direction not interpretable on volume-conducted EEG (MEA30 validation, 2026-10-08).** The sign of
+  `dPLI − 0.5` follows the *relative polarity* of the two sources as well as their timing: a sign flip between
+  two nodes (source orientation relative to an inverse filter or an electrode's gain) adds 180° to Δφ and
+  reverses dPLI. In simulation it was right 58–65% and wrong 1–2% when polarities agreed, and exactly
+  reversed when they did not (about half the time). Group differences in dPLI on a given edge remain valid as
+  differences in phase relationship (polarity is fixed across animals for a given edge and montage);
+  `|dPLI − 0.5|` (= PLI/2) is polarity-invariant. Analyses emitting dPLI log `DPLI_DIRECTION_NOTE`. See
+  [§ Validation on MEA30](#validation-on-mea30-planted-network-simulation).
 
 ### Orthogonalized amplitude envelope correlation — `aec`
 - **Reference:** **Hipp JF, Hawellek DJ, Corbetta M, Siegel M, Engel AK (2012).** "Large-scale cortical correlation structure of spontaneous oscillatory activity." *Nat Neurosci* 15(6):884–890.
@@ -97,13 +105,30 @@ Conventions: `S_xy(f)` = cross-spectral density, `S_xx` = auto-spectrum,
 
 ---
 
-## Directed connectivity (`spectral/transfer_entropy.py`)
+## Directed connectivity (`spectral/transfer_entropy.py`, `spectral/directed.py`)
 
 ### Transfer entropy — `te` / `net_te`
 - **Reference:** **Schreiber T (2000).** "Measuring information transfer." *Phys Rev Lett* 85(2):461–464. (arXiv:nlin/0001042.)
 - **Equation (Eq. 4):** `T_{J→I} = Σ p(i_{n+1}, i_n^{(k)}, j_n^{(l)}) · log[ p(i_{n+1}|i_n^{(k)}, j_n^{(l)}) / p(i_{n+1}|i_n^{(k)}) ]` — conditional mutual information `I(I_{n+1}; J_n^{(l)} | I_n^{(k)})`. Natural choices `l=k` or `l=1`; worked examples use `k=l=1`. Asymmetric.
-- **Our code (`compute_transfer_entropy`, `_te_from_discretized`):** binned (equal-probability, `n_bins=5`), `lag=1` (k=l=1), `TE = H(Y_f,Y_p)+H(Y_p,X_p)−H(Y_p)−H(Y_f,Y_p,X_p)` — the entropy decomposition of Eq. 4. `net_te = te − te.T`. ✅ **Matches** (binned k=l=1 estimator; net-TE is the standard downstream directionality summary).
-- **Note:** equal-probability binning + lag=1 are estimator choices; TE has positive finite-sample bias (significance normally vs surrogates — not yet wired). Confidence: high (Schreiber primary PDF read directly).
+- **Our code (`compute_transfer_entropy`, `_te_from_discretized`):** binned (equal-probability, `n_bins=5`), k=l=1 with history lag `L` samples, `TE = H(Y_f,Y_p)+H(Y_p,X_p)−H(Y_p)−H(Y_f,Y_p,X_p)` — the entropy decomposition of Eq. 4. `net_te = te − te.T`. ✅ **Matches** (binned k=l=1 estimator; net-TE is the standard downstream directionality summary).
+- **Lag (changed 2026-10-09):** `lag="band"` (default) sets `L = round(fs / (8·f_c))` per band, one eighth of the
+  band-centre period (45° at `f_c`; at 500 Hz: theta 9, beta 3, low gamma 2 samples). Up to v0.8.2 the default
+  was `L = 1`; `roi_directed: {te_lag: 1}` reproduces it. Reason: on band-limited signals a fixed lag that is a
+  large fraction of the period can reverse the inferred direction (MEA30 validation: `L = 5` at 500 Hz, i.e.
+  10 ms = 0.4 cycle at 40 Hz, gave the wrong direction for 58% of planted short-lag low-gamma couplings; the
+  band rule gave ≤ 1% wrong).
+- **Note:** equal-probability binning + the lag are estimator choices; TE has positive finite-sample bias (significance normally vs surrogates — not yet wired). Confidence: high (Schreiber primary PDF read directly).
+
+### Directed transfer function — `dtf`
+- **Reference:** **Kamiński MJ, Blinowska KJ (1991).** "A new method of the description of the information flow in the brain structures." *Biol Cybern* 65(3):203–210.
+- **Equation:** from an MVAR fit `X(t) = Σ_k A_k X(t−k) + E(t)`, `H(f) = A(f)⁻¹`, `γ_ij(f) = |H_ij(f)| / √(Σ_m |H_im(f)|²)`.
+- **Our code (`spectral/directed.py`: `fit_mvar`, `compute_dtf`):** ridge-regularised least-squares MVAR (order 8, ridge 0.05 of the mean Gram diagonal), band-averaged, transposed to source→target. ✅ Matches the definition; the ridge is a stabilising estimator choice.
+- **⚠ Direction not interpretable on volume-conducted EEG (MEA30 validation, 2026-10-08).** Like Granger-type
+  measures (Haufe et al. 2013, *NeuroImage* 64:120–133), DTF reports direction where there is none when one
+  source is mixed into several signals with unequal strength. In simulation, zero-lag coupling of unequal
+  strength gave false directions pointing from the stronger to the weaker source ~80% of the time, and
+  false-direction rates reached 0.64 in single conditions. `roi_directed` logs `DTF_DIRECTION_NOTE` when DTF
+  is selected.
 
 ---
 
@@ -122,6 +147,26 @@ Conventions: `S_xy(f)` = cross-spectral density, `S_xx` = auto-spectrum,
 - **Note (resolution):** absolute CV is NOT comparable across resolutions (n=30 channels vs ~n=200 vertices sample the FCD field at different granularity), so CV magnitude is reported per level, not differenced across levels. Each **group contrast is within a level**, so the source-vs-sensor comparison of the group EFFECT (g, direction) is resolution-fair — the same logic as `electrode_comparison` for spectral power. Confidence: high.
 
 ---
+
+## Validation on MEA30 (planted-network simulation)
+
+Run in the probability-atlas method workspace (Phases 9–10b, 2026-10-07 to 2026-10-09), on the MEA30 30-electrode
+mouse array with the hybrid source model. Coupled sources were planted at known positions under freshly drawn head
+models (registration and skull-conductivity error) into real FORGE vehicle resting EEG, and every edge was z-scored
+against the same background with no plant. Readouts: electrodes, the 26 hybrid parcels with the volume parcels
+collapsed into one Deep node, and the Phase 2 resolvable regions. These are this package's own functions, loaded
+by path.
+
+- **Undirected connectivity:** planted coupling is **detected** (AUC 0.92–0.99 at +5 dB for lagged wPLI and
+  envelope AEC), but **no node pair is resolvable**. The strongest edge is usually a neighbour sharing one node
+  with the true pair ("ghost interactions"; Palva et al. 2018, *NeuroImage* 173:632–643). An edge-level group
+  difference therefore means "coupling changed near these nodes", not "between them".
+- **Direction:** not readable on the anterior–posterior or left–right axes by any metric tested (dPLI, DTF, TE,
+  PSI, Granger and time-reversed Granger). dPLI is set by polarity (above). DTF is biased toward the stronger
+  source (above). TE rarely gives false directions; with the band-matched lag it reads only the strongest
+  cortex–Deep couplings, and those did not replicate on independent simulated truths.
+- **What this means for this package:** report undirected edge results as detection of changed coupling, and
+  do not report dPLI or DTF asymmetries as direction on this array. Other arrays need their own validation.
 
 ## Deviations requiring a decision
 

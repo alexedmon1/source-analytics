@@ -13,7 +13,7 @@ import yaml
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
-from ..spectral.connectivity import compute_connectivity_matrix
+from ..spectral.connectivity import DPLI_DIRECTION_NOTE, compute_connectivity_matrix
 from ..viz.constants import CC_ROIS, METRIC_LABELS
 from .base import BaseAnalysis
 
@@ -49,8 +49,8 @@ class ConnectivityAnalysis(BaseAnalysis):
     name = "roi_connectivity"
     SELECTABLE = {"metric": "connectivity metric", "band": "frequency band"}
 
-    # Metrics the ROI kernel emits (computed together in one shared pass;
-    # selection only restricts which are written/plotted).
+    # Metrics the ROI kernel emits. Only the selected ones are computed
+    # (compute_connectivity_matrix(metrics=...)); values equal a full pass.
     _ROI_METRICS = [
         "coherence", "imag_coherence", "pli", "dwpli", "wpli", "dpli",
         "aec", "partial_corr",
@@ -79,6 +79,8 @@ class ConnectivityAnalysis(BaseAnalysis):
         else:
             configured = list(self._ROI_METRICS)
         self._metrics = self._select("metric", configured)
+        if "dpli" in self._metrics:
+            logger.warning("%s: %s", self.name, DPLI_DIRECTION_NOTE)
         self._edge_rows.clear()
 
     def _compute_subject(self, subject: SubjectInfo):
@@ -104,7 +106,7 @@ class ConnectivityAnalysis(BaseAnalysis):
 
         for draw_ts in draws:
             band_results, roi_names = compute_connectivity_matrix(
-                draw_ts, sfreq, self._selected_bands(),
+                draw_ts, sfreq, self._selected_bands(), metrics=self._metrics,
             )
             if avg_results is None:
                 # First draw — initialize accumulators
@@ -126,9 +128,7 @@ class ConnectivityAnalysis(BaseAnalysis):
 
         n_rois = len(roi_names)
 
-        # Flatten upper triangle to edge rows. Emit only the selected metrics
-        # (all are computed together in compute_connectivity_matrix; --metric
-        # restricts which columns are written).
+        # Flatten upper triangle to edge rows (the selected metrics only).
         for band_name, metrics in avg_results.items():
             sel_mats = {
                 m: metrics[m] for m in self._metrics

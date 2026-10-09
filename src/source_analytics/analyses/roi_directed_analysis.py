@@ -19,7 +19,7 @@ from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.transfer_entropy import compute_transfer_entropy
-from ..spectral.directed import compute_dtf, DEFAULT_ORDER, DEFAULT_RIDGE
+from ..spectral.directed import compute_dtf, DEFAULT_ORDER, DEFAULT_RIDGE, DTF_DIRECTION_NOTE
 from ..viz.constants import CC_ROIS
 from .base import BaseAnalysis
 
@@ -74,9 +74,14 @@ class ROIDirectedAnalysis(BaseAnalysis):
         cfg = config.raw.get(self.name, {})
         self._mvar_order = int(cfg.get("mvar_order", DEFAULT_ORDER))
         self._mvar_ridge = float(cfg.get("mvar_ridge", DEFAULT_RIDGE))
+        # TE history lag: "band" (default; one eighth of the band-centre period) or samples (1 = pre-0.9 behaviour)
+        te_lag = cfg.get("te_lag", "band")
+        self._te_lag = te_lag if te_lag == "band" else int(te_lag)
 
     def setup(self) -> None:
         self._metrics = self._select("metric", self._DIRECTED_METRICS)
+        if "dtf" in self._metrics:
+            logger.warning("%s: %s", self.name, DTF_DIRECTION_NOTE)
         self._edge_rows.clear()
 
     def process_subject(self, subject: SubjectInfo) -> None:
@@ -112,7 +117,7 @@ class ROIDirectedAnalysis(BaseAnalysis):
             draw_results: dict[str, dict[str, np.ndarray]] = {}
             if "te" in self._metrics:
                 te_res, roi_names = compute_transfer_entropy(
-                    draw_ts, sfreq, self._selected_bands(),
+                    draw_ts, sfreq, self._selected_bands(), lag=self._te_lag,
                 )
                 for band, mets in te_res.items():
                     draw_results.setdefault(band, {}).update(mets)  # te, net_te

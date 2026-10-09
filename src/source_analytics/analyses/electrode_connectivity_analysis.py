@@ -36,6 +36,7 @@ from scipy import stats as sp_stats
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.electrode_loader import load_eeglab_set
+from ..spectral.connectivity import DPLI_DIRECTION_NOTE
 from ..spectral.epoch_sampler import sample_epochs
 from ..spectral.vertex_connectivity import (
     compute_vertex_connectivity_matrix_multi,
@@ -97,6 +98,8 @@ class ElectrodeConnectivityAnalysis(BaseAnalysis):
     # ------------------------------------------------------------------ setup
     def setup(self) -> None:
         self._metrics = self._select("metric", self._metrics)
+        if "dpli" in self._metrics:
+            logger.warning("%s: %s", self.name, DPLI_DIRECTION_NOTE)
         self._fcd.clear()
         self._subject_groups.clear()
         self._conn_matrices.clear()

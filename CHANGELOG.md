@@ -2,7 +2,25 @@
 
 ## Unreleased
 
+### Changed
+
+- **Transfer entropy's history lag is band-matched by default.** `compute_transfer_entropy(lag="band")` sets the
+  lag per band to one eighth of the band-centre period, `round(fs / (8 f_c))` (at 500 Hz: theta 9, beta 3, low
+  gamma 2 samples); `roi_directed` reads it from `te_lag` (default `band`). The previous default, `lag=1`, is
+  one call away (`te_lag: 1`). On simulated MEA30 data a fixed lag that is a large fraction of the period
+  reversed the inferred direction (lag 5 at 500 Hz: wrong for 58% of short-lag low-gamma couplings); the band
+  rule gave ≤ 1% wrong. **`te` / `net_te` values change; re-run `roi_directed` to update them.**
+
 ### Added
+
+- **`compute_connectivity_matrix(metrics=...)`** computes only the requested metrics (a family that shares a
+  pass is computed together), with values identical to a full call; `roi_connectivity` passes its selected
+  metrics, so `--metric` now saves the compute as well as the columns. Unknown names raise.
+- **Direction caveats for dPLI and DTF, from a planted-network validation on the MEA30 array.** `roi_connectivity`
+  and `electrode_connectivity` log `DPLI_DIRECTION_NOTE` when dPLI is selected (its sign followed the sources'
+  relative polarity, not their timing); `roi_directed` logs `DTF_DIRECTION_NOTE` when DTF is selected (false
+  directions from mixing, toward the stronger source). `docs/methods/CONNECTIVITY_METHODS.md` gains a DTF entry
+  and a "Validation on MEA30" section: coupling is detected but no node pair is resolvable on that array.
 
 - **Attribution maps, `viz/attribution_map.py`.** The display behind the published MS1
   brain figures (NIMG-26-1224, Figures 4-6), which lived only in that revision's

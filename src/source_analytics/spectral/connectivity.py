@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import logging
+from typing import Iterable
 
 import numpy as np
 from scipy.signal import welch, csd, stft, hilbert, butter, sosfiltfilt
 
 logger = logging.getLogger(__name__)
+
+ALL_METRICS = ("coherence", "imag_coherence", "pli", "dwpli", "wpli", "dpli", "aec", "partial_corr")
+
+# Logged once by analyses that emit dPLI. Simulation on the MEA30 array (probability-atlas Phase 10): a sign
+# flip between two nodes (source orientation relative to the inverse filter or electrode gain) adds 180 degrees
+# to their phase difference and reverses dPLI. See docs/methods/CONNECTIVITY_METHODS.md, "Validation on MEA30".
+DPLI_DIRECTION_NOTE = (
+    "dPLI: the sign of dPLI - 0.5 is not interpretable as which node leads. On simulated MEA30 data it was set "
+    "by the relative polarity of the two sources (reversed whenever it was opposite, ~half the time), not by "
+    "their timing. Group differences in dPLI remain valid as differences in phase relationship; |dPLI - 0.5| "
+    "is polarity-invariant. See docs/methods/CONNECTIVITY_METHODS.md (Validation on MEA30)."
+)
 
 
 def compute_connectivity_matrix(
@@ -17,6 +30,7 @@ def compute_connectivity_matrix(
     *,
     nperseg: int | None = None,
     window: str = "hann",
+    metrics: Iterable[str] | None = None,
 ) -> tuple[dict[str, dict[str, np.ndarray]], list[str]]:
     """Compute connectivity matrices for all ROI pairs.
 
@@ -43,6 +57,12 @@ def compute_connectivity_matrix(
         Segment length for Welch/CSD/STFT. Default: ``2 * sfreq`` (2-second windows).
     window : str
         Window function (default: Hann).
+    metrics : iterable of str, optional
+        Compute and return only these metrics (names as above). Default: all.
+        Metrics that share a computation are computed together (coherence and
+        imag_coherence share the CSD; pli, dwpli, wpli and dpli share the STFT),
+        but only the requested ones are returned. Values are identical to a
+        full call.
 
     Returns
     -------
@@ -51,6 +71,14 @@ def compute_connectivity_matrix(
     roi_names : list[str]
         Ordered list of ROI names (rows/columns of matrices).
     """
+    if metrics is None:
+        want = set(ALL_METRICS)
+    else:
+        want = set(metrics)
+        unknown = want - set(ALL_METRICS)
+        if unknown:
+            raise ValueError(f"unknown connectivity metric(s) {sorted(unknown)}; "
+                             f"choose from {list(ALL_METRICS)}")
     roi_names = sorted(roi_timeseries.keys())
     n_rois = len(roi_names)
     ts_list = [roi_timeseries[name] for name in roi_names]
@@ -83,15 +111,15 @@ def compute_connectivity_matrix(
         band_masks[band_name] = mask
 
     # Initialize result matrices
-    band_results: dict[str, dict[str, np.ndarray]] = {}
-    for band_name in band_masks:
-        band_results[band_name] = {
-            "coherence": np.eye(n_rois, dtype=np.float64),
-            "imag_coherence": np.zeros((n_rois, n_rois), dtype=np.float64),
-        }
+    band_results: dict[str, dict[str, np.ndarray]] = {band_name: {} for band_name in band_masks}
+    do_csd = bool(want & {"coherence", "imag_coherence"})
+    if do_csd:
+        for band_name in band_masks:
+            band_results[band_name]["coherence"] = np.eye(n_rois, dtype=np.float64)
+            band_results[band_name]["imag_coherence"] = np.zeros((n_rois, n_rois), dtype=np.float64)
 
     # Compute CSD for each unique pair and derive coherence + imag coherence
-    for i in range(n_rois):
+    for i in range(n_rois if do_csd else 0):
         for j in range(i + 1, n_rois):
             _, pxy = csd(ts_list[i], ts_list[j], fs=sfreq, window=window,
                          nperseg=nperseg, noverlap=noverlap)
@@ -122,12 +150,13 @@ def compute_connectivity_matrix(
     # --- PLI + dwPLI + wPLI + dPLI via per-segment STFT ---
     # (Stam 2007; Vinck 2011; Stam & van Straaten 2012). All four share the
     # per-segment cross-spectra, so they are computed together in one pass.
-    _compute_pli_family(ts_list, sfreq, n_rois, nperseg, noverlap, window,
-                        band_masks, band_results)
+    if want & {"pli", "dwpli", "wpli", "dpli"}:
+        _compute_pli_family(ts_list, sfreq, n_rois, nperseg, noverlap, window,
+                            band_masks, band_results)
 
     # --- Orthogonalized AEC (Hipp et al. 2012) ---
     for band_name, (fmin, fmax) in bands.items():
-        if band_name not in band_results:
+        if band_name not in band_results or "aec" not in want:
             continue
         band_results[band_name]["aec"] = _band_orthogonalized_aec(
             ts_list, sfreq, fmin, fmax,
@@ -135,10 +164,14 @@ def compute_connectivity_matrix(
 
     # --- Partial correlation on band-filtered time series ---
     for band_name, (fmin, fmax) in bands.items():
-        if band_name not in band_results:
+        if band_name not in band_results or "partial_corr" not in want:
             continue
         pcorr = _band_partial_correlation(ts_list, sfreq, fmin, fmax)
         band_results[band_name]["partial_corr"] = pcorr
+
+    # Return only what was asked for (a family is computed together)
+    for band_name in band_results:
+        band_results[band_name] = {m: v for m, v in band_results[band_name].items() if m in want}
 
     return band_results, roi_names
 

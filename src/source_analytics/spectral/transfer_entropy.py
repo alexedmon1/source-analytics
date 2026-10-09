@@ -25,12 +25,18 @@ from scipy.signal import butter, sosfiltfilt
 logger = logging.getLogger(__name__)
 
 
+def band_lag(sfreq: float, band: tuple[float, float]) -> int:
+    """TE history lag for a band: one eighth of the period at the band centre, in samples (at least 1)."""
+    fc = 0.5 * (band[0] + band[1])
+    return max(1, int(round(sfreq / (8.0 * fc))))
+
+
 def compute_transfer_entropy(
     roi_timeseries: dict[str, np.ndarray],
     sfreq: float,
     bands: dict[str, tuple[float, float]],
     *,
-    lag: int = 1,
+    lag: int | str = "band",
     n_bins: int = 5,
 ) -> tuple[dict[str, dict[str, np.ndarray]], list[str]]:
     """Compute directed transfer entropy between all ROI pairs.
@@ -43,8 +49,18 @@ def compute_transfer_entropy(
         Sampling frequency in Hz.
     bands : dict[str, tuple[float, float]]
         Frequency band definitions, e.g. ``{"low_gamma": (30, 55)}``.
-    lag : int
-        Number of samples for the history/prediction lag (default: 1).
+    lag : int or "band"
+        History/prediction lag in samples. ``"band"`` (default) sets it per band
+        to one eighth of the period at the band centre, ``round(sfreq / (8 f_c))``
+        (at least 1): 45° of phase at the centre and well under half a cycle at
+        the band edge. See :func:`band_lag`.
+
+        A fixed lag can reverse the inferred direction for oscillatory signals:
+        on simulated MEA30 data, ``lag=5`` (10 ms) gave the wrong direction for
+        58% of planted short-lag low-gamma couplings, and the band rule removed
+        those reversals (probability-atlas Phase 10/10b; see
+        ``docs/methods/CONNECTIVITY_METHODS.md``). Up to v0.8.2 the default was
+        ``lag=1``; pass ``lag=1`` to reproduce older results.
     n_bins : int
         Number of equal-probability bins for discretization (default: 5).
 
@@ -66,6 +82,7 @@ def compute_transfer_entropy(
     nyq = sfreq / 2.0
 
     for band_name, (fmin, fmax) in bands.items():
+        band_lagv = band_lag(sfreq, (fmin, fmax)) if lag == "band" else int(lag)
         lo = max(fmin / nyq, 1e-5)
         hi = min(fmax / nyq, 0.9999)
         sos = butter(4, [lo, hi], btype="band", output="sos")
@@ -83,7 +100,7 @@ def compute_transfer_entropy(
                 if i == j:
                     continue
                 te_mat[i, j] = _te_from_discretized(
-                    discretized[i], discretized[j], lag=lag, n_bins=n_bins,
+                    discretized[i], discretized[j], lag=band_lagv, n_bins=n_bins,
                 )
 
         net_te = te_mat - te_mat.T
