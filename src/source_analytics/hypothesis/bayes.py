@@ -121,3 +121,30 @@ def run_job(job: BayesJob, timeout: float | None = None) -> subprocess.Completed
     job_file.write_text(json.dumps(dataclasses.asdict(job), indent=2))
     cmd = ["Rscript", str(R_DIR / "bayes_analysis.R"), "--job", str(job_file)]
     return subprocess.run(cmd, text=True, timeout=timeout, check=False)
+
+
+GATE_MODES = ("prior_pred", "sbc", "null", "recovery", "summarize")
+
+
+def run_gate(job: BayesJob, bands: list[str] | None = None, reps: tuple[int, int, int] = (100, 50, 10),
+             workers: int = 5, timeout: float | None = None) -> int:
+    """The gate in order (R/bayes_gate.R): prior predictive, SBC and null at ``bands`` (a reduced design; None = all),
+    recovery at the full design, then the verdict (``<work_dir>/gate/<dv>/gate.json``). Hours at a real design."""
+    if not Path(job.data_csv).exists():
+        raise FileNotFoundError(f"bayes: input table not found: {job.data_csv}")
+    work = Path(job.work_dir)
+    work.mkdir(parents=True, exist_ok=True)
+    job_file = work / f"job_{job.dv}.json"
+    job_file.write_text(json.dumps(dataclasses.asdict(job), indent=2))
+    n = {"sbc": reps[0], "null": reps[1], "recovery": reps[2]}
+    for mode in GATE_MODES:
+        cmd = ["Rscript", str(R_DIR / "bayes_gate.R"), "--job", str(job_file), "--mode", mode,
+               "--workers", str(workers)]
+        if mode in n:
+            cmd += ["--reps", str(n[mode])]
+        if bands and mode in ("sbc", "null"):
+            cmd += ["--bands", ",".join(bands)]
+        res = subprocess.run(cmd, text=True, timeout=timeout, check=False)
+        if res.returncode != 0:
+            return res.returncode
+    return 0

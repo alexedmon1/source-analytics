@@ -22,10 +22,14 @@ prep <- bayes_prepare(dat, spec, job$dv, job$spatial_col, job$band_col)
 cat(sprintf("bayes: %s, %d rows, %d subjects, %d bands, %d group-effect terms\n", job$dv, nrow(prep$data),
             nlevels(prep$data$subject), length(prep$bands), nrow(prep$terms)))
 
-if (isTRUE(job$gate)) {
-  stop("bayes: --gate is not implemented yet (R/bayes_gate.R, next G1 step); no real fit was run")
+# the gate (R/bayes_gate.R) writes gate.json; a real fit records its verdict (NA when no gate has run at this design)
+gate_passed <- NA
+gf <- file.path(job$work_dir, "gate", job$dv, "gate.json")
+if (file.exists(gf)) {
+  g <- fromJSON(gf)
+  gate_passed <- if (identical(as.integer(g$design$n_rows), nrow(dat))) isTRUE(g$passed) else NA
 }
-gate_passed <- NA                                                       # set by the gate once it exists
+if (!isTRUE(gate_passed)) cat("bayes: WARNING: no passed gate for this design (gate_passed =", gate_passed, ")\n")
 
 informative <- NULL
 if (!is.null(job$informative)) informative <- lapply(job$informative, function(v) as.numeric(unlist(v)))
@@ -38,7 +42,7 @@ for (set in unlist(job$prior_sets)) {
   write.csv(as.data.frame(pr)[, c("prior", "class", "coef", "group", "dpar")],
             file.path(job$work_dir, sprintf("priors_%s_%s.csv", job$dv, set)), row.names = FALSE)
   fit <- bayes_fit(prep, set, informative, chains = job$chains, iter = job$iter, warmup = job$warmup,
-                   seed = job$seed)
+                   seed = job$seed, model_dir = file.path(job$work_dir, "stan"))
   saveRDS(fit, file.path(job$work_dir, sprintf("fit_%s_%s.rds", job$dv, set)))
   r <- bayes_readout(fit, prep, spec, set, informative, rope_sd = job$rope_sd)
   r$gate_passed <- gate_passed

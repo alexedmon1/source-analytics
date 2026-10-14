@@ -814,7 +814,7 @@ def cmd_init(args):
 def cmd_bayes(args):
     """Bayesian hypothesis adapter (docs/methods/BAYES_ENGINE.md): fits the declared hypotheses on a module's
     per-subject table with brms and writes ``<analysis>_hypotheses_bayes.csv``. Never touches frequentist output."""
-    from .hypothesis.bayes import build_job, run_job
+    from .hypothesis.bayes import build_job, run_gate, run_job
 
     config = StudyConfig.from_yaml(args.study)
     if getattr(args, "profile", None):
@@ -839,6 +839,14 @@ def cmd_bayes(args):
         except ValueError as exc:
             print(f"ERROR: {exc}")
             sys.exit(1)
+        if args.gate:
+            bands = [b.strip() for b in args.gate_bands.split(",")] if args.gate_bands else None
+            reps = tuple(int(x) for x in args.gate_reps.split(","))
+            print(f"bayes gate: {args.analysis} / {dv} (sbc/null bands: {bands or 'all'}; reps sbc,null,recovery "
+                  f"= {reps}) -> {job.work_dir}/gate/{dv}/gate.json")
+            if run_gate(job, bands=bands, reps=reps, workers=args.workers) != 0:
+                failures.append(dv)
+            continue
         print(f"bayes: {args.analysis} / {dv} -> {job.table_out}")
         res = run_job(job)
         if res.returncode != 0:
@@ -996,7 +1004,11 @@ def main():
                          help="ROPE half-width for plain contrasts, between-subject SD units "
                               "(default: study YAML bayes.rope.value, else 0.1)")
     p_bayes.add_argument("--gate", action="store_true",
-                         help="Run the gate (prior predictive, SBC, null) at this design instead of a real fit")
+                         help="Run the gate (prior predictive, SBC, null, recovery) at this design instead of a real "
+                              "fit; writes gate.json, which later real fits record as gate_passed")
+    p_bayes.add_argument("--gate-bands", help="Reduced design for SBC and null: comma-separated bands (default all)")
+    p_bayes.add_argument("--gate-reps", default="100,50,10", help="Replications: sbc,null,recovery (default 100,50,10)")
+    p_bayes.add_argument("--workers", type=int, default=5, help="Parallel gate fits (2 chains each)")
     p_bayes.add_argument("--out", type=Path,
                          help="Write the table and fits here instead of the study's results/analytics trees "
                               "(use when the study's results are frozen)")

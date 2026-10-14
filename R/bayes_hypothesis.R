@@ -10,10 +10,10 @@
 #   bayes_readout(fit, prep, spec, set, rope_sd)               -> one row per hypothesis x band x spatial cell
 #
 # Model (bands pooled; a band-less outcome such as the aperiodic exponent is one "band"):
-#   z ~ 0 + band + x_<band>_<group> ...                 band level of the reference group + group effect per band
-#       + (0 + x_<band>_<group> ... || roi)             ROI deviation of each band's group effect (partial pooling)
-#       + (1 | roi:band) + (0 + band || subject),         ROI level per band; subject level per band
-#   sigma ~ 0 + band,  family = gaussian()
+#   z ~ 0 + bd_<band> ... + x_<band>_<group> ...          band level of the reference group + group effect per band
+#       + (0 + x_<band>_<group> ... || roi)               ROI deviation of each band's group effect (partial pooling)
+#       + (1 | roi:band) + (0 + bd_<band> ... || subject), ROI level per band; subject level per band
+#   sigma ~ 0 + bd_<band> ...,  family = gaussian()       (bd_<band> = 1 on rows of that band: numeric, so one band works)
 # x_<band>_<group> = 1 for rows of that band and (non-reference) group. z is the outcome standardised per band by the
 # within-group between-subject SD within ROI x band (pooled over ROIs and groups), so effects, priors, the ROPE and `mode: sd` margins are in
 # between-subject SD units (the unit of a per-cell Hedges g).
@@ -56,7 +56,8 @@ bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "b
   }))
   i <- match(d$band, scale_tab$band)
   d$z <- (d[[dv_col]] - scale_tab$center[i]) / scale_tab$scale[i]
-  # group-effect indicators per band
+  # band indicators (numeric, so one band works the same as seven) and group-effect indicators per band
+  for (b in levels(d$band)) d[[paste0("bd_", b)]] <- as.numeric(d$band == b)
   terms <- expand.grid(band = levels(d$band), group = setdiff(levels, ref), stringsAsFactors = FALSE)
   terms$col <- sprintf("x_%s_%s", terms$band, .safe(terms$group))
   for (k in seq_len(nrow(terms)))
@@ -70,10 +71,11 @@ bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "b
 
 bayes_formula <- function(prep) {
   x <- paste(prep$terms$col, collapse = " + ")
+  bd <- paste(paste0("bd_", prep$bands), collapse = " + ")
   cv <- if (length(prep$covs)) paste(" +", paste(prep$covs, collapse = " + ")) else ""
-  sub <- if (length(prep$bands) > 1) "(0 + band || subject)" else "(1 | subject)"
-  bf(as.formula(paste0("z ~ 0 + band + ", x, cv, " + (0 + ", x, " || roi) + (1 | roi:band) + ", sub)),
-     sigma ~ 0 + band)
+  bf(as.formula(paste0("z ~ 0 + ", bd, " + ", x, cv, " + (0 + ", x, " || roi) + (1 | roi:band) + (0 + ", bd,
+                       " || subject)")),
+     as.formula(paste0("sigma ~ 0 + ", bd)))
 }
 
 #' Prior sets, generated from the spec (docs/methods/BAYES_ENGINE.md section 5). `informative` is a named list
@@ -91,15 +93,19 @@ bayes_priors <- function(prep, set = "W", informative = NULL) {
   p
 }
 
+#' model_dir: where cmdstanr keeps the compiled executable, so a saved fit can serve as an update() template in a
+#' later process (brms' default is a session temp dir, gone when the process ends).
 bayes_fit <- function(prep, set = "W", informative = NULL, chains = 4, iter = 2000, warmup = 1000, seed = 1,
-                      backend = "cmdstanr", threads = NULL, template = NULL, ...) {
+                      backend = "cmdstanr", threads = NULL, template = NULL, model_dir = NULL, ...) {
   pr <- bayes_priors(prep, set, informative)
   if (!is.null(template))
     return(update(template, newdata = prep$data, prior = pr, recompile = FALSE, chains = chains, iter = iter,
                   warmup = warmup, seed = seed, refresh = 0, ...))
   brm(bayes_formula(prep), data = prep$data, family = gaussian(), prior = pr, chains = chains, iter = iter,
       warmup = warmup, cores = chains, seed = seed, backend = backend, refresh = 0,
-      threads = if (is.null(threads)) NULL else threading(threads), ...)
+      threads = if (is.null(threads)) NULL else threading(threads),
+      stan_model_args = if (is.null(model_dir)) list() else { dir.create(model_dir, FALSE, TRUE); list(dir = model_dir) },
+      ...)
 }
 
 #' Prior draws of the group-effect parameters (for Savage-Dickey densities at 0): b ~ N(m, s) per term, ROI deviation
@@ -154,7 +160,7 @@ bayes_readout <- function(fit, prep, spec, set = "W", informative = NULL, rope_s
   Rr <- lapply(setNames(rois, rois), function(ro) {
     m <- as.matrix(dr[, sprintf("r_roi[%s,%s]", ro, cols)]); colnames(m) <- cols; m
   })
-  sig <- exp(as.matrix(dr[, paste0("b_sigma_band", prep$bands)])); colnames(sig) <- prep$bands
+  sig <- exp(as.matrix(dr[, paste0("b_sigma_bd_", prep$bands)])); colnames(sig) <- prep$bands
   set.seed(1)
   pd <- .prior_effect_draws(prep, set, informative)
   np <- nuts_params(fit)
