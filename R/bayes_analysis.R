@@ -22,14 +22,14 @@ prep <- bayes_prepare(dat, spec, job$dv, job$spatial_col, job$band_col)
 cat(sprintf("bayes: %s, %d rows, %d subjects, %d bands, %d group-effect terms\n", job$dv, nrow(prep$data),
             nlevels(prep$data$subject), length(prep$bands), nrow(prep$terms)))
 
-# the gate (R/bayes_gate.R) writes gate.json; a real fit records its verdict (NA when no gate has run at this design)
-gate_passed <- NA
-gf <- file.path(job$work_dir, "gate", job$dv, "gate.json")
-if (file.exists(gf)) {
+# the gate (R/bayes_gate.R) writes gate.json (W) / gate_I.json (I); a real fit records the verdict of its own prior set
+# (NA when no gate has run at this design)
+gate_verdict <- function(set) {
+  gf <- file.path(job$work_dir, "gate", job$dv, sprintf("gate%s.json", if (set == "W") "" else paste0("_", set)))
+  if (!file.exists(gf)) return(NA)
   g <- fromJSON(gf)
-  gate_passed <- if (identical(as.integer(g$design$n_rows), nrow(dat))) isTRUE(g$passed) else NA
+  if (identical(as.integer(g$design$n_rows), nrow(dat))) isTRUE(g$passed) else NA
 }
-if (!isTRUE(gate_passed)) cat("bayes: WARNING: no passed gate for this design (gate_passed =", gate_passed, ")\n")
 
 informative <- NULL
 if (!is.null(job$informative)) informative <- lapply(job$informative, function(v) as.numeric(unlist(v)))
@@ -45,7 +45,8 @@ for (set in unlist(job$prior_sets)) {
                    seed = job$seed, model_dir = file.path(job$work_dir, "stan"))
   saveRDS(fit, file.path(job$work_dir, sprintf("fit_%s_%s.rds", job$dv, set)))
   r <- bayes_readout(fit, prep, spec, set, informative, rope_sd = job$rope_sd)
-  r$gate_passed <- gate_passed
+  r$gate_passed <- gate_verdict(set)
+  if (!isTRUE(r$gate_passed[1])) cat("bayes: WARNING: no passed gate for set", set, "at this design\n")
   rows[[length(rows) + 1]] <- r
   cat(sprintf("bayes: %s set %s done (max rhat %.3f, %d divergent)\n", job$dv, set, r$max_rhat[1], r$n_divergent[1]))
 }

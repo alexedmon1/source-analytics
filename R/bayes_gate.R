@@ -7,6 +7,7 @@
 #   Rscript R/bayes_gate.R --job <job.json> --mode null     --reps 50  --workers 5 [--bands ...]
 #   Rscript R/bayes_gate.R --job <job.json> --mode recovery --reps 10  --workers 5          (full design)
 #   Rscript R/bayes_gate.R --job <job.json> --mode summarize
+# Add --set I to gate prior set I (parameters drawn from I; outputs and verdict suffixed _I: gate_I.json).
 #
 # sbc / null may run at a reduced design (a subset of bands, every subject and ROI): the model's structure per band is
 # the same, so calibration transfers; recovery runs at the full design to confirm (the Conductor, 2026-10-14).
@@ -26,7 +27,8 @@ source(file.path(script_dir, "bayes_hypothesis.R"))
 opt <- parse_args(OptionParser(option_list = list(
   make_option("--job"), make_option("--mode"), make_option("--reps", type = "integer", default = 100),
   make_option("--workers", type = "integer", default = 5), make_option("--bands", default = NULL),
-  make_option("--iter", type = "integer", default = 1500), make_option("--warmup", type = "integer", default = 750))))
+  make_option("--iter", type = "integer", default = 1500), make_option("--warmup", type = "integer", default = 750),
+  make_option("--set", default = "W"))))
 job <- fromJSON(opt$job, simplifyVector = FALSE)
 spec <- parse_design_spec(list(design = job$design, hypotheses = job$hypotheses))
 dat <- read.csv(job$data_csv, check.names = FALSE, stringsAsFactors = FALSE)
@@ -34,6 +36,9 @@ informative <- if (is.null(job$informative)) NULL else lapply(job$informative, f
 GDIR <- file.path(job$work_dir, "gate", job$dv)
 dir.create(GDIR, recursive = TRUE, showWarnings = FALSE)
 L <- 100
+SET <- opt$set
+if (SET == "I" && is.null(informative)) stop("bayes gate: --set I needs the job's informative entries")
+SFX <- if (SET == "W") "" else paste0("_", SET)          # W keeps the original file names (gate.json, prior_pred.csv)
 
 design_rows <- function(bands = NULL) {
   d <- dat
@@ -78,7 +83,7 @@ estimand_table <- function(prep, p, fit) {
   B <- as.matrix(dr[, paste0("b_", cols)]); colnames(B) <- cols
   rois <- levels(prep$data$roi)
   P0 <- list(b = matrix(p$b, 1, dimnames = list(NULL, cols)), r = p$r)
-  set.seed(1); pd <- .prior_effect_draws(prep, "W", NULL, n = 20000)
+  set.seed(1); pd <- .prior_effect_draws(prep, SET, informative, n = 20000)
   keep <- round(seq(1, nrow(B), length.out = L))
   out <- list()
   for (hyp in spec$hypotheses) {
@@ -109,18 +114,18 @@ estimand_table <- function(prep, p, fit) {
 run_reps <- function(mode, bands) {
   prep <- design_rows(bands)
   tag <- if (mode == "recovery") "full" else paste(.safe(bands %||% "all"), collapse = "-")
-  odir <- file.path(GDIR, sprintf("%s_%s", mode, tag)); dir.create(odir, showWarnings = FALSE)
-  tpl_f <- file.path(GDIR, sprintf("template_%s.rds", tag))
+  odir <- file.path(GDIR, sprintf("%s_%s%s", mode, tag, SFX)); dir.create(odir, showWarnings = FALSE)
+  tpl_f <- file.path(GDIR, sprintf("template_%s%s.rds", tag, SFX))     # one per set: brms writes priors into the code
   if (!file.exists(tpl_f)) {
-    set.seed(999); prep$data$z <- simulate_z(prep, draw_params(prep))
-    saveRDS(bayes_fit(prep, "W", chains = 2, iter = 400, warmup = 200, seed = 1,
+    set.seed(999); prep$data$z <- simulate_z(prep, draw_params(prep, SET))
+    saveRDS(bayes_fit(prep, SET, informative, chains = 2, iter = 400, warmup = 200, seed = 1,
                       model_dir = file.path(GDIR, "stan")), tpl_f)
   }
   tpl <- readRDS(tpl_f)
   todo <- Filter(function(r) !file.exists(file.path(odir, sprintf("rep%04d.rds", r))), seq_len(opt$reps))
   mclapply(todo, function(r) {
     set.seed(10000 * match(mode, c("sbc", "null", "recovery")) + r)
-    p <- draw_params(prep, "W", null = mode == "null")
+    p <- draw_params(prep, SET, null = mode == "null")
     pr <- prep; pr$data$z <- simulate_z(prep, p)
     fit <- update(tpl, newdata = pr$data, recompile = FALSE, chains = 2, cores = 2, iter = opt$iter,
                   warmup = opt$warmup, seed = r, refresh = 0)
@@ -142,13 +147,13 @@ if (opt$mode == "prior_pred") {
     fs <- match.fun(st)
     rs <- tapply(real, prep$data$band, fs)
     set.seed(7)
-    sims <- t(replicate(500, { z <- simulate_z(prep, draw_params(prep)); tapply(z, prep$data$band, fs) }))
+    sims <- t(replicate(500, { z <- simulate_z(prep, draw_params(prep, SET)); tapply(z, prep$data$band, fs) }))
     data.frame(stat = st, band = prep$bands, real = as.numeric(rs[prep$bands]),
                sim_q05 = apply(sims, 2, quantile, 0.05), sim_median = apply(sims, 2, median),
                sim_q95 = apply(sims, 2, quantile, 0.95),
                pctile = sapply(prep$bands, function(b) mean(sims[, b] < rs[[b]])), row.names = NULL)
   }))
-  write.csv(out, file.path(GDIR, "prior_pred.csv"), row.names = FALSE)
+  write.csv(out, file.path(GDIR, sprintf("prior_pred%s.csv", SFX)), row.names = FALSE)
   print(out, digits = 3)
 } else if (opt$mode %in% c("sbc", "null")) {
   run_reps(opt$mode, bands)
@@ -157,11 +162,12 @@ if (opt$mode == "prior_pred") {
 } else if (opt$mode == "summarize") {
   read_mode <- function(pat) {
     ds <- list.dirs(GDIR, recursive = FALSE); ds <- ds[grepl(pat, basename(ds))]
+    ds <- if (SET == "W") ds[!grepl("_[A-Z]+$", basename(ds))] else ds[endsWith(basename(ds), SFX)]
     fs <- unlist(lapply(ds, list.files, full.names = TRUE))
     if (length(fs)) dplyr::bind_rows(lapply(fs, readRDS)) else NULL
   }
-  verdict <- list(dv = job$dv, design = list(n_rows = nrow(dat)), rules = list())
-  pp <- file.path(GDIR, "prior_pred.csv")
+  verdict <- list(dv = job$dv, prior_set = SET, design = list(n_rows = nrow(dat)), rules = list())
+  pp <- file.path(GDIR, sprintf("prior_pred%s.csv", SFX))
   if (file.exists(pp)) {
     x <- read.csv(pp)
     verdict$rules$prior_pred <- list(min_pctile = min(x$pctile), max_pctile = max(x$pctile),
@@ -174,7 +180,7 @@ if (opt$mode == "prior_pred") {
       data.frame(hypothesis = x$hypothesis[1], band = x$band[1], spatial = x$spatial[1], n = nrow(x),
                  chisq_p = suppressWarnings(chisq.test(table(bins))$p.value), coverage = mean(x$covered))
     }))
-    write.csv(u, file.path(GDIR, "sbc_summary.csv"), row.names = FALSE)
+    write.csv(u, file.path(GDIR, sprintf("sbc_summary%s.csv", SFX)), row.names = FALSE)
     avg <- u[u$spatial == "all", ]
     verdict$rules$sbc <- list(n_reps = max(table(sbc$hypothesis)) / length(unique(paste(sbc$band, sbc$spatial))),
                               n_estimands = nrow(u), min_p_roi_average = min(avg$chisq_p),
@@ -186,7 +192,7 @@ if (opt$mode == "prior_pred") {
   nul <- read_mode("^null_")
   if (!is.null(nul)) {
     f <- aggregate(cbind(claim_effect, claim_dir, claim_bf3) ~ hypothesis + band + spatial, data = nul, FUN = mean)
-    write.csv(f, file.path(GDIR, "null_summary.csv"), row.names = FALSE)
+    write.csv(f, file.path(GDIR, sprintf("null_summary%s.csv", SFX)), row.names = FALSE)
     avg <- f[f$spatial == "all", ]
     verdict$rules$null <- list(max_claim_effect = max(avg$claim_effect), max_claim_dir = max(avg$claim_dir),
                                max_claim_bf3 = max(avg$claim_bf3),
@@ -202,6 +208,6 @@ if (opt$mode == "prior_pred") {
                                    pass = mean(avg$covered) >= 0.85 && max(rec$max_rhat) < 1.05)
   }
   verdict$passed <- length(verdict$rules) == 4 && all(vapply(verdict$rules, function(r) isTRUE(r$pass), logical(1)))
-  write(toJSON(verdict, auto_unbox = TRUE, pretty = TRUE, digits = 4), file.path(GDIR, "gate.json"))
+  write(toJSON(verdict, auto_unbox = TRUE, pretty = TRUE, digits = 4), file.path(GDIR, sprintf("gate%s.json", SFX)))
   cat(toJSON(verdict, auto_unbox = TRUE, pretty = TRUE, digits = 4), "\n")
 }

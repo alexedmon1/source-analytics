@@ -82,17 +82,16 @@ bayes_formula <- function(prep) {
 #' Prior sets, generated from the spec (docs/methods/BAYES_ENGINE.md section 5). `informative` is a named list
 #' col -> c(mean, sd) for set I (derived by script from a logged literature search); terms without an entry stay W.
 bayes_priors <- function(prep, set = "W", informative = NULL) {
-  p <- c(set_prior("normal(0, 1)", class = "b"),                       # band levels (reference group)
-         do.call(c, lapply(prep$terms$col, function(cl)
-           set_prior(sprintf("normal(0, %g)", BAYES_W_EFFECT_SD), class = "b", coef = cl))),
-         set_prior("normal(0, 0.25)", class = "sd", group = "roi"),
-         set_prior("normal(0, 0.5)", class = "sd", group = "roi:band"),
-         set_prior("normal(0, 0.5)", class = "sd", group = "subject"),
-         set_prior(sprintf("normal(%g, 0.5)", log(0.5)), class = "b", dpar = "sigma"))
-  if (identical(set, "I") && length(informative))
-    for (cl in names(informative))
-      p <- c(p, set_prior(sprintf("normal(%g, %g)", informative[[cl]][1], informative[[cl]][2]), class = "b", coef = cl))
-  p
+  term_prior <- function(cl) {                     # one prior per group-effect term: I's entry where one exists, else W
+    ms <- if (identical(set, "I") && !is.null(informative[[cl]])) informative[[cl]] else c(0, BAYES_W_EFFECT_SD)
+    set_prior(sprintf("normal(%g, %g)", ms[1], ms[2]), class = "b", coef = cl)
+  }
+  c(set_prior("normal(0, 1)", class = "b"),                            # band levels (reference group)
+    do.call(c, lapply(prep$terms$col, term_prior)),                    # entries for terms not in this design are unused
+    set_prior("normal(0, 0.25)", class = "sd", group = "roi"),
+    set_prior("normal(0, 0.5)", class = "sd", group = "roi:band"),
+    set_prior("normal(0, 0.5)", class = "sd", group = "subject"),
+    set_prior(sprintf("normal(%g, 0.5)", log(0.5)), class = "b", dpar = "sigma"))
 }
 
 #' model_dir: where cmdstanr keeps the compiled executable, so a saved fit can serve as an update() template in a
