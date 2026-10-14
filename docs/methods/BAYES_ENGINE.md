@@ -39,8 +39,10 @@ source-analytics bayes ... --gate            # prior predictive + recovery/SBC +
 
 ## 3. Model
 
-The outcome is standardised before fitting: z = (y - mean) / SD over all rows of the band (power) or of the outcome
-(exponent). All priors are then in SD units. The FORGE equivalence margin (0.25 SD) is on the same scale.
+The outcome is standardised before fitting, per band: z = (y - band mean) / s_b. Here s_b is the within-group
+between-subject SD within ROI x band, pooled over ROIs and groups. This is the unit of a per-cell Hedges g. The total SD over all rows is not used,
+because ROI differences in absolute dB would inflate it. Effects, priors, the ROPE and `mode: sd` margins are all in
+these units.
 
 **Band power, bands pooled:**
 

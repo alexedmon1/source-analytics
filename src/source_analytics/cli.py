@@ -810,6 +810,43 @@ def cmd_init(args):
             print(f"WARNING: scaffolded config failed to parse: {exc}", file=err)
 
 
+
+def cmd_bayes(args):
+    """Bayesian hypothesis adapter (docs/methods/BAYES_ENGINE.md): fits the declared hypotheses on a module's
+    per-subject table with brms and writes ``<analysis>_hypotheses_bayes.csv``. Never touches frequentist output."""
+    from .hypothesis.bayes import build_job, run_job
+
+    config = StudyConfig.from_yaml(args.study)
+    if getattr(args, "profile", None):
+        config = config.for_profile(args.profile)
+    if config.has_paradigms:
+        if not args.paradigm:
+            print("ERROR: multi-paradigm config: --paradigm is required for bayes")
+            sys.exit(1)
+        config = config.for_paradigm_analysis(args.paradigm, args.analysis)
+    sets = tuple(s.strip() for s in args.prior_sets.split(","))
+    if "I" in sets and not args.informative:
+        print("WARNING: prior set I requested without --informative; fitting W only. An informative set needs "
+              "entries derived from a logged literature search (BAYES_ENGINE.md section 5).")
+    hyps = [h.strip() for h in args.hypothesis.split(",")] if args.hypothesis else None
+    failures = []
+    for dv in (x.strip() for x in args.dv.split(",")):
+        try:
+            job = build_job(config, args.analysis, dv, hypotheses=hyps, prior_sets=sets,
+                            informative=args.informative, rope_sd=args.rope_sd, gate=args.gate,
+                            chains=args.chains, iter=args.iter, warmup=args.warmup, seed=args.seed,
+                            out_dir=args.out)
+        except ValueError as exc:
+            print(f"ERROR: {exc}")
+            sys.exit(1)
+        print(f"bayes: {args.analysis} / {dv} -> {job.table_out}")
+        res = run_job(job)
+        if res.returncode != 0:
+            failures.append(dv)
+    if failures:
+        print(f"ERROR: bayes failed for dv(s): {', '.join(failures)}")
+        sys.exit(1)
+
 def main():
     parser = argparse.ArgumentParser(
         prog="source-analytics",
@@ -940,6 +977,34 @@ def main():
         help="Where to write the YAML (default: <paradigm_dir>/analysis/<name>.yaml); '-' prints to stdout",
     )
     p_init.set_defaults(func=cmd_init)
+
+    # bayes
+    p_bayes = subparsers.add_parser(
+        "bayes",
+        help="Bayesian hypothesis adapter (brms): posterior per declared hypothesis on a module's table "
+             "(writes <analysis>_hypotheses_bayes.csv; see docs/methods/BAYES_ENGINE.md)",
+    )
+    p_bayes.add_argument("--study", required=True, type=Path, help="Path to study YAML config")
+    p_bayes.add_argument("--paradigm", help="Paradigm name (multi-paradigm configs)")
+    p_bayes.add_argument("--analysis", required=True, help="Module whose table is read (roi_psd, roi_aperiodic)")
+    p_bayes.add_argument("--dv", required=True, help="Outcome column(s), comma-separated (e.g. absolute; exponent)")
+    p_bayes.add_argument("--profile", metavar="NAME", help="Profile block narrowing bands/ROIs/hypotheses")
+    p_bayes.add_argument("--hypothesis", help="Comma-separated declared hypothesis(es); default all")
+    p_bayes.add_argument("--prior-sets", default="W,I", help="Prior sets to fit (default W,I; I needs --informative)")
+    p_bayes.add_argument("--informative", type=Path, help="JSON {term: [mean, sd]} for set I (from a logged search)")
+    p_bayes.add_argument("--rope-sd", type=float, default=None,
+                         help="ROPE half-width for plain contrasts, between-subject SD units "
+                              "(default: study YAML bayes.rope.value, else 0.1)")
+    p_bayes.add_argument("--gate", action="store_true",
+                         help="Run the gate (prior predictive, SBC, null) at this design instead of a real fit")
+    p_bayes.add_argument("--out", type=Path,
+                         help="Write the table and fits here instead of the study's results/analytics trees "
+                              "(use when the study's results are frozen)")
+    p_bayes.add_argument("--chains", type=int, default=4)
+    p_bayes.add_argument("--iter", type=int, default=2000)
+    p_bayes.add_argument("--warmup", type=int, default=1000)
+    p_bayes.add_argument("--seed", type=int, default=1)
+    p_bayes.set_defaults(func=cmd_bayes)
 
     args = parser.parse_args()
     setup_logging(args.verbose)
