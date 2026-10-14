@@ -91,7 +91,8 @@ Fits, the prior table used and the gate summary go to `data/bayes/` (provenance)
 ## 5. Priors: generated from the spec, two sets
 
 **W (weakly informative, SD units):**
-- band-specific group effects N(0, 0.5);
+- band-specific group effects N(0, 1). This is Track A's weak default; the first draft had 0.5, which was
+  tighter than the library's informative entries (SD 0.8). The Conductor set it, 2026-10-14;
 - band intercepts N(0, 1);
 - ROI-deviation SDs half-N(0, 0.25);
 - ROI-level and subject SDs half-N(0, 0.5);
@@ -100,7 +101,11 @@ Fits, the prior table used and the gate summary go to `data/bayes/` (provenance)
 These are proposals. Each must pass the prior predictive check at the study design. The tectum model needed three
 rounds.
 
-**I (informative):** only from a logged literature search. For FORGE the source is
+**I (informative):** only from a logged literature search. **For FORGE (the Conductor, 2026-10-14): pooled.**
+- **The gap:** library entries are regional (AC, FC, S1, deep), and no source measured the ROI-average.
+- **The rule:** a band-level entry is the median of that band's regional entries when they agree in sign, with the
+  largest regional scale.
+- **Derivation:** by `bayes-sl/scripts/derive_forge_I.py`. Files: `bayes-sl/priors/library/2026-10-14_forge_I_*`. For FORGE the source is
 `bayes-sl/priors/lit/2026-10-07_fmr1_resting_state.md`, the Fmr1 resting-state log, which predates FORGE. The
 entries are derived by script, as Track A's set I was. Bands and contrasts without logged evidence stay at W.
 

@@ -29,6 +29,7 @@ if (!exists("parse_design_spec")) {
 BAYES_SETS <- c("W", "I")
 BAYES_ROPE_SD <- 0.1      # default ROPE for plain contrasts, between-subject SD units (the Conductor, 2026-10-14)
 BAYES_HDI <- 0.95
+BAYES_W_EFFECT_SD <- 1  # W group effects N(0, 1), Track A's weak default (the Conductor, 2026-10-14; was 0.5)
 
 .safe <- function(x) gsub("[^A-Za-z0-9]", "", x)
 
@@ -82,7 +83,8 @@ bayes_formula <- function(prep) {
 #' col -> c(mean, sd) for set I (derived by script from a logged literature search); terms without an entry stay W.
 bayes_priors <- function(prep, set = "W", informative = NULL) {
   p <- c(set_prior("normal(0, 1)", class = "b"),                       # band levels (reference group)
-         do.call(c, lapply(prep$terms$col, function(cl) set_prior("normal(0, 0.5)", class = "b", coef = cl))),
+         do.call(c, lapply(prep$terms$col, function(cl)
+           set_prior(sprintf("normal(0, %g)", BAYES_W_EFFECT_SD), class = "b", coef = cl))),
          set_prior("normal(0, 0.25)", class = "sd", group = "roi"),
          set_prior("normal(0, 0.5)", class = "sd", group = "roi:band"),
          set_prior("normal(0, 0.5)", class = "sd", group = "subject"),
@@ -113,7 +115,7 @@ bayes_fit <- function(prep, set = "W", informative = NULL, chains = 4, iter = 20
 .prior_effect_draws <- function(prep, set, informative, n = 20000) {
   cols <- prep$terms$col
   b <- sapply(cols, function(cl) {
-    ms <- if (identical(set, "I") && !is.null(informative[[cl]])) informative[[cl]] else c(0, 0.5)
+    ms <- if (identical(set, "I") && !is.null(informative[[cl]])) informative[[cl]] else c(0, BAYES_W_EFFECT_SD)
     rnorm(n, ms[1], ms[2])
   })
   r <- sapply(cols, function(cl) rnorm(n, 0, abs(rnorm(n, 0, 0.25))))

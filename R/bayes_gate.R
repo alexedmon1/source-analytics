@@ -46,7 +46,7 @@ draw_params <- function(prep, set = "W", null = FALSE) {
   cols <- prep$terms$col
   hn <- function(s, n = 1) abs(rnorm(n, 0, s))
   b <- sapply(cols, function(cl) {
-    ms <- if (identical(set, "I") && !is.null(informative[[cl]])) informative[[cl]] else c(0, 0.5)
+    ms <- if (identical(set, "I") && !is.null(informative[[cl]])) informative[[cl]] else c(0, BAYES_W_EFFECT_SD)
     rnorm(1, ms[1], ms[2])
   })
   tau <- setNames(hn(0.25, length(cols)), cols)
