@@ -30,6 +30,7 @@ BAYES_SETS <- c("W", "I")
 BAYES_ROPE_SD <- 0.1      # default ROPE for plain contrasts, between-subject SD units (the Conductor, 2026-10-14)
 BAYES_HDI <- 0.95
 BAYES_W_EFFECT_SD <- 1  # W group effects N(0, 1), Track A's weak default (the Conductor, 2026-10-14; was 0.5)
+BAYES_SD_ROI_BAND <- 3  # ROI level per band, half-N(0, 3): FORGE source power ROI means spread 0.9-3.0 SD (the Conductor, 2026-10-15; was 0.5)
 
 .safe <- function(x) gsub("[^A-Za-z0-9]", "", x)
 
@@ -89,7 +90,7 @@ bayes_priors <- function(prep, set = "W", informative = NULL) {
   c(set_prior("normal(0, 1)", class = "b"),                            # band levels (reference group)
     do.call(c, lapply(prep$terms$col, term_prior)),                    # entries for terms not in this design are unused
     set_prior("normal(0, 0.25)", class = "sd", group = "roi"),
-    set_prior("normal(0, 0.5)", class = "sd", group = "roi:band"),
+    set_prior(sprintf("normal(0, %g)", BAYES_SD_ROI_BAND), class = "sd", group = "roi:band"),
     set_prior("normal(0, 0.5)", class = "sd", group = "subject"),
     set_prior(sprintf("normal(%g, 0.5)", log(0.5)), class = "b", dpar = "sigma"))
 }

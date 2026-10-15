@@ -95,7 +95,10 @@ Fits, the prior table used and the gate summary go to `data/bayes/` (provenance)
   tighter than the library's informative entries (SD 0.8). The Conductor set it, 2026-10-14;
 - band intercepts N(0, 1);
 - ROI-deviation SDs half-N(0, 0.25);
-- ROI-level and subject SDs half-N(0, 0.5);
+- ROI level per band SD half-N(0, 3) (`BAYES_SD_ROI_BAND`). Raised from 0.5 (the Conductor, 2026-10-15): FORGE's
+  source power ROI means spread 0.9-3.0 between-subject SD per band (largest in gamma and epsilon), and the real spread
+  fell at the 97th-100th prior predictive percentile. Group effects were not involved (group-mean SD 0.35-0.40);
+- subject SDs half-N(0, 0.5);
 - log sigma N(log 0.5, 0.5).
 
 These are proposals. Each must pass the prior predictive check at the study design. The tectum model needed three

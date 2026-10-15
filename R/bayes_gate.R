@@ -59,7 +59,7 @@ draw_params <- function(prep, set = "W", null = FALSE) {
   rois <- levels(prep$data$roi)
   list(b_band = setNames(rnorm(length(prep$bands), 0, 1), prep$bands), b = b, tau = tau,
        r = sapply(cols, function(cl) setNames(rnorm(length(rois), 0, tau[[cl]]), rois)),
-       sd_rb = hn(0.5), sd_sub = setNames(hn(0.5, length(prep$bands)), prep$bands),
+       sd_rb = hn(BAYES_SD_ROI_BAND), sd_sub = setNames(hn(0.5, length(prep$bands)), prep$bands),
        sigma = setNames(exp(rnorm(length(prep$bands), log(0.5), 0.5)), prep$bands))
 }
 
@@ -147,7 +147,9 @@ if (opt$mode == "prior_pred") {
     fs <- match.fun(st)
     rs <- tapply(real, prep$data$band, fs)
     set.seed(7)
-    sims <- t(replicate(500, { z <- simulate_z(prep, draw_params(prep, SET)); tapply(z, prep$data$band, fs) }))
+    sims <- do.call(rbind, lapply(1:500, function(i) {    # 500 x bands; stays a matrix for a single band
+      z <- simulate_z(prep, draw_params(prep, SET)); c(tapply(z, prep$data$band, fs))
+    }))
     data.frame(stat = st, band = prep$bands, real = as.numeric(rs[prep$bands]),
                sim_q05 = apply(sims, 2, quantile, 0.05), sim_median = apply(sims, 2, median),
                sim_q95 = apply(sims, 2, quantile, 0.95),
