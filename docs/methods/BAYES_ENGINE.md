@@ -129,6 +129,11 @@ FALSE)` keeps the template's priors whatever `prior =` says. The gate compiles o
 requested priors (a template from the other set, or from before a prior change). The tectum model in bayes-sl hit
 this on 2026-10-15: its set I fits ran W priors.
 
+**Workers are separate R processes** (a PSOCK cluster), not forks. With cmdstanr fits in forked `mclapply` workers,
+the gate's R process was SIGKILLed with its whole process group as it exited (3 of 4 trials in a reduced test). That
+took the calling queue down at the end of a stage three times (2026-10-14 to 10-16), each time with every replication
+already saved.
+
 A gate result is cached per (spec hash, design hash, prior hash). The real-fit table carries `gate_passed`.
 
 **Cost.** This is the open risk:

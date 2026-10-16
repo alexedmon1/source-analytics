@@ -122,9 +122,18 @@ run_reps <- function(mode, bands) {
     saveRDS(bayes_fit(prep, SET, informative, chains = 2, iter = 400, warmup = 200, seed = 1,
                       model_dir = file.path(GDIR, "stan")), tpl_f)
   }
-  tpl <- bayes_check_template(readRDS(tpl_f), prep, bayes_priors(prep, SET, informative))
+  bayes_check_template(readRDS(tpl_f), prep, bayes_priors(prep, SET, informative))
   todo <- Filter(function(r) !file.exists(file.path(odir, sprintf("rep%04d.rds", r))), seq_len(opt$reps))
-  mclapply(todo, function(r) {
+  if (!length(todo)) return(invisible(NULL))
+  # Workers are separate R processes (PSOCK), not forks. With cmdstanr fits in forked mclapply workers, this process
+  # was SIGKILLed together with its whole process group as it exited (3 of 4 trials), which took the calling queue
+  # down at the end of a stage (2026-10-14 to 10-16). Each worker reads the template itself.
+  cl <- makePSOCKcluster(min(opt$workers, length(todo)), outfile = "")
+  on.exit(stopCluster(cl), add = TRUE)
+  clusterExport(cl, ls(globalenv(), all.names = TRUE), envir = globalenv())
+  clusterExport(cl, "tpl_f", envir = environment())
+  clusterEvalQ(cl, { suppressMessages({ library(brms); library(posterior) }); tpl <- readRDS(tpl_f); NULL })
+  one_rep <- function(r) try({
     set.seed(10000 * match(mode, c("sbc", "null", "recovery")) + r)
     p <- draw_params(prep, SET, null = mode == "null")
     pr <- prep; pr$data$z <- simulate_z(prep, p)
@@ -134,7 +143,9 @@ run_reps <- function(mode, bands) {
     saveRDS(s, file.path(odir, sprintf("rep%04d.rds", r)))
     cat(sprintf("gate %s rep %d done\n", mode, r))
     NULL
-  }, mc.cores = opt$workers, mc.preschedule = FALSE) -> res
+  })
+  environment(one_rep) <- list2env(list(prep = prep, odir = odir, mode = mode), parent = globalenv())
+  res <- parLapplyLB(cl, todo, one_rep, chunk.size = 1)
   err <- Filter(function(x) inherits(x, "try-error"), res)
   if (length(err)) stop(sprintf("%d %s replication(s) failed; first: %s", length(err), mode, err[[1]]))
   invisible(NULL)
