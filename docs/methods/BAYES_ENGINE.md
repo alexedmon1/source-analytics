@@ -123,6 +123,12 @@ At the study's actual design (subjects per group, ROIs, bands), before any real 
    chi-square, and coverage of the 95% HDI.
 3. **Null:** every group effect 0. Rates of each decision rule claiming an effect, per hypothesis.
 
+**One template per prior set.** brms writes prior values into the compiled Stan code, and `update(..., recompile =
+FALSE)` keeps the template's priors whatever `prior =` says. The gate compiles one template per set and design
+(`template_<bands><_SET>.rds`), and `bayes_check_template()` stops a fit whose template's code differs from the
+requested priors (a template from the other set, or from before a prior change). The tectum model in bayes-sl hit
+this on 2026-10-15: its set I fits ran W priors.
+
 A gate result is cached per (spec hash, design hash, prior hash). The real-fit table carries `gate_passed`.
 
 **Cost.** This is the open risk:

@@ -122,7 +122,7 @@ run_reps <- function(mode, bands) {
     saveRDS(bayes_fit(prep, SET, informative, chains = 2, iter = 400, warmup = 200, seed = 1,
                       model_dir = file.path(GDIR, "stan")), tpl_f)
   }
-  tpl <- readRDS(tpl_f)
+  tpl <- bayes_check_template(readRDS(tpl_f), prep, bayes_priors(prep, SET, informative))
   todo <- Filter(function(r) !file.exists(file.path(odir, sprintf("rep%04d.rds", r))), seq_len(opt$reps))
   mclapply(todo, function(r) {
     set.seed(10000 * match(mode, c("sbc", "null", "recovery")) + r)

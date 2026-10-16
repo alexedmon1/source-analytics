@@ -98,3 +98,24 @@ def test_r_scripts_parse():
     for f in ("bayes_hypothesis.R", "bayes_analysis.R"):
         r = subprocess.run(["Rscript", "-e", f"invisible(parse(file='{R_DIR / f}'))"], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
+
+
+def test_template_guard_rejects_other_prior_set():
+    """brms writes priors into the compiled code, so update(recompile=FALSE) on a W template would run W priors
+    whatever set is asked for; bayes_check_template must refuse it (empty brmsfit: no compiling, no sampling)."""
+    code = f"""
+    suppressMessages({{ source('{R_DIR / "hypothesis.R"}'); source('{R_DIR / "bayes_hypothesis.R"}') }})
+    d <- expand.grid(subject = paste0('s', 1:6), roi = c('r1', 'r2'), stringsAsFactors = FALSE)
+    d$group <- ifelse(d$subject %in% c('s1', 's2', 's3'), 'WT', 'KO'); set.seed(1); d$value <- rnorm(nrow(d))
+    spec <- parse_design_spec(list(design = list(factor = 'group', reference = 'WT', levels = list('WT', 'KO'))))
+    prep <- bayes_prepare(d, spec, 'value', 'roi', NULL)
+    inf <- list(x_all_KO = c(0.5, 0.8))
+    tW <- suppressMessages(brm(bayes_formula(prep), data = prep$data, family = gaussian(),
+                               prior = bayes_priors(prep, 'W'), empty = TRUE))
+    bayes_check_template(tW, prep, bayes_priors(prep, 'W', inf))
+    r <- try(bayes_check_template(tW, prep, bayes_priors(prep, 'I', inf)), silent = TRUE)
+    cat(if (inherits(r, 'try-error')) 'REJECTED' else 'ACCEPTED')
+    """
+    r = subprocess.run(["Rscript", "-e", code], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().endswith("REJECTED")
