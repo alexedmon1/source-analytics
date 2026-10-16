@@ -5,7 +5,7 @@
 #   Rscript R/bayes_gate.R --job <job.json> --mode prior_pred
 #   Rscript R/bayes_gate.R --job <job.json> --mode sbc      --reps 100 --workers 5 [--bands "Theta,Low Gamma"]
 #   Rscript R/bayes_gate.R --job <job.json> --mode null     --reps 50  --workers 5 [--bands ...]
-#   Rscript R/bayes_gate.R --job <job.json> --mode recovery --reps 10  --workers 5          (full design)
+#   Rscript R/bayes_gate.R --job <job.json> --mode recovery --reps 10  --workers 5 [--chains 4]   (full design)
 #   Rscript R/bayes_gate.R --job <job.json> --mode summarize
 # Add --set I to gate prior set I (parameters drawn from I; outputs and verdict suffixed _I: gate_I.json).
 #
@@ -28,6 +28,7 @@ opt <- parse_args(OptionParser(option_list = list(
   make_option("--job"), make_option("--mode"), make_option("--reps", type = "integer", default = 100),
   make_option("--workers", type = "integer", default = 5), make_option("--bands", default = NULL),
   make_option("--iter", type = "integer", default = 1500), make_option("--warmup", type = "integer", default = 750),
+  make_option("--chains", type = "integer", default = 2),   # per replication fit (cores = chains)
   make_option("--set", default = "W"))))
 job <- fromJSON(opt$job, simplifyVector = FALSE)
 spec <- parse_design_spec(list(design = job$design, hypotheses = job$hypotheses))
@@ -127,8 +128,8 @@ run_reps <- function(mode, bands) {
     set.seed(10000 * match(mode, c("sbc", "null", "recovery")) + r)
     p <- draw_params(prep, SET, null = mode == "null")
     pr <- prep; pr$data$z <- simulate_z(prep, p)
-    fit <- update(tpl, newdata = pr$data, recompile = FALSE, chains = 2, cores = 2, iter = opt$iter,
-                  warmup = opt$warmup, seed = r, refresh = 0)
+    fit <- update(tpl, newdata = pr$data, recompile = FALSE, chains = opt$chains, cores = opt$chains,
+                  iter = opt$iter, warmup = opt$warmup, seed = r, refresh = 0)
     s <- estimand_table(pr, p, fit); s$rep <- r; s$mode <- mode
     saveRDS(s, file.path(odir, sprintf("rep%04d.rds", r)))
     cat(sprintf("gate %s rep %d done\n", mode, r))
