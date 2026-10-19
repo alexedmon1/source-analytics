@@ -4,8 +4,9 @@
 #
 #   Rscript R/bayes_gate.R --job <job.json> --mode prior_pred
 #   Rscript R/bayes_gate.R --job <job.json> --mode sbc      --reps 100 --workers 5 [--bands "Theta,Low Gamma"]
-#   Rscript R/bayes_gate.R --job <job.json> --mode null     --reps 50  --workers 5 [--bands ...]
-#   Rscript R/bayes_gate.R --job <job.json> --mode recovery --reps 10  --workers 5 [--chains 4]   (full design)
+#   Rscript R/bayes_gate.R --job <job.json> --mode null     --reps 100 --workers 5 [--bands ...]
+#   Rscript R/bayes_gate.R --job <job.json> --mode recovery --reps 10  --workers 5 --chains 4 --iter 2000 --warmup 1000
+#                                                           (full design; the CLI passes the job's real-fit settings)
 #   Rscript R/bayes_gate.R --job <job.json> --mode summarize
 # Add --set I to gate prior set I (parameters drawn from I; outputs and verdict suffixed _I: gate_I.json).
 #
@@ -44,21 +45,25 @@ SFX <- if (SET == "W") "" else paste0("_", SET)          # W keeps the original 
 design_rows <- function(bands = NULL) {
   d <- dat
   if (!is.null(bands) && !is.null(job$band_col)) d <- d[as.character(d[[job$band_col]]) %in% bands, , drop = FALSE]
-  bayes_prepare(d, spec, job$dv, job$spatial_col, job$band_col)
+  bayes_prepare(d, spec, job$dv, job$spatial_col, job$band_col, SET, informative)
 }
 
-#' One parameter draw from prior set `set` (mirrors bayes_priors()). null zeroes every group effect.
-draw_params <- function(prep, set = "W", null = FALSE) {
-  cols <- prep$terms$col
+#' One parameter draw from prep's prior set (mirrors bayes_priors()). null: every group of a band at one common
+#' level (drawn from the reference level's prior), set-I differences 0, no ROI deviations.
+draw_params <- function(prep, null = FALSE) {
+  cols <- prep$terms$col; fx <- prep$fixed
   hn <- function(s, n = 1) abs(rnorm(n, 0, s))
-  b <- sapply(cols, function(cl) {
-    ms <- if (identical(set, "I") && !is.null(informative[[cl]])) informative[[cl]] else c(0, BAYES_W_EFFECT_SD)
-    rnorm(1, ms[1], ms[2])
-  })
+  b <- setNames(rnorm(nrow(fx), fx$prior_mean, fx$prior_sd), fx$col)
   tau <- setNames(hn(0.25, length(cols)), cols)
-  if (null) { b[] <- 0; tau[] <- 0 }
+  if (null) {
+    tau[] <- 0
+    for (bd in prep$bands) {
+      k <- fx$band == bd
+      b[fx$col[k]] <- ifelse(startsWith(fx$col[k], "dx_"), 0, b[fx$col[k & fx$group == prep$ref]])
+    }
+  }
   rois <- levels(prep$data$roi)
-  list(b_band = setNames(rnorm(length(prep$bands), 0, 1), prep$bands), b = b, tau = tau,
+  list(b = b, tau = tau,
        r = sapply(cols, function(cl) setNames(rnorm(length(rois), 0, tau[[cl]]), rois)),
        sd_rb = hn(BAYES_SD_ROI_BAND), sd_sub = setNames(hn(0.5, length(prep$bands)), prep$bands),
        sigma = setNames(exp(rnorm(length(prep$bands), log(0.5), 0.5)), prep$bands))
@@ -67,8 +72,9 @@ draw_params <- function(prep, set = "W", null = FALSE) {
 simulate_z <- function(prep, p) {
   d <- prep$data
   bnd <- as.character(d$band); roi <- as.character(d$roi)
-  mu <- p$b_band[bnd]
-  for (cl in prep$terms$col) mu <- mu + d[[cl]] * (p$b[[cl]] + p$r[roi, cl])
+  mu <- 0
+  for (cl in prep$fixed$col) mu <- mu + d[[cl]] * p$b[[cl]]
+  for (cl in prep$terms$col) mu <- mu + d[[cl]] * p$r[roi, cl]
   rb <- paste(roi, bnd); urb <- unique(rb)
   mu <- mu + setNames(rnorm(length(urb), 0, p$sd_rb), urb)[rb]
   sb <- paste(d$subject, bnd); usb <- unique(sb)
@@ -79,12 +85,12 @@ simulate_z <- function(prep, p) {
 
 #' Truth and posterior draws of every contrast/equivalence estimand: band x (ROI-average, each ROI).
 estimand_table <- function(prep, p, fit) {
-  dr <- as_draws_df(fit)
-  cols <- prep$terms$col
-  B <- as.matrix(dr[, paste0("b_", cols)]); colnames(B) <- cols
+  dr <- as.data.frame(as_draws_df(fit))
+  cols <- prep$terms$col; fx <- prep$fixed$col
+  B <- as.matrix(dr[, paste0("b_", fx)]); colnames(B) <- fx
   rois <- levels(prep$data$roi)
-  P0 <- list(b = matrix(p$b, 1, dimnames = list(NULL, cols)), r = p$r)
-  set.seed(1); pd <- .prior_effect_draws(prep, SET, informative, n = 20000)
+  P0 <- list(b = matrix(p$b[fx], 1, dimnames = list(NULL, fx)), r = p$r)
+  set.seed(1); pd <- .prior_effect_draws(prep, n = 20000)
   keep <- round(seq(1, nrow(B), length.out = L))
   out <- list()
   for (hyp in spec$hypotheses) {
@@ -118,24 +124,25 @@ run_reps <- function(mode, bands) {
   odir <- file.path(GDIR, sprintf("%s_%s%s", mode, tag, SFX)); dir.create(odir, showWarnings = FALSE)
   tpl_f <- file.path(GDIR, sprintf("template_%s%s.rds", tag, SFX))     # one per set: brms writes priors into the code
   if (!file.exists(tpl_f)) {
-    set.seed(999); prep$data$z <- simulate_z(prep, draw_params(prep, SET))
-    saveRDS(bayes_fit(prep, SET, informative, chains = 2, iter = 400, warmup = 200, seed = 1,
+    set.seed(999); prep$data$z <- simulate_z(prep, draw_params(prep))
+    saveRDS(bayes_fit(prep, chains = 2, iter = 400, warmup = 200, seed = 1,
                       model_dir = file.path(GDIR, "stan")), tpl_f)
   }
-  bayes_check_template(readRDS(tpl_f), prep, bayes_priors(prep, SET, informative))
+  bayes_check_template(readRDS(tpl_f), prep, bayes_priors(prep))
   todo <- Filter(function(r) !file.exists(file.path(odir, sprintf("rep%04d.rds", r))), seq_len(opt$reps))
   if (!length(todo)) return(invisible(NULL))
   # Workers are separate R processes (PSOCK), not forks. With cmdstanr fits in forked mclapply workers, this process
   # was SIGKILLed together with its whole process group as it exited (3 of 4 trials), which took the calling queue
   # down at the end of a stage (2026-10-14 to 10-16). Each worker reads the template itself.
-  cl <- makePSOCKcluster(min(opt$workers, length(todo)), outfile = "")
+  nw <- max(1, min(opt$workers, length(todo), floor(detectCores() / opt$chains)))   # workers x chains <= cores
+  cl <- makePSOCKcluster(nw, outfile = "")
   on.exit(stopCluster(cl), add = TRUE)
   clusterExport(cl, ls(globalenv(), all.names = TRUE), envir = globalenv())
   clusterExport(cl, "tpl_f", envir = environment())
   clusterEvalQ(cl, { suppressMessages({ library(brms); library(posterior) }); tpl <- readRDS(tpl_f); NULL })
   one_rep <- function(r) try({
     set.seed(10000 * match(mode, c("sbc", "null", "recovery")) + r)
-    p <- draw_params(prep, SET, null = mode == "null")
+    p <- draw_params(prep, null = mode == "null")
     pr <- prep; pr$data$z <- simulate_z(prep, p)
     fit <- update(tpl, newdata = pr$data, recompile = FALSE, chains = opt$chains, cores = opt$chains,
                   iter = opt$iter, warmup = opt$warmup, seed = r, refresh = 0)
@@ -160,7 +167,7 @@ if (opt$mode == "prior_pred") {
     rs <- tapply(real, prep$data$band, fs)
     set.seed(7)
     sims <- do.call(rbind, lapply(1:500, function(i) {    # 500 x bands; stays a matrix for a single band
-      z <- simulate_z(prep, draw_params(prep, SET)); c(tapply(z, prep$data$band, fs))
+      z <- simulate_z(prep, draw_params(prep)); c(tapply(z, prep$data$band, fs))
     }))
     data.frame(stat = st, band = prep$bands, real = as.numeric(rs[prep$bands]),
                sim_q05 = apply(sims, 2, quantile, 0.05), sim_median = apply(sims, 2, median),
@@ -180,7 +187,7 @@ if (opt$mode == "prior_pred") {
     fs <- unlist(lapply(ds, list.files, full.names = TRUE))
     if (length(fs)) dplyr::bind_rows(lapply(fs, readRDS)) else NULL
   }
-  verdict <- list(dv = job$dv, prior_set = SET, design = list(n_rows = nrow(dat)), rules = list())
+  verdict <- list(dv = job$dv, prior_set = SET, coding = BAYES_CODING, design = list(n_rows = nrow(dat)), rules = list())
   pp <- file.path(GDIR, sprintf("prior_pred%s.csv", SFX))
   if (file.exists(pp)) {
     x <- read.csv(pp)

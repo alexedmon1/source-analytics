@@ -108,14 +108,63 @@ def test_template_guard_rejects_other_prior_set():
     d <- expand.grid(subject = paste0('s', 1:6), roi = c('r1', 'r2'), stringsAsFactors = FALSE)
     d$group <- ifelse(d$subject %in% c('s1', 's2', 's3'), 'WT', 'KO'); set.seed(1); d$value <- rnorm(nrow(d))
     spec <- parse_design_spec(list(design = list(factor = 'group', reference = 'WT', levels = list('WT', 'KO'))))
-    prep <- bayes_prepare(d, spec, 'value', 'roi', NULL)
     inf <- list(x_all_KO = c(0.5, 0.8))
-    tW <- suppressMessages(brm(bayes_formula(prep), data = prep$data, family = gaussian(),
-                               prior = bayes_priors(prep, 'W'), empty = TRUE))
-    bayes_check_template(tW, prep, bayes_priors(prep, 'W', inf))
-    r <- try(bayes_check_template(tW, prep, bayes_priors(prep, 'I', inf)), silent = TRUE)
+    pW <- bayes_prepare(d, spec, 'value', 'roi', NULL, 'W', inf)
+    pI <- bayes_prepare(d, spec, 'value', 'roi', NULL, 'I', inf)
+    tW <- suppressMessages(brm(bayes_formula(pW), data = pW$data, family = gaussian(),
+                               prior = bayes_priors(pW), empty = TRUE))
+    bayes_check_template(tW, pW, bayes_priors(pW))
+    r <- try(bayes_check_template(tW, pI, bayes_priors(pI)), silent = TRUE)
     cat(if (inherits(r, 'try-error')) 'REJECTED' else 'ACCEPTED')
     """
     r = subprocess.run(["Rscript", "-e", code], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip().endswith("REJECTED")
+
+
+_THREE_GROUPS = f"""
+    suppressMessages({{ source('{R_DIR / "hypothesis.R"}'); source('{R_DIR / "bayes_hypothesis.R"}') }})
+    d <- expand.grid(subject = paste0('s', 1:9), roi = c('r1', 'r2'), band = c('Alpha', 'Beta'), stringsAsFactors = FALSE)
+    d$group <- c('WT', 'KO', 'TR')[(as.integer(sub('s', '', d$subject)) - 1) %/% 3 + 1]
+    set.seed(1); d$value <- rnorm(nrow(d))
+    spec <- parse_design_spec(list(design = list(factor = 'group', reference = 'WT', levels = list('WT', 'KO', 'TR'))))
+    inf <- list(x_Alpha_KO = c(0.5, 0.3))
+    con <- function(prep, band, a, b) {{ w <- setNames(c(0, 0, 0), prep$levels); w[a] <- 1; w[b] <- -1
+      set.seed(2); .contrast_draws(.prior_effect_draws(prep, 200000)$b, NULL, prep, band, w) }}
+"""
+
+
+def _r(code):
+    r = subprocess.run(["Rscript", "-e", _THREE_GROUPS + code], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.split()
+
+
+def test_w_prior_is_symmetric_over_groups():
+    """Group-level coding (2026-10-19): under W every pairwise contrast, with or without the reference, is a priori
+    N(0, 1); reference-coded N(0, 1) effects had given contrasts between non-reference groups SD sqrt(2)."""
+    out = _r("""p <- bayes_prepare(d, spec, 'value', 'roi', 'band', 'W', inf)
+    cat(sapply(list(c('KO', 'WT'), c('TR', 'WT'), c('TR', 'KO')), function(g) sd(con(p, 'Alpha', g[1], g[2]))))""")
+    assert all(abs(float(x) - 1) < 0.01 for x in out)
+
+
+def test_set_I_entry_is_the_contrast_prior():
+    """A set-I entry x_<band>_<group> is the prior of that group - reference, exactly; other bands stay W."""
+    out = _r("""p <- bayes_prepare(d, spec, 'value', 'roi', 'band', 'I', inf)
+    x <- con(p, 'Alpha', 'KO', 'WT'); y <- con(p, 'Beta', 'KO', 'WT')
+    cat(mean(x), sd(x), sd(y), sum(startsWith(p$fixed$col, 'dx_')))""")
+    m, s, s_beta, n_dx = map(float, out)
+    assert abs(m - 0.5) < 0.01 and abs(s - 0.3) < 0.01 and abs(s_beta - 1) < 0.01 and n_dx == 1
+
+
+def test_design_columns_give_group_levels():
+    """Each row's fixed part is its own group's level in its own band, under both codings."""
+    out = _r("""ok <- sapply(c('W', 'I'), function(set) {
+      p <- bayes_prepare(d, spec, 'value', 'roi', 'band', set, inf)
+      b <- setNames(rnorm(nrow(p$fixed)), p$fixed$col)
+      fx <- as.matrix(p$data[, p$fixed$col]) %*% b
+      lev <- sapply(seq_len(nrow(p$data)), function(i) {
+        M <- p$lmap[[as.character(p$data$band[i])]]; sum(M[as.character(p$data$.grp[i]), ] * b[colnames(M)]) })
+      isTRUE(all.equal(as.numeric(fx), lev)) })
+    cat(all(ok))""")
+    assert out == ["TRUE"]

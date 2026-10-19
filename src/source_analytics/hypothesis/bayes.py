@@ -126,10 +126,11 @@ def run_job(job: BayesJob, timeout: float | None = None) -> subprocess.Completed
 GATE_MODES = ("prior_pred", "sbc", "null", "recovery", "summarize")
 
 
-def run_gate(job: BayesJob, bands: list[str] | None = None, reps: tuple[int, int, int] = (100, 50, 10),
+def run_gate(job: BayesJob, bands: list[str] | None = None, reps: tuple[int, int, int] = (100, 100, 10),
              workers: int = 5, timeout: float | None = None) -> int:
     """The gate in order (R/bayes_gate.R), for each of the job's prior sets: prior predictive, SBC and null at
-    ``bands`` (a reduced design; None = all), recovery at the full design, then the verdict
+    ``bands`` (a reduced design; None = all), recovery at the full design with the real fit's sampler settings
+    (the job's chains/iter/warmup; the Conductor 2026-10-19: 2-chain recovery fits missed R-hat < 1.05), then the verdict
     (``<work_dir>/gate/<dv>/gate.json``; ``gate_I.json`` for set I). Finished replications are skipped on a re-run.
     Hours at a real design."""
     if not Path(job.data_csv).exists():
@@ -145,6 +146,8 @@ def run_gate(job: BayesJob, bands: list[str] | None = None, reps: tuple[int, int
                    "--workers", str(workers), "--set", prior_set]
             if mode in n:
                 cmd += ["--reps", str(n[mode])]
+            if mode == "recovery":
+                cmd += ["--chains", str(job.chains), "--iter", str(job.iter), "--warmup", str(job.warmup)]
             if bands and mode in ("sbc", "null"):
                 cmd += ["--bands", ",".join(bands)]
             res = subprocess.run(cmd, text=True, timeout=timeout, check=False)

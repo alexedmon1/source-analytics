@@ -4,19 +4,26 @@
 # same per-subject long tables as the emmeans adapter (R/hypothesis.R, whose parser it reuses); answers each
 # hypothesis with a posterior instead of a p-value. Runs only from the separate `bayes` step.
 #
-#   bayes_prepare(data, spec, dv_col, spatial_col, band_col)  -> coded data + term names
-#   bayes_formula(prep) / bayes_priors(prep, set)             -> brms formula / prior table, generated from the spec
-#   bayes_fit(prep, set, ...)                                  -> brmsfit (cmdstanr backend)
-#   bayes_readout(fit, prep, spec, set, rope_sd)               -> one row per hypothesis x band x spatial cell
+#   bayes_prepare(data, spec, dv_col, spatial_col, band_col, set, informative) -> coded data + term map for one prior set
+#   bayes_formula(prep) / bayes_priors(prep)                   -> brms formula / prior table, generated from the spec
+#   bayes_fit(prep, ...)                                       -> brmsfit (cmdstanr backend)
+#   bayes_readout(fit, prep, spec, rope_sd)                    -> one row per hypothesis x band x spatial cell
 #
 # Model (bands pooled; a band-less outcome such as the aperiodic exponent is one "band"):
-#   z ~ 0 + bd_<band> ... + x_<band>_<group> ...          band level of the reference group + group effect per band
+#   z ~ 0 + lv_<band>_<group> ... [+ dx_<band>_<group> ...]  group level per band (every group, reference included)
 #       + (0 + x_<band>_<group> ... || roi)               ROI deviation of each band's group effect (partial pooling)
 #       + (1 | roi:band) + (0 + bd_<band> ... || subject), ROI level per band; subject level per band
 #   sigma ~ 0 + bd_<band> ...,  family = gaussian()       (bd_<band> = 1 on rows of that band: numeric, so one band works)
 # x_<band>_<group> = 1 for rows of that band and (non-reference) group. z is the outcome standardised per band by the
 # within-group between-subject SD within ROI x band (pooled over ROIs and groups), so effects, priors, the ROPE and `mode: sd` margins are in
 # between-subject SD units (the unit of a per-cell Hedges g).
+#
+# Group levels, not reference-coded effects (the Conductor, 2026-10-19; bayes-sl reports/G1_forge_exponent.md): with
+# N(0, 1) on each effect against the reference, the effects' priors jointly pooled the reference level toward the other
+# groups' levels, shrinking every contrast against the reference by up to 0.18 SD in FORGE. Now each level is
+# N(0, 1/sqrt(2)) (W), so every pairwise contrast is a priori N(0, 1) and no group is privileged. A set-I entry
+# x_<band>_<group> (group - reference) re-expresses that group's level as reference level + dx_<band>_<group>, with
+# dx ~ the entry: that contrast's prior is exactly the entry, and no other group is tied to the reference.
 # ============================================================================
 
 suppressMessages({ library(brms); library(posterior) })
@@ -29,13 +36,18 @@ if (!exists("parse_design_spec")) {
 BAYES_SETS <- c("W", "I")
 BAYES_ROPE_SD <- 0.1      # default ROPE for plain contrasts, between-subject SD units (the Conductor, 2026-10-14)
 BAYES_HDI <- 0.95
-BAYES_W_EFFECT_SD <- 1  # W group effects N(0, 1), Track A's weak default (the Conductor, 2026-10-14; was 0.5)
+BAYES_W_EFFECT_SD <- 1  # W: every pairwise group contrast a priori N(0, 1), Track A's weak default (the Conductor, 2026-10-14; was 0.5)
+BAYES_W_LEVEL_SD <- BAYES_W_EFFECT_SD / sqrt(2)   # ... from independent group levels N(0, 1/sqrt(2)) (2026-10-19)
+BAYES_CODING <- "group-levels-2026-10-19"   # fixed-effect parametrisation; a gate verdict attaches only to fits of the same
 BAYES_SD_ROI_BAND <- 3  # ROI level per band, half-N(0, 3): FORGE source power ROI means spread 0.9-3.0 SD (the Conductor, 2026-10-15; was 0.5)
 
 .safe <- function(x) gsub("[^A-Za-z0-9]", "", x)
 
-#' Code a long table for the model. Returns the data plus the term map.
-bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "band") {
+#' Code a long table for the model, for one prior set (the set decides the fixed-effect parametrisation, see the
+#' header). `informative` is a named list x_<band>_<group> -> c(mean, sd) (group - reference) for set I; terms without
+#' an entry stay W, and entries for terms not in this design are unused. Returns the data plus the term map.
+bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "band", set = "W", informative = NULL) {
+  if (!set %in% BAYES_SETS) stop(sprintf("bayes: unknown prior set '%s'", set))
   d <- as.data.frame(data)
   d <- d[!is.na(d[[dv_col]]), , drop = FALSE]
   levels <- spec$levels %||% sort(unique(as.character(d[[spec$factor]])))
@@ -64,31 +76,46 @@ bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "b
   terms$col <- sprintf("x_%s_%s", terms$band, .safe(terms$group))
   for (k in seq_len(nrow(terms)))
     d[[terms$col[k]]] <- as.numeric(d$band == terms$band[k] & d$.grp == terms$group[k])
+  # fixed effects: one parameter per band x group; lmap[[band]] (groups x parameters) gives the group levels
+  fixed <- list(); lmap <- list()
+  for (b in levels(d$band)) {
+    anch <- Filter(function(g) g != ref && identical(set, "I") && !is.null(informative[[sprintf("x_%s_%s", b, .safe(g))]]),
+                   levels)
+    cols <- ifelse(levels %in% anch, sprintf("dx_%s_%s", b, .safe(levels)), sprintf("lv_%s_%s", b, .safe(levels)))
+    M <- diag(length(levels)); dimnames(M) <- list(levels, cols)
+    M[anch, cols[levels == ref]] <- 1                      # anchored level = reference level + dx
+    lmap[[b]] <- M
+    ms <- t(sapply(levels, function(g)
+      if (g %in% anch) informative[[sprintf("x_%s_%s", b, .safe(g))]] else c(0, BAYES_W_LEVEL_SD)))
+    fixed[[b]] <- data.frame(col = cols, band = b, group = levels, prior_mean = ms[, 1], prior_sd = ms[, 2],
+                             row.names = NULL)
+    for (p in cols) d[[p]] <- as.numeric(d$band == b) * M[as.character(d$.grp), p]
+  }
   covs <- intersect(spec$covariates, names(d))
   for (cv in covs) d[[paste0("cov_", .safe(cv))]] <- d[[cv]] - mean(d[[cv]], na.rm = TRUE)
-  list(data = d, terms = terms, levels = levels, ref = ref, bands = levels(d$band), band_labels = band_labels,
+  list(data = d, terms = terms, fixed = do.call(rbind, unname(fixed)), lmap = lmap, set = set,
+       levels = levels, ref = ref, bands = levels(d$band), band_labels = band_labels,
        covs = if (length(covs)) paste0("cov_", .safe(covs)) else character(0), scale = scale_tab,
        dv = dv_col, spatial = spatial_col)
 }
 
 bayes_formula <- function(prep) {
+  fx <- paste(prep$fixed$col, collapse = " + ")
   x <- paste(prep$terms$col, collapse = " + ")
   bd <- paste(paste0("bd_", prep$bands), collapse = " + ")
   cv <- if (length(prep$covs)) paste(" +", paste(prep$covs, collapse = " + ")) else ""
-  bf(as.formula(paste0("z ~ 0 + ", bd, " + ", x, cv, " + (0 + ", x, " || roi) + (1 | roi:band) + (0 + ", bd,
+  bf(as.formula(paste0("z ~ 0 + ", fx, cv, " + (0 + ", x, " || roi) + (1 | roi:band) + (0 + ", bd,
                        " || subject)")),
      as.formula(paste0("sigma ~ 0 + ", bd)))
 }
 
-#' Prior sets, generated from the spec (docs/methods/BAYES_ENGINE.md section 5). `informative` is a named list
-#' col -> c(mean, sd) for set I (derived by script from a logged literature search); terms without an entry stay W.
-bayes_priors <- function(prep, set = "W", informative = NULL) {
-  term_prior <- function(cl) {                     # one prior per group-effect term: I's entry where one exists, else W
-    ms <- if (identical(set, "I") && !is.null(informative[[cl]])) informative[[cl]] else c(0, BAYES_W_EFFECT_SD)
-    set_prior(sprintf("normal(%g, %g)", ms[1], ms[2]), class = "b", coef = cl)
-  }
-  c(set_prior("normal(0, 1)", class = "b"),                            # band levels (reference group)
-    do.call(c, lapply(prep$terms$col, term_prior)),                    # entries for terms not in this design are unused
+#' Prior table of prep's set, generated from the spec (docs/methods/BAYES_ENGINE.md section 5): group levels
+#' N(0, BAYES_W_LEVEL_SD), set-I differences dx ~ their entry (derived by script from a logged literature search).
+bayes_priors <- function(prep) {
+  fx <- prep$fixed
+  c(set_prior("normal(0, 1)", class = "b"),                            # covariates
+    do.call(c, lapply(seq_len(nrow(fx)), function(k)
+      set_prior(sprintf("normal(%g, %g)", fx$prior_mean[k], fx$prior_sd[k]), class = "b", coef = fx$col[k]))),
     set_prior("normal(0, 0.25)", class = "sd", group = "roi"),
     set_prior(sprintf("normal(0, %g)", BAYES_SD_ROI_BAND), class = "sd", group = "roi:band"),
     set_prior("normal(0, 0.5)", class = "sd", group = "subject"),
@@ -108,9 +135,9 @@ bayes_check_template <- function(template, prep, pr) {
 
 #' model_dir: where cmdstanr keeps the compiled executable, so a saved fit can serve as an update() template in a
 #' later process (brms' default is a session temp dir, gone when the process ends).
-bayes_fit <- function(prep, set = "W", informative = NULL, chains = 4, iter = 2000, warmup = 1000, seed = 1,
+bayes_fit <- function(prep, chains = 4, iter = 2000, warmup = 1000, seed = 1,
                       backend = "cmdstanr", threads = NULL, template = NULL, model_dir = NULL, ...) {
-  pr <- bayes_priors(prep, set, informative)
+  pr <- bayes_priors(prep)
   if (!is.null(template))
     return(update(bayes_check_template(template, prep, pr), newdata = prep$data, recompile = FALSE, chains = chains,
                   iter = iter, warmup = warmup, seed = seed, refresh = 0, ...))
@@ -121,16 +148,13 @@ bayes_fit <- function(prep, set = "W", informative = NULL, chains = 4, iter = 20
       ...)
 }
 
-#' Prior draws of the group-effect parameters (for Savage-Dickey densities at 0): b ~ N(m, s) per term, ROI deviation
-#' r ~ N(0, tau) with tau ~ half-N(0, 0.25).
-.prior_effect_draws <- function(prep, set, informative, n = 20000) {
-  cols <- prep$terms$col
-  b <- sapply(cols, function(cl) {
-    ms <- if (identical(set, "I") && !is.null(informative[[cl]])) informative[[cl]] else c(0, BAYES_W_EFFECT_SD)
-    rnorm(n, ms[1], ms[2])
-  })
+#' Prior draws of the group parameters (for Savage-Dickey densities at 0): each fixed parameter (level or set-I
+#' difference) ~ N(m, s), ROI deviation r ~ N(0, tau) with tau ~ half-N(0, 0.25).
+.prior_effect_draws <- function(prep, n = 20000) {
+  fx <- prep$fixed; cols <- prep$terms$col
+  b <- sapply(seq_len(nrow(fx)), function(k) rnorm(n, fx$prior_mean[k], fx$prior_sd[k]))
   r <- sapply(cols, function(cl) rnorm(n, 0, abs(rnorm(n, 0, 0.25))))
-  list(b = matrix(b, n, dimnames = list(NULL, cols)), r = matrix(r, n, dimnames = list(NULL, cols)))
+  list(b = matrix(b, n, dimnames = list(NULL, fx$col)), r = matrix(r, n, dimnames = list(NULL, cols)))
 }
 
 .hdi <- function(x, mass = BAYES_HDI) {
@@ -141,14 +165,15 @@ bayes_fit <- function(prep, set = "W", informative = NULL, chains = 4, iter = 20
   bw <- tryCatch(bw.SJ(x), error = function(e) bw.nrd0(x)); mean(dnorm(-x / bw)) / bw
 }
 
-#' Weighted group-effect contrast per draw: sum_g w_g * (b_g [+ r_g]). The reference group's effect is 0; band levels
-#' and ROI x band levels cancel when the weights sum to 0 (required here).
+#' Weighted group contrast per draw: sum_g w_g * (level_g [+ r_g]). B holds the fixed parameters (columns
+#' prep$fixed$col); levels = B %*% t(lmap). The reference group has no ROI deviation; ROI x band levels cancel when the
+#' weights sum to 0 (required here).
 .contrast_draws <- function(B, R, prep, band, w) {
-  out <- 0
-  for (g in names(w)[w != 0]) {
+  M <- prep$lmap[[band]]
+  out <- as.numeric(B[, colnames(M), drop = FALSE] %*% (t(M) %*% w[rownames(M)]))
+  if (!is.null(R)) for (g in names(w)[w != 0]) {
     if (g == prep$ref) next
-    cl <- sprintf("x_%s_%s", band, .safe(g))
-    out <- out + w[[g]] * (B[, cl] + if (is.null(R)) 0 else R[, cl])
+    out <- out + w[[g]] * R[, sprintf("x_%s_%s", band, .safe(g))]
   }
   out
 }
@@ -164,18 +189,18 @@ bayes_fit <- function(prep, set = "W", informative = NULL, chains = 4, iter = 20
 
 #' Read every requested hypothesis off one fit. One row per hypothesis x band x spatial cell ("all" = ROI-average,
 #' i.e. the band's population effect). Omnibus: a placeholder row (deferred).
-bayes_readout <- function(fit, prep, spec, set = "W", informative = NULL, rope_sd = BAYES_ROPE_SD,
-                          hypotheses = NULL) {
-  dr <- as_draws_df(fit)
+bayes_readout <- function(fit, prep, spec, rope_sd = BAYES_ROPE_SD, hypotheses = NULL) {
+  set <- prep$set
+  dr <- as.data.frame(as_draws_df(fit))            # plain data frame: column subsets keep no draws_df metadata
   cols <- prep$terms$col
-  B <- as.matrix(dr[, paste0("b_", cols)]); colnames(B) <- cols
+  B <- as.matrix(dr[, paste0("b_", prep$fixed$col)]); colnames(B) <- prep$fixed$col
   rois <- levels(prep$data$roi)
   Rr <- lapply(setNames(rois, rois), function(ro) {
     m <- as.matrix(dr[, sprintf("r_roi[%s,%s]", ro, cols)]); colnames(m) <- cols; m
   })
-  sig <- exp(as.matrix(dr[, paste0("b_sigma_bd_", prep$bands)])); colnames(sig) <- prep$bands
+  sig <- exp(as.matrix(dr[, paste0("b_sigma_bd_", prep$bands), drop = FALSE])); colnames(sig) <- prep$bands
   set.seed(1)
-  pd <- .prior_effect_draws(prep, set, informative)
+  pd <- .prior_effect_draws(prep)
   np <- nuts_params(fit)
   diag <- list(max_rhat = max(rhat(fit), na.rm = TRUE), n_divergent = sum(np$Value[np$Parameter == "divergent__"]))
   hyps <- spec$hypotheses

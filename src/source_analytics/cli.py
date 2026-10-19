@@ -1007,7 +1007,8 @@ def main():
                          help="Run the gate (prior predictive, SBC, null, recovery) at this design instead of a real "
                               "fit; writes gate.json, which later real fits record as gate_passed")
     p_bayes.add_argument("--gate-bands", help="Reduced design for SBC and null: comma-separated bands (default all)")
-    p_bayes.add_argument("--gate-reps", default="100,50,10", help="Replications: sbc,null,recovery (default 100,50,10)")
+    p_bayes.add_argument("--gate-reps", default="100,100,10",
+                         help="Replications: sbc,null,recovery (default 100,100,10; null 100: the Conductor, B3 2026-10-16)")
     p_bayes.add_argument("--workers", type=int, default=5, help="Parallel gate fits (2 chains each)")
     p_bayes.add_argument("--out", type=Path,
                          help="Write the table and fits here instead of the study's results/analytics trees "

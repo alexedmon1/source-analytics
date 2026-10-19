@@ -90,10 +90,18 @@ Fits, the prior table used and the gate summary go to `data/bayes/` (provenance)
 
 ## 5. Priors: generated from the spec, two sets
 
+**Coding: group levels (the Conductor, 2026-10-19).** The fixed part has one level per band x group, the reference
+included (`lv_<band>_<group>`). It used to be a reference level plus effects against it, with N(0, 1) on each effect.
+Jointly, those priors pooled the reference level toward the other groups' levels: in FORGE's exponent every contrast
+against WT_VEH came out 0.10-0.18 SD smaller than emmeans (bayes-sl `reports/G1_forge_exponent.md`; checked against
+REML and an N(0, 10) refit). Fits and gate verdicts carry the coding (`BAYES_CODING`); a verdict attaches only to fits
+of the same coding.
+
 **W (weakly informative, SD units):**
-- band-specific group effects N(0, 1). This is Track A's weak default; the first draft had 0.5, which was
-  tighter than the library's informative entries (SD 0.8). The Conductor set it, 2026-10-14;
-- band intercepts N(0, 1);
+- group levels N(0, 1/sqrt(2)) per band, so every pairwise contrast is a priori N(0, 1). N(0, 1) on contrasts is
+  Track A's weak default; the first draft had 0.5, which was tighter than the library's informative entries (SD 0.8).
+  The Conductor set it, 2026-10-14. Levels are pooled toward the band's grand mean (z is centred per band), each by its
+  own standard error, so small arms shrink more; no group is privileged;
 - ROI-deviation SDs half-N(0, 0.25);
 - ROI level per band SD half-N(0, 3) (`BAYES_SD_ROI_BAND`). Raised from 0.5 (the Conductor, 2026-10-15): FORGE's
   source power ROI means spread 0.9-3.0 between-subject SD per band (largest in gamma and epsilon), and the real spread
@@ -104,7 +112,9 @@ Fits, the prior table used and the gate summary go to `data/bayes/` (provenance)
 These are proposals. Each must pass the prior predictive check at the study design. The tectum model needed three
 rounds.
 
-**I (informative):** only from a logged literature search. **For FORGE (the Conductor, 2026-10-14): pooled.**
+**I (informative):** only from a logged literature search. An entry `x_<band>_<group>` is a prior on group -
+reference. That group's level is written as reference level + `dx_<band>_<group>` with `dx` ~ the entry, so the
+contrast's prior is exactly the entry; groups without an entry keep W levels and are not tied to the reference. **For FORGE (the Conductor, 2026-10-14): pooled.**
 - **The gap:** library entries are regional (AC, FC, S1, deep), and no source measured the ROI-average.
 - **The rule:** a band-level entry is the median of that band's regional entries when they agree in sign, with the
   largest regional scale.
