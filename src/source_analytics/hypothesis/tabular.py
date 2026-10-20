@@ -23,6 +23,11 @@ each dv is a separate ``run_hypothesis`` call.
 Kinds: ``omnibus`` (group F, partial ω²), ``contrast`` (weighted group contrast,
 Hedges g), ``equivalence`` (TOST, sd margin). ``regression`` is not supported here
 (no per-cell continuous predictor contract).
+
+Every contrast/equivalence row carries the minimum detectable effect (``mde``,
+``mde_percent`` of the reference group's cell mean, ``mde_power``, ``mde_alpha``,
+``mde_note``) from its own ``SE`` and ``df``; omnibus rows carry the note instead.
+See :mod:`.power` (DUET #151).
 """
 
 from __future__ import annotations
@@ -38,6 +43,7 @@ from scipy import stats as st
 from ..config import DesignSpec, Hypothesis
 from ..viz.constants import order_bands
 from .permutation import _fit_groups
+from .power import mde_columns, mde_not_computed, reference_weights
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +199,9 @@ def _apply_fdr(
 # Per-cell kind adapter (mirror of R .adapt_cell — between-subjects one-way model)
 # --------------------------------------------------------------------------- #
 def _adapt_cell(by_group: dict[str, np.ndarray], hyp: Hypothesis,
-                groups: list[str]) -> dict[str, Any] | None:
+                groups: list[str], reference: str | None = None) -> dict[str, Any] | None:
+    """One cell's row. ``reference`` (the design's reference level) picks the
+    group mean that scales ``mde_percent``; see :mod:`.power`."""
     arrays = []
     for g in groups:
         a = np.asarray(by_group.get(g, []), dtype=float)
@@ -227,6 +235,7 @@ def _adapt_cell(by_group: dict[str, np.ndarray], hyp: Hypothesis,
             "stat_type": "F", "p_value": p, "estimate_lcl": float("nan"),
             "estimate_ucl": float("nan"), "effect_size": omega2,
             "effect_size_type": "omega2_partial", "group_a": None, "group_b": None,
+            **mde_not_computed("omnibus F test"),
         }
 
     # contrast / equivalence
@@ -248,6 +257,10 @@ def _adapt_cell(by_group: dict[str, np.ndarray], hyp: Hypothesis,
         "group_a": pos[0] if len(pos) == 1 else None,
         "group_b": neg[0] if len(neg) == 1 else None,
     }
+    rw = reference_weights(weights, groups, reference)
+    row.update(mde_columns(se, df_res,
+                           ref_mean=float((rw * means).sum()) if rw is not None else None,
+                           resid_sd=resid_sd))
     if hyp.kind == "equivalence":
         margin = hyp.margin or {}
         mode = margin.get("mode", "sd")
@@ -346,7 +359,7 @@ def write_module_hypotheses_tabular(
                     }
                     if any(np.isfinite(v).sum() < min_per_group for v in by_group.values()):
                         continue
-                    res = _adapt_cell(by_group, hyp, groups)
+                    res = _adapt_cell(by_group, hyp, groups, reference=spec.reference)
                     if res is None:
                         continue
                     res["spatial"] = sp

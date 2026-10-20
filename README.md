@@ -650,7 +650,7 @@ source-analytics run --study study.yaml --paradigm resting \
 
 Output is **additive**: a `<module>_hypotheses.csv` written alongside the module's
 other tables, with one tidy row per band × spatial cell (estimate, SE, CI, stat, p,
-q, effect size, `fdr_family`). Modules with multiple spatial tiers emit one table
+q, effect size, `fdr_family`, and the minimum detectable effect `mde`). Modules with multiple spatial tiers emit one table
 per tier — `roi_directed` writes `roi_directed_global_hypotheses.csv`,
 `roi_directed_directed_edges_hypotheses.csv`, and `roi_directed_region_hypotheses.csv`.
 
@@ -716,6 +716,19 @@ single-paradigm config (no `paradigms:`) omits the paradigm segment.
 The `<analysis>_hypotheses.csv` is the canonical statistical contract across all
 emmeans/permutation modules; figure and gallery consumers read it (plus legacy
 column aliases during the migration).
+
+**Minimum detectable effect.** Every tabular row also says how large a true
+difference the design would have detected: `mde`, the difference detectable with
+80% power at two-sided alpha 0.05 (`(qt(0.975, df) + qt(0.80, df)) * SE`, normal
+quantiles when `df` is infinite), in the estimate's units; `mde_percent`, that as a
+percentage of the reference group's mean (blank for slopes, omnibus rows, and a
+reference mean within one residual SD of zero); `mde_power` and `mde_alpha`
+(0.8, 0.05); and `mde_note`, empty when `mde` is computed and otherwise
+`not computed: <reason>`. Alpha is **nominal**, not corrected for multiple
+comparisons. Omnibus F, cluster-permutation and NBS rows carry the note instead of
+a number. The existing `SE` column is the standard error the MDE is computed
+from. DUET reads each finding's size against this number, so a null says what the
+study could have seen; see `docs/methods/HYPOTHESIS.md` §4a.
 
 > Figures are **render-on-demand** — they are not auto-regenerated when data
 > changes. Re-run the `figures` step (or `source-analytics figure …`) before

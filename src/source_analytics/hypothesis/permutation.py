@@ -37,6 +37,7 @@ from ..stats.cluster_permutation import (
     cluster_permutation_test,
     find_clusters,
 )
+from .power import mde_not_computed
 
 logger = logging.getLogger(__name__)
 
@@ -381,6 +382,11 @@ def write_module_hypotheses_perm(
                     "label": hyp.label or hyp.name, "test": hyp.test,
                     "band": band, "dv": dv,
                     "n_perms": n_perms, "threshold": threshold, **c,
+                    # A cluster has no single estimate with an SE, so no MDE
+                    # (DUET #151): the note says so rather than leaving a blank.
+                    **mde_not_computed(
+                        "per-vertex equivalence summary" if c.get("stat_type") == "tost"
+                        else "cluster permutation test"),
                 })
 
     if not rows:

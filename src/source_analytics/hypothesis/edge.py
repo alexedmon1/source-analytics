@@ -40,6 +40,7 @@ from scipy import stats
 from ..config import DesignSpec, Hypothesis
 from ..stats.graph_metrics import _find_components, nbs_permutation_test
 from .permutation import _fit_groups, _group_uids
+from .power import mde_not_computed
 
 logger = logging.getLogger(__name__)
 
@@ -462,6 +463,11 @@ def write_module_hypotheses_edge(
                     "label": hyp.label or hyp.name, "test": hyp.test,
                     "band": band, "dv": dv,
                     "n_perms": n_perms, "threshold": nbs_threshold, **c,
+                    # A subnetwork has no single estimate with an SE, so no MDE
+                    # (DUET #151): the note says so rather than leaving a blank.
+                    **mde_not_computed(
+                        "per-edge equivalence summary" if c.get("stat_type") == "tost"
+                        else "network-based statistic component"),
                 })
 
     if not rows:
