@@ -72,6 +72,9 @@ figures → summary`. `DEFAULT_RUN_STEPS` excludes `figures`.
 
 ## Conventions
 
+- Known defects and open follow-ups are in `docs/KNOWN_ISSUES.md`; check it before
+  touching effect sizes, the MDE columns or the lock file.
+
 - Deprecated analysis names (`psd`, `pac`, `vertex_mvpa`, …) are in
   `core._DEPRECATED_NAMES`; output always goes under the canonical name.
 - R scripts derive contrasts with `contrasts_from_spec(parse_design_spec(config))`
