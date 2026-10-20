@@ -107,13 +107,59 @@ Output is **additive**: a new `<module>_hypotheses.csv` under the module's table
 
 ```
 hypothesis, kind, role, band, spatial, estimate, SE, df, df_num, stat, stat_type,
-p_value, estimate_lcl, estimate_ucl, effect_size, effect_size_type, label, test,
+p_value, estimate_lcl, estimate_ucl, effect_size, effect_size_type, group_a, group_b,
+mde, mde_percent, mde_power, mde_alpha, mde_note, label, test,
 q_value, significant, fdr_family, dv
 ```
 
 One row per **band × spatial cell × DV**. `q_value`/`significant` are **within-run** BH-FDR,
 corrected across that hypothesis's band × spatial family (named in `fdr_family`). Cross-
 hypothesis correction is your call, made explicitly — never silent.
+
+### 4a. Minimum detectable effect
+
+Every tabular row says how large a true difference the design would have detected,
+so a null reads as "nothing as large as X" rather than as absence. DUET (OPEN.md
+#151) reads each finding's size against this number, and only the tool that fitted
+the model can supply it: the SE and df the design produced, covariates and random
+term included, are here and nowhere else.
+
+| column | meaning |
+|---|---|
+| `SE` | standard error of the estimate from the fitted model, in the estimate's units. This **is** the shared contract's `se`; it is not renamed or duplicated. |
+| `df` | degrees of freedom of the test (Satterthwaite for the LMM; `Inf` on emmeans' asymptotic fallback) |
+| `mde` | `(qt(1 - α/2, df) + qt(power, df)) * SE`: the difference detectable with 80% power at two-sided α = 0.05, in the estimate's units. Normal quantiles when `df` is NA or infinite. |
+| `mde_percent` | `100 * mde / abs(reference mean)`. NA for regression slopes, omnibus rows, and whenever `abs(reference mean) < residual SD` (the fitted model's `sigma`; the pooled SD of the one-way cell model): for change scores, centred measures, dB or log ratios a percent of a near-zero mean is a huge meaningless number. |
+| `mde_power`, `mde_alpha` | 0.80 and 0.05, constant, so the CSV describes itself |
+| `mde_note` | empty when `mde` is computed; otherwise `not computed: <reason>`. `mde` is never NA without one. |
+
+**Alpha is nominal**, by the user's decision: no multiple-comparison correction
+enters the MDE. `q_value` is the separate, corrected column; the MDE does not try to
+anticipate it.
+
+**Reference mean**, per adapter:
+
+- *emmeans contrast / equivalence:* the reference group's emmean in the same cell
+  (marginalized over the spatial factor for a marginal contrast). The reference group
+  is `design.reference` when the contrast weights it; otherwise the contrast's
+  negative-weight side, |w|-weighted (the baseline the estimate is taken from).
+- *directed edges and the Python tabular adapter:* the same rule on the raw cell
+  means of the one-way model.
+- *legacy post-hoc tables in `stats_utils.R`* (`run_posthoc_emmeans*`,
+  `run_posthoc_global`): `emmean_b`, since `group_b` is the reference in the
+  pairwise `group_a - group_b` convention.
+- *regression (emtrends):* none; `mde` is the smallest detectable slope.
+
+**Not computed:** omnibus F rows (`not computed: omnibus F test`), cluster-permutation
+rows (`not computed: cluster permutation test`; TOST map summaries:
+`not computed: per-vertex equivalence summary`), and NBS component rows
+(`not computed: network-based statistic component`; `per-edge equivalence summary`).
+None of them has a single estimate with a standard error.
+
+The column names and formula are shared with neurofaune and neurovrai. Both helpers
+(`mde_from_se` in `R/hypothesis.R`, `hypothesis/power.py`) are tested against the
+same reference values: se 1, df 10 → 3.107197; se 1, df 26 → 2.911195; se 2.09,
+df 24 → 6.104376; se 1, df ∞ → 2.801585; se 0.5, df 4 → 1.858705.
 
 ## 5. Adapters & result contracts
 
@@ -123,8 +169,8 @@ statistic is computed — the divide is the inference machinery, **not** the spa
 | adapter | modules | result contract |
 |---|---|---|
 | **emmeans** (R LMM) ✅ | roi_psd, roi_aperiodic, electrode_psd, electrode_aperiodic, … | **tabular** — per-cell estimate/CI/p/FDR/effect (the schema above) |
-| **permutation** (Python) ✅ | all per-unit-map vertex_*, electrode_connectivity, vertex_connectivity/directed/specparam | **map + clusters** — per-unit statistic map + cluster extent/mass/cluster-p (max-stat/TFCE corrected, *not* per-cell FDR) |
-| **edge / NBS** (Python) ✅ | roi_nbs, vertex_nbs (+ the combined roi_network/vertex_network aliases) | **subnetwork table** — per-edge statistic matrix → connected supra-threshold components with edge-count, mass, peak, component-p (NBS max-component corrected) |
+| **permutation** (Python) ✅ | all per-unit-map vertex_*, electrode_connectivity, vertex_connectivity/directed/specparam | **map + clusters** — per-unit statistic map + cluster extent/mass/cluster-p (max-stat/TFCE corrected, *not* per-cell FDR); MDE columns carry the "not computed" note (§4a) |
+| **edge / NBS** (Python) ✅ | roi_nbs, vertex_nbs (+ the combined roi_network/vertex_network aliases) | **subnetwork table** — per-edge statistic matrix → connected supra-threshold components with edge-count, mass, peak, component-p (NBS max-component corrected); MDE columns carry the "not computed" note (§4a) |
 
 `electrode_connectivity` runs on the **permutation** adapter (it is a per-channel map),
 alongside `vertex_connectivity` — not with `electrode_psd`. The **edge/NBS** adapter is the

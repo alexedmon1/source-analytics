@@ -56,6 +56,17 @@ figures → summary`. `DEFAULT_RUN_STEPS` excludes `figures`.
   (`BaseAnalysis.tbl_dir` / `fig_dir`). source-lightbox reads these.
 - Every inferential module writes `<analysis>_hypotheses.csv` (one row per
   band × spatial cell, or per cluster for map modules) into `tables/`.
+- Every tabular row carries the minimum detectable effect, because DUET (OPEN.md
+  #151) reads each finding's size against it and only the fitted model has the SE
+  and df: `mde` = `(qt(1-α/2, df) + qt(power, df)) * SE` (normal quantiles when
+  df is NA/Inf), `mde_percent` = `100 * mde / |reference mean|` (NA for slopes,
+  omnibus rows, or a reference mean within one residual SD of zero), `mde_power`
+  0.80, `mde_alpha` 0.05 **nominal (uncorrected), by the user's decision**, and
+  `mde_note` (empty, or `not computed: <reason>` -- mde is never NA without one).
+  `SE` is the contract's `se`; do not rename it or add a lowercase twin. Omnibus,
+  cluster-permutation and NBS rows get the note, not a number. Helpers:
+  `mde_from_se` / `.add_mde` in `R/hypothesis.R`, `hypothesis/power.py` in
+  Python. The column names are shared with neurofaune and neurovrai.
 - Band power CSVs carry `absolute` (mean power density, dB/Hz) and `relative`.
   There is no `dB` column.
 
