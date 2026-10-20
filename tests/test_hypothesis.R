@@ -245,4 +245,94 @@ ok(all(c("q_value", "significant", "fdr_family") %in% names(de)),
 de_ac <- de[de$kind == "contrast" & de$source == "A" & de$target == "C", ]
 ok(!de_ac$significant, "null edge A->C not flagged significant")
 
+# ---- 13. minimum detectable effect (DUET #151): power 0.80, alpha 0.05 ----
+# Reference values shared with the Python helper (tests/test_power.py) and with
+# neurofaune / neurovrai: one contract, one set of numbers.
+mde_ref <- list(c(1.0, 10, 3.107197), c(1.0, 26, 2.911195), c(2.09, 24, 6.104376),
+                c(1.0, Inf, 2.801585), c(0.5, 4, 1.858705))
+for (r in mde_ref)
+  ok(near(mde_from_se(r[1], r[2]), r[3], 1e-6),
+     sprintf("mde_from_se(se=%g, df=%g) = %.6f", r[1], r[2], r[3]))
+ok(near(mde_from_se(1.0, NA), 2.801585, 1e-6), "mde: missing df falls back to normal quantiles")
+ok(is.na(mde_from_se(NA, 10)) && is.na(mde_from_se(0, 10)) && is.na(mde_from_se(1, 0)),
+   "mde: NA for missing/zero SE or non-positive df")
+ok(identical(.mde_reference_weights(c(A = -1, B = 1), "B"), c(A = 0, B = 1)),
+   "reference weights: the design reference when the contrast weights it")
+ok(isTRUE(all.equal(.mde_reference_weights(c(A = 1, B = -0.5, C = -0.5), NULL),
+                    c(A = 0, B = 0.5, C = 0.5))),
+   "reference weights: otherwise the |w|-weighted negative side")
+ok(is.null(.mde_reference_weights(c(A = 1, B = 1), NULL)), "reference weights: none without a negative side")
+
+# mde_percent boundary: blank when |reference mean| < residual SD, computed at or above
+bnd <- .add_mde(data.frame(SE = rep(1, 6), df = rep(10, 6)),
+                ref_mean = c(2 * (1 - 1e-9), 2, 2 * (1 + 1e-9), -2 * (1 - 1e-9), -2, 0),
+                resid_sd = 2)
+ok(is.na(bnd$mde_percent[1]) && is.na(bnd$mde_percent[4]) && is.na(bnd$mde_percent[6]),
+   "mde_percent blank when |reference mean| is just below one residual SD")
+ok(near(bnd$mde_percent[2], 100 * 3.107197 / 2, 1e-4) &&
+     near(bnd$mde_percent[3], 100 * 3.107197 / 2, 1e-4) &&
+     near(bnd$mde_percent[5], 100 * 3.107197 / 2, 1e-4),
+   "mde_percent computed at and just above one residual SD")
+ok(all(abs(bnd$mde - 3.107197) < 1e-6) && all(bnd$mde_note == ""),
+   "the residual-SD rule blanks only the percent, never the mde")
+ok(is.na(.add_mde(data.frame(SE = 1, df = 10), ref_mean = 5)$mde_percent),
+   "mde_percent blank without a residual SD to judge the reference by")
+
+mde_cols <- c("mde", "mde_percent", "mde_power", "mde_alpha", "mde_note")
+# contrast rows: mde from the row's own SE/df; percent of the WT_VEH emmean in the same ROI
+ok(all(mde_cols %in% names(new_con)), "contrast rows carry the mde columns")
+ok(isTRUE(all.equal(new_con$mde, mde_from_se(new_con$SE, new_con$df))),
+   "contrast mde = (qt(.975,df) + qt(.80,df)) * SE per row")
+ok(all(new_con$mde_power == 0.8 & new_con$mde_alpha == 0.05 & new_con$mde_note == ""),
+   "contrast rows: mde_power 0.8, mde_alpha 0.05, empty note")
+pc <- df[df$group %in% c("KO_VEH", "WT_VEH"), ]
+pc$grp <- factor(pc$group, levels = c("KO_VEH", "WT_VEH"))
+gold_ed <- as.data.frame(emmeans::emmeans(suppressMessages(
+  lmer(dv ~ grp * roi + (1 | subject), data = pc)), ~ grp | roi))
+for (r in rois) {
+  wt <- gold_ed$emmean[gold_ed$grp == "WT_VEH" & gold_ed$roi == r]
+  row <- new_con[new_con$spatial == r, ]
+  ok(near(row$mde_percent, 100 * row$mde / abs(wt), 1e-6),
+     sprintf("mde_percent @ roi %s = 100*mde/|WT_VEH emmean| (%.2f%%)", r, row$mde_percent))
+}
+con_marg <- run_hypothesis(df, "ko_vs_wt", spec, dv_col = "dv", spatial_col = "roi",
+                           band_col = "band", marginal = TRUE)
+marg_wt <- as.data.frame(emmeans::emmeans(suppressMessages(
+  lmer(dv ~ grp * roi + (1 | subject),
+       data = transform(df, grp = relevel(factor(group, levels = groups), "WT_VEH")))),
+  ~ grp))
+ok(nrow(con_marg) == 1 &&
+     near(con_marg$mde_percent,
+          100 * con_marg$mde / abs(marg_wt$emmean[marg_wt$grp == "WT_VEH"]), 1e-6),
+   "marginal contrast: mde_percent against the WT_VEH emmean marginalized over ROI")
+ok(all(is.na(new_omni4$mde)) && all(new_omni4$mde_note == "not computed: omnibus F test"),
+   "omnibus rows: mde NA with a 'not computed' note")
+ok(near(new_reg$mde, mde_from_se(new_reg$SE, new_reg$df)) && is.na(new_reg$mde_percent) &&
+     new_reg$mde_note == "", "regression: slope mde computed, no percent")
+ok(isTRUE(all.equal(new_eq$mde, mde_from_se(new_eq$SE, new_eq$df))) && all(new_eq$mde_percent > 0),
+   "equivalence (TOST) rows carry mde and mde_percent")
+ok(all(!is.na(new_con$mde) | grepl("^not computed: ", new_con$mde_note)) &&
+     all(!is.na(new_omni4$mde) | grepl("^not computed: ", new_omni4$mde_note)),
+   "mde is never NA without a note")
+
+# legacy descriptive post-hoc tables (stats_utils.R): group_b's emmean is the reference
+ok(isTRUE(all.equal(ph_legacy$mde, mde_from_se(ph_legacy$SE, ph_legacy$df))) &&
+     isTRUE(all.equal(ph_legacy$mde_percent, 100 * ph_legacy$mde / abs(ph_legacy$emmean_b))) &&
+     all(ph_legacy$mde_note == ""),
+   "legacy run_posthoc_emmeans rows carry mde, percent of emmean_b")
+ph_glob <- run_posthoc_global(df[df$group %in% c("KO_VEH", "WT_VEH"), ], legacy_con,
+                              spatial_col = "roi", dv_col = "dv", dv_label = "dv")
+ok(nrow(ph_glob) == 1 && near(ph_glob$mde, mde_from_se(ph_glob$SE, ph_glob$df)) &&
+     near(ph_glob$mde_percent, 100 * ph_glob$mde / abs(ph_glob$emmean_b)),
+   sprintf("legacy run_posthoc_global row carries mde (%.3f, %.1f%% of emmean_b)",
+           ph_glob$mde, ph_glob$mde_percent))
+
+# directed edges (analytic contrast): reference WT_VEH cell mean; omnibus note
+de_ab_wt <- mean(ab$te[ab$group == "WT_VEH"])
+ok(near(de_ab$mde, mde_from_se(de_ab$SE, de_ab$df)) &&
+     near(de_ab$mde_percent, 100 * de_ab$mde / abs(de_ab_wt)),
+   sprintf("directed edge A->B: mde %.3f, %.1f%% of the WT_VEH mean", de_ab$mde, de_ab$mde_percent))
+ok(all(de_om$mde_note == "not computed: omnibus F test") && all(is.na(de_om$mde)),
+   "directed-edge omnibus rows: note, no mde")
+
 cat("\nAll hypothesis-layer checks passed.\n")

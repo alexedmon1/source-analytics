@@ -252,7 +252,97 @@ weight_vector <- function(hyp, levels) {
   has_sp <- nlevels(d$.sp) > 1
   sp_term <- if (has_sp) " * .sp" else ""
   f <- as.formula(paste0(".dv ~ .grp", sp_term, cov_terms, " + (1 | subject)"))
-  list(fit = suppressMessages(lmer(f, data = d)), data = d, has_sp = has_sp)
+  ref <- if (!is.null(spec$reference) && spec$reference %in% groups) spec$reference else NULL
+  list(fit = suppressMessages(lmer(f, data = d)), data = d, has_sp = has_sp,
+       reference = ref)
+}
+
+# ---- Minimum detectable effect (power at the fitted design) -----------------
+# Every tabular row says how large a true difference this design would have
+# detected, so a null reads as "nothing as large as X" rather than as absence
+# (DUET #151, which reads each finding's size against it). The number has to come
+# from here: only the fitted model holds the SE and df the design produced, with
+# its covariates and random term. Power 0.80 at two-sided alpha 0.05, NOMINAL --
+# no multiple-comparison correction, by the user's decision; q_value is a separate
+# column and the MDE does not try to anticipate it.
+#
+#   mde         = (qt(1 - alpha/2, df) + qt(power, df)) * SE   (normal quantiles
+#                 when df is NA or Inf, i.e. emmeans' asymptotic fallback)
+#   mde_percent = 100 * mde / |reference mean| (contrast/TOST rows only), blank
+#                 when |reference mean| < residual SD (sigma of the fitted model):
+#                 for change scores, centred measures, dB or log ratios a percent of
+#                 a near-zero mean is a huge meaningless number. Shared rule with
+#                 neurofaune / neurovrai.
+#   mde_power, mde_alpha  constants, so the CSV describes itself
+#   mde_note    "" when computed, else "not computed: <reason>"; mde is never NA
+#               without one
+#
+# The Python side (source_analytics/hypothesis/power.py) writes the same columns
+# by the same formula, and the contract is shared with neurofaune and neurovrai;
+# tests/test_hypothesis.R and tests/test_power.py pin the same reference values.
+# This tool keeps its existing `SE` column: it IS the contract's `se`.
+MDE_POWER <- 0.80
+MDE_ALPHA <- 0.05
+
+#' Minimum detectable effect from a standard error and degrees of freedom.
+#' Vectorized; NA where se is not a positive finite number or df <= 0.
+mde_from_se <- function(se, df = Inf, alpha = MDE_ALPHA, power = MDE_POWER) {
+  se <- as.numeric(se); df <- as.numeric(df)
+  n <- max(length(se), length(df))
+  if (n == 0) return(numeric(0))
+  se <- rep_len(se, n); df <- rep_len(df, n)
+  normal <- is.na(df) | is.infinite(df)
+  q <- rep(qnorm(1 - alpha / 2) + qnorm(power), n)
+  tdf <- !normal & df > 0
+  q[tdf] <- qt(1 - alpha / 2, df[tdf]) + qt(power, df[tdf])
+  q[!normal & !tdf] <- NA_real_
+  out <- q * se
+  out[is.na(se) | !is.finite(se) | se <= 0] <- NA_real_
+  out
+}
+
+#' Weights over group levels that define a contrast's reference mean.
+#' The design's reference level when the contrast weights it; otherwise the
+#' negative-weight side (|w|-weighted), the baseline the estimate is taken from
+#' (legacy group_a - group_b puts the reference in group_b). NULL when the
+#' contrast has no negative side (no baseline to scale by).
+.mde_reference_weights <- function(wv, reference = NULL) {
+  rw <- setNames(numeric(length(wv)), names(wv))
+  if (!is.null(reference) && reference %in% names(wv) && wv[[reference]] != 0) {
+    rw[[reference]] <- 1
+  } else if (any(wv < 0)) {
+    neg <- wv < 0
+    rw[neg] <- abs(wv[neg]) / sum(abs(wv[neg]))
+  } else {
+    return(NULL)
+  }
+  rw
+}
+
+#' Append the MDE columns to adapter rows (which carry SE and df).
+#' `note`: a reason the MDE is not computed for these rows (e.g. "omnibus F
+#' test"); `ref_mean`: the reference mean per row, NA where there is none;
+#' `resid_sd`: the fitted model's residual SD per row -- mde_percent is left NA
+#' when |ref_mean| < resid_sd (or either is missing).
+.add_mde <- function(res, ref_mean = NA_real_, resid_sd = NA_real_, note = NULL) {
+  n <- nrow(res)
+  if (n == 0) return(res)
+  if (!is.null(note)) {
+    res$mde <- NA_real_; res$mde_percent <- NA_real_
+    res$mde_power <- MDE_POWER; res$mde_alpha <- MDE_ALPHA
+    res$mde_note <- paste0("not computed: ", note)
+    return(res)
+  }
+  m <- mde_from_se(res$SE, res$df)
+  ref <- rep_len(as.numeric(ref_mean), n)
+  pct <- 100 * m / abs(ref)
+  sdv <- rep_len(as.numeric(resid_sd), n)
+  pct[is.na(m) | is.na(ref) | !is.finite(ref) | is.na(sdv) | !is.finite(sdv) |
+        abs(ref) < sdv] <- NA_real_
+  res$mde <- m; res$mde_percent <- pct
+  res$mde_power <- MDE_POWER; res$mde_alpha <- MDE_ALPHA
+  res$mde_note <- ifelse(is.na(m), "not computed: no finite standard error", "")
+  res
 }
 
 # ---- Kind adapters (emmeans) ----------------------------------------------
@@ -265,11 +355,12 @@ weight_vector <- function(hyp, levels) {
   df1 <- aov[".grp", "NumDF"]; df2 <- aov[".grp", "DenDF"]
   o2 <- tryCatch(as.numeric(effectsize::F_to_omega2(fF, df1, df2)[1]),
                  error = function(e) NA_real_)
-  data.frame(spatial = NA_character_, estimate = NA_real_, SE = NA_real_,
-             df = df2, df_num = df1, stat = fF, stat_type = "F", p_value = p,
-             estimate_lcl = NA_real_, estimate_ucl = NA_real_,
-             effect_size = o2, effect_size_type = "omega2_partial",
-             stringsAsFactors = FALSE)
+  .add_mde(data.frame(spatial = NA_character_, estimate = NA_real_, SE = NA_real_,
+                      df = df2, df_num = df1, stat = fF, stat_type = "F", p_value = p,
+                      estimate_lcl = NA_real_, estimate_ucl = NA_real_,
+                      effect_size = o2, effect_size_type = "omega2_partial",
+                      stringsAsFactors = FALSE),
+           note = "omnibus F test")
 }
 
 # emmeans falls back to ASYMPTOTIC (z) inference when n_obs exceeds the
@@ -299,7 +390,21 @@ weight_vector <- function(hyp, levels) {
   # Pairwise endpoints (positive- vs negative-weight group) for legacy figures
   # that draw between-group brackets. NA when the contrast is not a clean pair.
   pos <- glev[wv > 0]; neg <- glev[wv < 0]
-  data.frame(
+  # Reference mean for mde_percent: the reference group's emmean in the same
+  # cell (or the weighted negative side when the contrast leaves it out).
+  rw <- .mde_reference_weights(wv, fo$reference)
+  ed <- as.data.frame(emm)
+  ref_mean <- if (is.null(rw)) {
+    NA_real_
+  } else if (per_sp) {
+    vapply(as.character(cd$.sp), function(s) {
+      e <- ed[as.character(ed$.sp) == s, , drop = FALSE]
+      sum(rw[as.character(e$.grp)] * e$emmean)
+    }, numeric(1), USE.NAMES = FALSE)
+  } else {
+    sum(rw[as.character(ed$.grp)] * ed$emmean)
+  }
+  .add_mde(data.frame(
     spatial = if (per_sp) as.character(cd$.sp) else NA_character_,
     estimate = cd$estimate, SE = cd$SE, df = .emm_df(cd), df_num = 1,
     stat = .emm_stat(cd), stat_type = "t", p_value = cd$p.value,
@@ -308,7 +413,7 @@ weight_vector <- function(hyp, levels) {
     group_a = if (length(pos) == 1) pos else NA_character_,
     group_b = if (length(neg) == 1) neg else NA_character_,
     stringsAsFactors = FALSE
-  )
+  ), ref_mean = ref_mean, resid_sd = resid_sd)
 }
 
 #' Slope of dv on a continuous predictor (standardized beta). emtrends.
@@ -332,7 +437,9 @@ weight_vector <- function(hyp, levels) {
   slope <- cd[[".x.trend"]]
   cd_df <- .emm_df(cd)
   tstat <- slope / cd$SE
-  data.frame(
+  # mde is the smallest slope detectable (dv units per predictor unit); a slope
+  # has no reference mean, so mde_percent stays NA.
+  .add_mde(data.frame(
     spatial = if (by_grp) as.character(cd$.grp) else NA_character_,
     estimate = slope, SE = cd$SE, df = cd_df, df_num = 1,
     stat = tstat, stat_type = "t",
@@ -340,7 +447,7 @@ weight_vector <- function(hyp, levels) {
     estimate_lcl = .emm_lcl(cd), estimate_ucl = .emm_ucl(cd),
     effect_size = slope * sdx / sdy, effect_size_type = "std_beta",
     stringsAsFactors = FALSE
-  )
+  ))
 }
 
 #' Equivalence (TOST) on a weighted contrast. Reuses stats_utils primitives.
@@ -516,8 +623,9 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
 #' reference-grid overhead is prohibitive. `tests/test_hypothesis.R` pins this
 #' against a hand-fit emmeans contrast. `fit` is an `lm` (one obs per subject per
 #' cell -> a (1|subject) term would be singular); `d` is that cell's data with
-#' `.dv`/`.grp`; `glev` the group levels in fit order.
-.adapt_cell <- function(fit, hyp, glev, d) {
+#' `.dv`/`.grp`; `glev` the group levels in fit order; `reference` the design's
+#' reference level (if fitted), whose cell mean scales mde_percent.
+.adapt_cell <- function(fit, hyp, glev, d, reference = NULL) {
   resid_sd <- sigma(fit)
   if (hyp$kind == "omnibus") {
     aov <- anova(fit)
@@ -526,12 +634,13 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
     df1 <- aov[rn, "Df"]; df2 <- aov["Residuals", "Df"]
     o2 <- tryCatch(as.numeric(effectsize::F_to_omega2(fF, df1, df2)[1]),
                    error = function(e) NA_real_)
-    return(data.frame(estimate = NA_real_, SE = NA_real_, df = df2, df_num = df1,
-                      stat = fF, stat_type = "F", p_value = p,
-                      estimate_lcl = NA_real_, estimate_ucl = NA_real_,
-                      effect_size = o2, effect_size_type = "omega2_partial",
-                      group_a = NA_character_, group_b = NA_character_,
-                      stringsAsFactors = FALSE))
+    return(.add_mde(data.frame(estimate = NA_real_, SE = NA_real_, df = df2, df_num = df1,
+                               stat = fF, stat_type = "F", p_value = p,
+                               estimate_lcl = NA_real_, estimate_ucl = NA_real_,
+                               effect_size = o2, effect_size_type = "omega2_partial",
+                               group_a = NA_character_, group_b = NA_character_,
+                               stringsAsFactors = FALSE),
+                    note = "omnibus F test"))
   }
   wv <- weight_vector(hyp, glev)
   gm <- tapply(d$.dv, d$.grp, mean)[glev]
@@ -551,6 +660,9 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
     group_a = if (length(pos) == 1) pos else NA_character_,
     group_b = if (length(neg) == 1) neg else NA_character_,
     stringsAsFactors = FALSE)
+  rw <- .mde_reference_weights(wv, reference)
+  res <- .add_mde(res, ref_mean = if (is.null(rw)) NA_real_ else sum(rw * gm),
+                  resid_sd = resid_sd)
   if (hyp$kind == "equivalence") {
     m <- .equivalence_margin(hyp$margin, NA_real_, resid_sd)
     res$margin_used <- m
@@ -626,7 +738,9 @@ run_directed_edges <- function(data, hyps, spec,
           need <- names(hyp$weights)[hyp$weights != 0]
           if (!all(need %in% glev)) next
         }
-        res <- tryCatch(.adapt_cell(fit, hyp, glev, d), error = function(e) NULL)
+        ref <- if (!is.null(spec$reference) && spec$reference %in% glev) spec$reference else NULL
+        res <- tryCatch(.adapt_cell(fit, hyp, glev, d, reference = ref),
+                        error = function(e) NULL)
         if (is.null(res) || nrow(res) == 0) next
         res$hypothesis <- hyp$name; res$kind <- hyp$kind
         res$role <- hyp$role; res$label <- hyp$label; res$test <- hyp$test

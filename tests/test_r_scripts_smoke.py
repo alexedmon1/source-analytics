@@ -50,6 +50,21 @@ def _run(script: str, data_dir: Path, config: Path, out: Path, *extra: str) -> s
     return res.stdout + res.stderr
 
 
+def _assert_mde(df: pd.DataFrame) -> None:
+    """Every hypothesis row carries the MDE contract (DUET #151): a positive mde on
+    contrast rows, a "not computed" note wherever mde is blank, 0.80 / 0.05."""
+    assert {"SE", "df", "mde", "mde_percent", "mde_power", "mde_alpha", "mde_note"} <= set(df.columns)
+    assert (df["mde_power"] == 0.8).all() and (df["mde_alpha"] == 0.05).all()
+    note = df["mde_note"].fillna("").astype(str)
+    assert note[df["mde"].isna()].str.startswith("not computed: ").all()
+    if "kind" in df.columns:
+        con = df[df["kind"] == "contrast"]
+        assert (con["mde"] > 0).all()
+        # mde_percent is blank where the reference mean is within one residual SD of 0
+        assert (con["mde_percent"].dropna() > 0).all() and con["mde_percent"].notna().any()
+        assert (note[df["kind"] == "omnibus"] == "not computed: omnibus F test").all()
+
+
 @pytest.fixture
 def design_config(tmp_path) -> Path:
     """A modern config: design:/hypotheses: only, no legacy contrasts: block."""
@@ -97,6 +112,7 @@ def test_evoked_scripts_derive_contrasts_from_design_spec(tmp_path, design_confi
         omnibus = pd.read_csv(out / "tables" / f"{level}_evoked_omnibus.csv")
         assert len(omnibus) > 0, "descriptive LMM table is empty — contrast loop did not run"
         assert set(omnibus["contrast"]) == {"disease_effect"}
+        _assert_mde(pd.read_csv(out / "tables" / f"{level}_evoked_posthoc_global.csv"))
 
 
 def test_connectivity_script_runs_on_single_metric_csv(tmp_path, design_config):
@@ -149,6 +165,7 @@ def test_cross_freq_edges_script_writes_hypothesis_tables(tmp_path, design_confi
             df = pd.read_csv(path)
             assert {"hypothesis", "kind", "band", "q_value", "significant"} <= set(df.columns)
             assert set(df["band"]) <= {f"{pb}-{ab}" for pb, ab in pairs}
+            _assert_mde(df)
     # PPC carries the surrogate z as a second DV
     ppc_edges = pd.read_csv(tbl / "roi_cross_freq_ppc_directed_edges_hypotheses.csv")
     assert set(ppc_edges["dv"]) == {"ppc", "ppc_z"}
@@ -185,6 +202,8 @@ def test_directed_script_uses_canonical_prefix_and_tests_every_dv(tmp_path, desi
         assert (tbl / name).exists(), name
     edges = pd.read_csv(tbl / "roi_directed_directed_edges_hypotheses.csv")
     assert set(edges["dv"]) == set(cols)
+    _assert_mde(edges)
+    _assert_mde(pd.read_csv(tbl / "roi_directed_global_hypotheses.csv"))
 
 
 # ---------------------------------------------------------------------------
