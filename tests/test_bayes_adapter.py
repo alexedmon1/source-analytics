@@ -95,7 +95,7 @@ def test_unknown_analysis_and_dv(cfg):
 
 
 def test_r_scripts_parse():
-    for f in ("bayes_hypothesis.R", "bayes_analysis.R"):
+    for f in ("bayes_hypothesis.R", "bayes_analysis.R", "bayes_gate.R"):
         r = subprocess.run(["Rscript", "-e", f"invisible(parse(file='{R_DIR / f}'))"], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
 
@@ -168,3 +168,19 @@ def test_design_columns_give_group_levels():
       isTRUE(all.equal(as.numeric(fx), lev)) })
     cat(all(ok))""")
     assert out == ["TRUE"]
+
+
+def test_estimand_rhat_ignores_a_ridge_no_contrast_sees():
+    """R-hat on what is decided (2026-10-21): two parameters that trade a chain-specific constant (a level against
+    a roi:band offset, held only by the prior) each fail R-hat, while their sum, the identified direction, passes."""
+    code = f"""
+    suppressMessages({{ source('{R_DIR / "hypothesis.R"}'); source('{R_DIR / "bayes_hypothesis.R"}') }})
+    set.seed(3); ch <- rep(1:4, each = 1000); u <- c(-1, -0.3, 0.4, 1)[ch]
+    a <- rnorm(4000) + u; b <- rnorm(4000) - u
+    cat(.estimand_conv(a, ch)[['rhat']], .estimand_conv(b, ch)[['rhat']], .estimand_conv(a + b, ch)[['rhat']],
+        BAYES_RHAT_MAX)
+    """
+    r = subprocess.run(["Rscript", "-e", code], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    ra, rb, rsum, rule = map(float, r.stdout.split())
+    assert ra > rule and rb > rule and rsum < 1.01

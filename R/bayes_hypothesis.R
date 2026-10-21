@@ -40,6 +40,7 @@ BAYES_W_EFFECT_SD <- 1  # W: every pairwise group contrast a priori N(0, 1), Tra
 BAYES_W_LEVEL_SD <- BAYES_W_EFFECT_SD / sqrt(2)   # ... from independent group levels N(0, 1/sqrt(2)) (2026-10-19)
 BAYES_CODING <- "group-levels-2026-10-19"   # fixed-effect parametrisation; a gate verdict attaches only to fits of the same
 BAYES_SD_ROI_BAND <- 3  # ROI level per band, half-N(0, 3): FORGE source power ROI means spread 0.9-3.0 SD (the Conductor, 2026-10-15; was 0.5)
+BAYES_RHAT_MAX <- 1.05  # convergence rule, on what is decided: estimands and scales (the Conductor, 2026-10-21; .estimand_conv)
 
 .safe <- function(x) gsub("[^A-Za-z0-9]", "", x)
 
@@ -178,6 +179,22 @@ bayes_fit <- function(prep, chains = 4, iter = 2000, warmup = 1000, seed = 1,
   out
 }
 
+#' Convergence of what is decided (the Conductor, 2026-10-21): R-hat and bulk ESS of one estimand's draws, split by
+#' chain. The max R-hat over every parameter includes directions the data do not identify: a per-band constant trades
+#' between the group levels and the (1 | roi:band) offsets, held only by the prior (FORGE power recovery rep 9: raw max
+#' 1.076 on Low Gamma's offsets and levels, every pairwise contrast <= 1.02; bayes-sl R/g1_power_rhat_directions.R).
+#' No contrast sees that direction, so the raw max is reported, not gated.
+.estimand_conv <- function(x, chain) {
+  m <- do.call(cbind, split(x, chain))                     # iterations x chains
+  c(rhat = posterior::rhat(m), ess_bulk = posterior::ess_bulk(m))
+}
+
+#' Max R-hat of the scale parameters (every SD and the per-band log sigma), and over every parameter (reported only).
+.scale_conv <- function(fit) {
+  rh <- rhat(fit)
+  c(max_rhat_scale = max(rh[grepl("^(sd_|b_sigma_)", names(rh))], na.rm = TRUE), max_rhat_raw = max(rh, na.rm = TRUE))
+}
+
 .decide <- function(x, prior0, rope) {
   h <- .hdi(x)
   bf10 <- prior0 / max(.dens0(x), 1e-12)
@@ -202,7 +219,9 @@ bayes_readout <- function(fit, prep, spec, rope_sd = BAYES_ROPE_SD, hypotheses =
   set.seed(1)
   pd <- .prior_effect_draws(prep)
   np <- nuts_params(fit)
-  diag <- list(max_rhat = max(rhat(fit), na.rm = TRUE), n_divergent = sum(np$Value[np$Parameter == "divergent__"]))
+  sc <- .scale_conv(fit)
+  diag <- list(max_rhat = sc[["max_rhat_raw"]], max_rhat_scale = sc[["max_rhat_scale"]],
+               n_divergent = sum(np$Value[np$Parameter == "divergent__"]))
   hyps <- spec$hypotheses
   if (!is.null(hypotheses)) hyps <- hyps[hypotheses]
   rows <- list()
@@ -234,6 +253,8 @@ bayes_readout <- function(fit, prep, spec, rope_sd = BAYES_ROPE_SD, hypotheses =
         } else {
           res <- .decide(x, .dens0(x0), rope_sd)
         }
+        cv <- .estimand_conv(x, dr$.chain)
+        res$rhat <- cv[["rhat"]]; res$ess_bulk <- cv[["ess_bulk"]]
         rows[[length(rows) + 1]] <- cbind(base, band = prep$band_labels[[b]] %||% b,
                                           spatial = if (sp == "all") "ROI-average" else sp, res, status = "ok")
       }
@@ -241,6 +262,7 @@ bayes_readout <- function(fit, prep, spec, rope_sd = BAYES_ROPE_SD, hypotheses =
   }
   out <- dplyr::bind_rows(rows)
   out$fdr_family <- "none (partial pooling across ROIs)"
-  out$max_rhat <- diag$max_rhat; out$n_divergent <- diag$n_divergent
+  out$max_rhat_scale <- diag$max_rhat_scale
+  out$max_rhat <- diag$max_rhat; out$n_divergent <- diag$n_divergent   # max_rhat: over every parameter, reported only
   out
 }

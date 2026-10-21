@@ -49,7 +49,11 @@ for (set in unlist(job$prior_sets)) {
   r$gate_passed <- gate_verdict(set)
   if (!isTRUE(r$gate_passed[1])) cat("bayes: WARNING: no passed gate for set", set, "at this design\n")
   rows[[length(rows) + 1]] <- r
-  cat(sprintf("bayes: %s set %s done (max rhat %.3f, %d divergent)\n", job$dv, set, r$max_rhat[1], r$n_divergent[1]))
+  ok <- r$status == "ok"
+  cat(sprintf("bayes: %s set %s done (R-hat: estimands max %.3f, scales %.3f, raw %.3f; %d divergent)\n", job$dv, set,
+              max(r$rhat[ok]), r$max_rhat_scale[1], r$max_rhat[1], r$n_divergent[1]))
+  if (max(r$rhat[ok]) >= BAYES_RHAT_MAX || r$max_rhat_scale[1] >= BAYES_RHAT_MAX)
+    cat("bayes: WARNING: R-hat of an estimand or scale >=", BAYES_RHAT_MAX, "for set", set, "\n")
 }
 out <- dplyr::bind_rows(rows)
 if (file.exists(job$table_out)) {

@@ -104,8 +104,10 @@ estimand_table <- function(prep, p, fit) {
                             prep, b, w)
       x0 <- .contrast_draws(pd$b, if (sp == "all") NULL else pd$r, prep, b, w)
       dec <- .decide(x, .dens0(x0), job$rope_sd)
+      cv <- .estimand_conv(x, dr$.chain)
       out[[length(out) + 1]] <- data.frame(hypothesis = hyp$name, band = b, spatial = sp, truth = t0,
                                            rank = sum(x[keep] < t0), mean = mean(x), sd = sd(x),
+                                           rhat = cv[["rhat"]], ess_bulk = cv[["ess_bulk"]],
                                            covered = as.numeric(t0 >= dec$hdi_lo & t0 <= dec$hdi_hi),
                                            claim_effect = as.numeric(dec$decision == "effect"),
                                            claim_dir = as.numeric(dec$p_direction >= 0.975),
@@ -114,7 +116,9 @@ estimand_table <- function(prep, p, fit) {
   }
   np <- nuts_params(fit)
   res <- dplyr::bind_rows(out)
-  res$max_rhat <- max(rhat(fit), na.rm = TRUE); res$n_div <- sum(np$Value[np$Parameter == "divergent__"])
+  sc <- .scale_conv(fit)
+  res$max_rhat_scale <- sc[["max_rhat_scale"]]; res$max_rhat <- sc[["max_rhat_raw"]]   # max_rhat: raw, reported only
+  res$n_div <- sum(np$Value[np$Parameter == "divergent__"])
   res
 }
 
@@ -207,7 +211,9 @@ if (opt$mode == "prior_pred") {
                               n_estimands = nrow(u), min_p_roi_average = min(avg$chisq_p),
                               bonferroni = 0.01 / nrow(avg), min_coverage_roi_average = min(avg$coverage),
                               median_coverage_cells = median(u$coverage[u$spatial != "all"]),
-                              max_rhat = max(sbc$max_rhat), divergent_fit_frac = mean(tapply(sbc$n_div > 0, sbc$rep, any)),
+                              max_rhat_raw = max(sbc$max_rhat),
+                              max_rhat_estimands = if ("rhat" %in% names(sbc)) max(sbc$rhat) else NA,
+                              divergent_fit_frac = mean(tapply(sbc$n_div > 0, sbc$rep, any)),
                               pass = min(avg$chisq_p) > 0.01 / nrow(avg) && min(avg$coverage) >= 0.85)
   }
   nul <- read_mode("^null_")
@@ -222,11 +228,20 @@ if (opt$mode == "prior_pred") {
   }
   rec <- read_mode("^recovery_")
   if (!is.null(rec)) {
+    # R-hat on what is decided (the Conductor, 2026-10-21): every estimand (ROI-average and cells) and the scales; the
+    # max over every parameter is reported, not gated (.estimand_conv). Reps from before the rule have no estimand
+    # R-hat and are refused rather than read as passing.
+    if (!all(c("rhat", "max_rhat_scale") %in% names(rec)) || anyNA(rec$rhat))
+      stop("bayes gate: recovery reps without per-estimand R-hat (written before 2026-10-21); delete them and rerun")
     avg <- rec[rec$spatial == "all", ]
     verdict$rules$recovery <- list(n_reps = length(unique(rec$rep)), coverage_roi_average = mean(avg$covered),
                                    coverage_cells = mean(rec$covered[rec$spatial != "all"]),
-                                   mean_abs_error = mean(abs(avg$mean - avg$truth)), max_rhat = max(rec$max_rhat),
-                                   pass = mean(avg$covered) >= 0.85 && max(rec$max_rhat) < 1.05)
+                                   mean_abs_error = mean(abs(avg$mean - avg$truth)),
+                                   max_rhat_estimands = max(rec$rhat), max_rhat_roi_average = max(avg$rhat),
+                                   max_rhat_scale = max(rec$max_rhat_scale), min_ess_bulk_estimands = min(rec$ess_bulk),
+                                   max_rhat_raw = max(rec$max_rhat), rhat_max = BAYES_RHAT_MAX,
+                                   pass = mean(avg$covered) >= 0.85 && max(rec$rhat) < BAYES_RHAT_MAX &&
+                                     max(rec$max_rhat_scale) < BAYES_RHAT_MAX)
   }
   verdict$passed <- length(verdict$rules) == 4 && all(vapply(verdict$rules, function(r) isTRUE(r$pass), logical(1)))
   write(toJSON(verdict, auto_unbox = TRUE, pretty = TRUE, digits = 4), file.path(GDIR, sprintf("gate%s.json", SFX)))

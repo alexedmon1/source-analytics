@@ -83,8 +83,12 @@ z ~ 0 + band + band:grp                                   group effect per band 
 
 ```
 hypothesis, kind, role, band, spatial, dv, prior_set, estimate (posterior median), hdi_lo, hdi_hi, p_direction,
-p_rope, rope_lo, rope_hi, log10_bf10, decision, max_rhat, n_divergent, min_ess_bulk, gate_passed, label
+p_rope, rope_lo, rope_hi, log10_bf10, decision, rhat, ess_bulk, max_rhat_scale, max_rhat, n_divergent,
+gate_passed, label
 ```
+
+`rhat` and `ess_bulk` are the row's estimand's own (its draws split by chain); `max_rhat_scale` is the max over every
+SD and log sigma; `max_rhat` is the max over every parameter, reported only (section 6, convergence).
 
 Fits, the prior table used and the gate summary go to `data/bayes/` (provenance).
 
@@ -132,6 +136,20 @@ At the study's actual design (subjects per group, ROIs, bands), before any real 
    the truth among 100 thinned draws. Covers every hypothesis estimand, per band and per cell. Uniformity by
    chi-square, and coverage of the 95% HDI.
 3. **Null:** every group effect 0. Rates of each decision rule claiming an effect, per hypothesis.
+4. **Recovery:** at the full design and the job's real-fit chains/iter/warmup. HDI coverage of the ROI-average
+   estimands at least 0.85, and convergence (below).
+
+**Convergence: R-hat on what is decided (the Conductor, 2026-10-21).** The rule is R-hat < 1.05 (`BAYES_RHAT_MAX`)
+for every estimand (each hypothesis x band, ROI-average and cell, computed on its draws split by chain) and for every
+scale parameter (SDs, log sigma). The max over every parameter is reported as `max_rhat_raw` and not gated.
+- **Why:** the model has a direction the data do not identify. A per-band constant trades between the group levels
+  and the `(1 | roi:band)` offsets, held only by the prior, and no contrast sees it.
+- **Case:** FORGE power recovery W, rep 9 (bayes-sl `R/g1_power_rhat_diag.R`, `R/g1_power_rhat_directions.R`). All 26
+  Low Gamma offsets and 4 levels were at 1.07-1.076, moving together with bulk ESS about 50. Every pairwise contrast
+  was at or below 1.016 (min bulk ESS 295); the band's grand level was at or below 1.01; scales were at or below 1.021.
+- **Consequence:** absolute group levels mix slowly. A report that shows levels rather than contrasts has to check
+  their own R-hat.
+- Recovery reps written before the rule carry no estimand R-hat; `summarize` refuses them.
 
 **One template per prior set.** brms writes prior values into the compiled Stan code, and `update(..., recompile =
 FALSE)` keeps the template's priors whatever `prior =` says. The gate compiles one template per set and design
