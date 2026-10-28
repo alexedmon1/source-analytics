@@ -96,9 +96,14 @@ for (cs in cases) {
     for (set in unlist(L$job$prior_sets)) {
       sfx <- if (set == "W") "" else paste0("_", set)
       out <- system2("Rscript", c(gate_r, "--job", jf, "--mode", "summarize", "--set", set), stdout = TRUE, stderr = TRUE)
-      a <- readLines(file.path(wd, "gate", L$job$dv, sprintf("gate%s.json", sfx)))
-      b <- readLines(file.path(gd, sprintf("stored_gate%s.json", sfx)))
-      if (!identical(a, b)) fail <- c(fail, sprintf("%s %s: gate verdict differs", cs, set))
+      # the verdict's rules and pass/fail, byte for byte; provenance fields added since E0 (E3: gate_id,
+      # gate_inputs, engine_version, versions, complete) are not part of the fixture
+      strip <- function(f) { x <- fromJSON(f, simplifyVector = FALSE)
+        x[setdiff(names(x), c("gate_id", "gate_inputs", "engine_version", "versions", "complete"))] }
+      a <- strip(file.path(wd, "gate", L$job$dv, sprintf("gate%s.json", sfx)))
+      b <- strip(file.path(gd, sprintf("stored_gate%s.json", sfx)))
+      if (!identical(toJSON(a, auto_unbox = TRUE, digits = NA), toJSON(b, auto_unbox = TRUE, digits = NA)))
+        fail <- c(fail, sprintf("%s %s: gate verdict differs", cs, set))
       cat(sprintf("%s %s: gate verdict checked\n", cs, set))
     }
   }

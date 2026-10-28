@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +32,8 @@ class BayesJob:
     iter: int
     warmup: int
     seed: int
+    gate_settings: dict = dataclasses.field(default_factory=dict)   # bayes.gate: part of the gate id (E3)
+    provenance: dict = dataclasses.field(default_factory=dict)      # package, study and prior files (the manifest)
 
 
 def design_payload(config: StudyConfig) -> tuple[dict, list[dict]]:
@@ -56,12 +59,13 @@ def resolve_paths(config: StudyConfig, analysis: str) -> tuple[Path, Path, Path]
 
 def build_job(config: StudyConfig, analysis: str, dv: str, bayes: BayesConfig | None = None,
               hypotheses: list[str] | None = None, prior_sets: tuple[str, ...] | None = None, gate: bool = False,
-              out_dir: Path | None = None) -> BayesJob:
+              out_dir: Path | None = None, study_path: Path | None = None) -> BayesJob:
     """One job. Everything that changes a number comes from ``bayes`` (the study's ``bayes:`` block, bayes/config.py;
     default: parsed from ``config.raw`` with paths relative to the working directory). The other arguments say what
     to run and where: ``hypotheses`` and ``prior_sets`` select from what the study declares; ``out_dir`` redirects the
     table and the fits (``<out_dir>/<analysis>_hypotheses_bayes.csv``, ``<out_dir>/bayes/``) away from the study
-    tree, e.g. when the study's results are frozen. Set I is dropped when its file has no entry for ``dv``."""
+    tree, e.g. when the study's results are frozen. Set I is dropped when its file has no entry for ``dv``.
+    ``study_path`` (the study YAML) is hashed into the job's provenance for the manifest."""
     if bayes is None:
         bayes = parse_bayes_config(config.raw.get("bayes"), Path.cwd())
     tab = BAYES_TABLES.get(analysis)
@@ -89,8 +93,28 @@ def build_job(config: StudyConfig, analysis: str, dv: str, bayes: BayesConfig | 
             raise ValueError(f"bayes: prior set(s) {', '.join(sorted(extra))} not in the study's bayes.prior_sets")
         sets = [s for s in sets if s in prior_sets]
     sets = [s for s in sets if s != "I" or info is not None]
-    f = bayes.fit
+    f, g = bayes.fit, bayes.gate
+    gate_settings = {"sbc": g.sbc, "null": g.null, "recovery": g.recovery,
+                     "reduced_bands": list(g.reduced_bands) if g.reduced_bands and tab.band_col else None}
+    provenance = {"source_analytics": _package(),
+                  "study": _file_record(study_path),
+                  "informative": _file_record(bayes.informative) if "I" in sets else None}
     return BayesJob(data_csv=str(csv), dv=dv, spatial_col=tab.spatial_col, band_col=tab.band_col, design=design,
                     hypotheses=hyps, prior_sets=sets, informative=info, rope_sd=bayes.rope_sd,
                     table_out=str(tbl_dir / f"{analysis}_hypotheses_bayes.csv"), work_dir=str(work), gate=gate,
-                    chains=f.chains, iter=f.iter, warmup=f.warmup, seed=f.seed)
+                    chains=f.chains, iter=f.iter, warmup=f.warmup, seed=f.seed, gate_settings=gate_settings,
+                    provenance=provenance)
+
+
+def _file_record(path: Path | None) -> dict | None:
+    if path is None:
+        return None
+    path = Path(path).resolve()
+    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def _package() -> dict:
+    from .. import __version__
+    from .._version import git_describe
+
+    return {"version": __version__, "git_describe": git_describe()}

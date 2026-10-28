@@ -162,6 +162,15 @@ run_reps <- function(mode, bands) {
 }
 
 bands <- if (is.null(opt$bands)) NULL else trimws(strsplit(opt$bands, ",")[[1]])
+GS <- bayes_gate_settings(job)                 # the study's bayes.gate (E3); absent in pre-E3 job files
+LEGACY <- is.null(job$gate_settings)
+if (!LEGACY) {
+  if (opt$mode %in% c("sbc", "null", "recovery") && opt$reps != GS[[opt$mode]])
+    stop(sprintf("bayes gate: --reps %d differs from the study's bayes.gate.reps.%s (%d)", opt$reps, opt$mode,
+                 GS[[opt$mode]]))
+  if (opt$mode %in% c("sbc", "null") && !identical(bands, GS$reduced_bands))
+    stop("bayes gate: --bands differs from the study's bayes.gate.reduced_bands")
+}
 if (opt$mode == "prior_pred") {
   prep <- design_rows()
   real <- prep$data$z
@@ -184,18 +193,25 @@ if (opt$mode == "prior_pred") {
 } else if (opt$mode == "recovery") {
   run_reps("recovery", NULL)
 } else if (opt$mode == "summarize") {
+  RU <- BAYES_GATE_RULES   # thresholds, locked defaults (B3), part of the gate id
+  red_tag <- paste(.safe(GS$reduced_bands %||% "all"), collapse = "-")
   read_mode <- function(pat) {
     ds <- list.dirs(GDIR, recursive = FALSE); ds <- ds[grepl(pat, basename(ds))]
+    if (!LEGACY) {                     # exactly the configured design's directory, not every run left in GDIR
+      tag <- if (pat == "^recovery_") "full" else red_tag
+      ds <- ds[basename(ds) == paste0(sub("^\\^", "", pat), tag, SFX)]
+    }
     ds <- if (SET == "W") ds[!grepl("_[A-Z]+$", basename(ds))] else ds[endsWith(basename(ds), SFX)]
     fs <- unlist(lapply(ds, list.files, full.names = TRUE))
     if (length(fs)) dplyr::bind_rows(lapply(fs, readRDS)) else NULL
   }
+  gid <- bayes_gate_id(design_rows(), job)
   verdict <- list(dv = job$dv, prior_set = SET, coding = BAYES_CODING, design = list(n_rows = nrow(dat)), rules = list())
   pp <- file.path(GDIR, sprintf("prior_pred%s.csv", SFX))
   if (file.exists(pp)) {
     x <- read.csv(pp)
     verdict$rules$prior_pred <- list(min_pctile = min(x$pctile), max_pctile = max(x$pctile),
-                                     pass = all(x$pctile >= 0.05 & x$pctile <= 0.95))
+                                     pass = all(x$pctile >= RU$prior_pred_lo & x$pctile <= RU$prior_pred_hi))
   }
   sbc <- read_mode("^sbc_")
   if (!is.null(sbc)) {
@@ -208,12 +224,12 @@ if (opt$mode == "prior_pred") {
     avg <- u[u$spatial == "all", ]
     verdict$rules$sbc <- list(n_reps = max(table(sbc$hypothesis)) / length(unique(paste(sbc$band, sbc$spatial))),
                               n_estimands = nrow(u), min_p_roi_average = min(avg$chisq_p),
-                              bonferroni = 0.01 / nrow(avg), min_coverage_roi_average = min(avg$coverage),
+                              bonferroni = RU$sbc_alpha / nrow(avg), min_coverage_roi_average = min(avg$coverage),
                               median_coverage_cells = median(u$coverage[u$spatial != "all"]),
                               max_rhat_raw = max(sbc$max_rhat),
                               max_rhat_estimands = if ("rhat" %in% names(sbc)) max(sbc$rhat) else NA,
                               divergent_fit_frac = mean(tapply(sbc$n_div > 0, sbc$rep, any)),
-                              pass = min(avg$chisq_p) > 0.01 / nrow(avg) && min(avg$coverage) >= 0.85)
+                              pass = min(avg$chisq_p) > RU$sbc_alpha / nrow(avg) && min(avg$coverage) >= RU$sbc_min_coverage)
   }
   nul <- read_mode("^null_")
   if (!is.null(nul)) {
@@ -223,7 +239,7 @@ if (opt$mode == "prior_pred") {
     verdict$rules$null <- list(max_claim_effect = max(avg$claim_effect), max_claim_dir = max(avg$claim_dir),
                                max_claim_bf3 = max(avg$claim_bf3),
                                cells_mean_claim_dir = mean(f$claim_dir[f$spatial != "all"]),
-                               pass = max(avg$claim_effect) <= 0.05 && max(avg$claim_dir) <= 0.10)
+                               pass = max(avg$claim_effect) <= RU$null_max_claim_effect && max(avg$claim_dir) <= RU$null_max_claim_dir)
   }
   rec <- read_mode("^recovery_")
   if (!is.null(rec)) {
@@ -239,10 +255,22 @@ if (opt$mode == "prior_pred") {
                                    max_rhat_estimands = max(rec$rhat), max_rhat_roi_average = max(avg$rhat),
                                    max_rhat_scale = max(rec$max_rhat_scale), min_ess_bulk_estimands = min(rec$ess_bulk),
                                    max_rhat_raw = max(rec$max_rhat), rhat_max = BAYES_RHAT_MAX,
-                                   pass = mean(avg$covered) >= 0.85 && max(rec$rhat) < BAYES_RHAT_MAX &&
-                                     max(rec$max_rhat_scale) < BAYES_RHAT_MAX)
+                                   pass = mean(avg$covered) >= RU$recovery_min_coverage && max(rec$rhat) < RU$rhat_max &&
+                                     max(rec$max_rhat_scale) < RU$rhat_max)
   }
-  verdict$passed <- length(verdict$rules) == 4 && all(vapply(verdict$rules, function(r) isTRUE(r$pass), logical(1)))
+  # every configured replication present (a resumable gate summarized half way must not pass)
+  found <- c(sbc = if (is.null(sbc)) 0L else length(unique(sbc$rep)), null = if (is.null(nul)) 0L else
+    length(unique(nul$rep)), recovery = if (is.null(rec)) 0L else length(unique(rec$rep)))
+  complete <- lapply(c(sbc = "sbc", null = "null", recovery = "recovery"), function(m)
+    list(found = found[[m]], wanted = GS[[m]]))
+  is_complete <- all(vapply(complete, function(x) x$found >= x$wanted, logical(1)))
+  verdict$passed <- length(verdict$rules) == 4 && all(vapply(verdict$rules, function(r) isTRUE(r$pass), logical(1))) &&
+    is_complete
+  verdict$complete <- complete
+  verdict$gate_id <- gid$id
+  verdict$gate_inputs <- gid$components
+  verdict$engine_version <- BAYES_ENGINE_VERSION
+  verdict$versions <- bayes_versions()
   write(toJSON(verdict, auto_unbox = TRUE, pretty = TRUE, digits = 4), file.path(GDIR, sprintf("gate%s.json", SFX)))
   cat(toJSON(verdict, auto_unbox = TRUE, pretty = TRUE, digits = 4), "\n")
 }

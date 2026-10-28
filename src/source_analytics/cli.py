@@ -815,8 +815,13 @@ def cmd_bayes(args):
     """Bayesian hypothesis adapter (docs/methods/BAYES_ENGINE.md): fits the declared hypotheses on a module's
     per-subject table with brms and writes ``<analysis>_hypotheses_bayes.csv``. Never touches frequentist output.
     Settings come from the study YAML's ``bayes:`` block; a bad block stops here, before R starts."""
-    from .bayes import BayesConfigError, build_job, parse_bayes_config, run_gate, run_job
+    from .bayes import BayesConfigError, build_job, check_env, parse_bayes_config, run_gate, run_job
 
+    if args.check_env:
+        sys.exit(check_env(None if args.check_env is True else Path(args.check_env)))
+    if not args.study:
+        print("ERROR: bayes needs --study (or --check-env)")
+        sys.exit(1)
     config = StudyConfig.from_yaml(args.study)
     try:
         bayes = parse_bayes_config(config.raw.get("bayes"), Path(args.study).resolve().parent)
@@ -851,7 +856,7 @@ def cmd_bayes(args):
         for dv in dvs:
             try:
                 job = build_job(cfg, analysis, dv, bayes, hypotheses=hyps, prior_sets=sets, gate=args.gate,
-                                out_dir=out)
+                                out_dir=out, study_path=args.study)
             except ValueError as exc:
                 print(f"ERROR: {exc}")
                 sys.exit(1)
@@ -859,7 +864,7 @@ def cmd_bayes(args):
                 print(f"WARNING: {analysis} / {dv}: the set-I file has no entry for this outcome; fitting W only")
             if args.gate:
                 g = bayes.gate
-                bands = list(g.reduced_bands) if g.reduced_bands else None
+                bands = job.gate_settings["reduced_bands"]    # None for a band-less outcome
                 print(f"bayes gate: {analysis} / {dv} (sbc/null bands: {bands or 'all'}; reps sbc,null,recovery "
                       f"= {g.reps}) -> {job.work_dir}/gate/{dv}/gate.json")
                 if run_gate(job, bands=bands, reps=g.reps, workers=args.workers) != 0:
@@ -1010,7 +1015,10 @@ def main():
         help="Bayesian hypothesis adapter (brms): posterior per declared hypothesis on a module's table "
              "(writes <analysis>_hypotheses_bayes.csv; see docs/methods/BAYES_ENGINE.md)",
     )
-    p_bayes.add_argument("--study", required=True, type=Path,
+    p_bayes.add_argument("--check-env", nargs="?", const=True, metavar="MANIFEST",
+                         help="Report R, the engine's R packages and CmdStan, and exit (1 if anything is missing); "
+                              "with a run's manifest, also list versions that differ from the ones it recorded")
+    p_bayes.add_argument("--study", type=Path,
                          help="Study YAML; its bayes: block holds every setting that changes a number "
                               "(BAYES_ENGINE.md section 2)")
     p_bayes.add_argument("--paradigm", help="Paradigm name (multi-paradigm configs)")

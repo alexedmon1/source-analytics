@@ -203,6 +203,32 @@ A gate result is cached per (spec hash, design hash, prior hash). The real-fit t
 - Options: install cmdstanr (within-chain threading, faster); run SBC per band subset; or a reduced SBC (100) with
   the null at 50.
 
+### 6.1 Gate ids, manifests and the environment (E3, 2026-10-28)
+
+**Gate id.** A gate belongs to one design and model. `gate.json` carries `gate_id`, a hash of: the engine version
+(`BAYES_ENGINE_VERSION`, bumped when the model, priors, readout or gate change what they compute), the coding, the prior
+set and its prior table, the design rows, the outcome values (the prior predictive reads them), the hypotheses, the
+ROPE (the null rule's claims use it), the gate settings (replications, reduced bands, recovery's sampler settings) and
+the thresholds (`BAYES_GATE_RULES`, locked defaults). Each component's hash is kept as `gate_inputs`. A real fit
+computes the id of its own design and records `gate_passed` (and `gate_id`) only for a gate with that id. Otherwise
+`gate_passed` is `NA`, with a warning naming what differs ("the gate was made for different prior table, ROPE"). Not in
+the id: the fit's seed, the package's git commit (a docs commit must not invalidate gates). Gates written before E3 have
+no id and count as `NA` until their `summarize` is rerun.
+
+**Completeness.** `summarize` reads only the configured design's replication directories and fails the gate unless
+every configured replication is present (`complete` in `gate.json`): a resumable gate summarized half way does not pass.
+
+**Manifest.** Each run writes `manifest_<dv>.json` in the work dir and merges it by dv into
+`<analysis>_hypotheses_bayes_manifest.json` beside the table: engine version and coding; R, brms, cmdstanr, posterior,
+digest and CmdStan versions; the package version and git describe; the study YAML, set-I file, job file and input
+table with sha256; rows, subjects and groups used; the settings (ROPE, sampler, gate, thresholds); per prior set the
+gate check (id wanted, id found, verdict, reason), the prior table and fit with sha256, and convergence; the table's
+sha256.
+
+**Environment.** `source-analytics bayes --check-env` reports R, the engine's R packages and CmdStan and exits 1 if one
+is missing; `--check-env <manifest>` also lists versions that differ from the ones a run recorded (decision B5: record
+and check; `renv` only if two machines disagree).
+
 ## 7. FORGE test (the G1 acceptance test)
 
 1. **Inputs:** the G0 sha256 hashes match (`bayes-sl/reports/G0_forge_inputs.md`), or work from a copy.

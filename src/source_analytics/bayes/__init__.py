@@ -10,14 +10,14 @@ frequentist outputs are never touched: results go to ``<analysis>_hypotheses_bay
     priors.py  informative prior files (load_informative)
     tables.py  outcome-table registry (BAYES_TABLES)
     job.py     BayesJob, build_job, design_payload, resolve_paths
-    run.py     run_job, run_gate, r_dir
+    run.py     run_job, run_gate, check_env, r_dir
 """
 from .config import BayesConfig, BayesConfigError, FitSettings, GateSettings, parse_bayes_config
 from .job import BayesJob, build_job, design_payload, resolve_paths
-from .run import GATE_MODES, r_dir, run_gate, run_job
+from .run import GATE_MODES, check_env, r_dir, run_gate, run_job
 from .priors import load_informative
 from .tables import BAYES_TABLES, BayesTable
 
 __all__ = ["BAYES_TABLES", "BayesConfig", "BayesConfigError", "BayesJob", "BayesTable", "FitSettings", "GATE_MODES",
-           "GateSettings", "build_job", "design_payload", "load_informative", "parse_bayes_config", "r_dir",
+           "GateSettings", "build_job", "check_env", "design_payload", "load_informative", "parse_bayes_config", "r_dir",
            "resolve_paths", "run_gate", "run_job"]

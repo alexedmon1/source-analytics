@@ -39,6 +39,18 @@ def run_job(job: BayesJob, timeout: float | None = None) -> subprocess.Completed
     return subprocess.run(cmd, text=True, timeout=timeout, check=False)
 
 
+def check_env(manifest: Path | None = None) -> int:
+    """``source-analytics bayes --check-env``: print what R/bayes/check_env.R reports; its exit status (1 if a required
+    R package or CmdStan is missing)."""
+    if shutil.which("Rscript") is None:
+        print('{"missing": ["Rscript"]}')
+        return 1
+    cmd = ["Rscript", str(r_dir() / "bayes" / "check_env.R")]
+    if manifest is not None:
+        cmd += ["--against", str(manifest)]
+    return subprocess.run(cmd, text=True, check=False).returncode
+
+
 def run_gate(job: BayesJob, bands: list[str] | None = None, reps: tuple[int, int, int] = (100, 100, 10),
              workers: int = 5, timeout: float | None = None) -> int:
     """The gate in order (R/bayes/gate.R), for each of the job's prior sets: prior predictive, SBC and null at

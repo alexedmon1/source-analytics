@@ -106,4 +106,5 @@ def test_forge_jobs_from_the_block_equal_e0():
             # `gate` records only whether the CLI ran the gate; R never reads it (the E0 files were last written by
             # their gate runs), so it is not part of what makes a number
             got.pop("gate"), want.pop("gate")
+            got = {k: v for k, v in got.items() if k in want}   # fields added since E0 (E3: gate settings, provenance)
             assert got == want, {k: (got.get(k), want.get(k)) for k in set(got) | set(want) if got.get(k) != want.get(k)}
