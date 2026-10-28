@@ -1,7 +1,7 @@
 """Provenance (engine plan E3): gate ids, the gate check a real fit makes, the manifest, --check-env.
 
 Fast tests use R without sampling. ``test_end_to_end_gate_fit_manifest`` runs a tiny gate and fit through the CLI
-(compiles Stan, a few minutes); it runs only with ``SA_BAYES_SLOW=1``.
+(compiles Stan, a few minutes); marked slow (tests/bayes/conftest.py).
 """
 from __future__ import annotations
 
@@ -86,10 +86,7 @@ def test_check_env_reports_and_compares(tmp_path):
     assert check_env() == (1 if rep["missing"] else 0)
 
 
-SLOW = os.environ.get("SA_BAYES_SLOW")
-
-
-@pytest.mark.skipif(not SLOW, reason="slow (compiles and samples); set SA_BAYES_SLOW=1")
+@pytest.mark.slow
 def test_end_to_end_gate_fit_manifest(tmp_path):
     """A tiny study through the CLI: gate, then a fit that records that gate (its id); then the study's gate settings
     change and the same fit records NA; the manifest names every input."""

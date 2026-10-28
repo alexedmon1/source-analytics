@@ -28,7 +28,7 @@ A separate CLI step, not a flag on the existing modules:
 ```bash
 source-analytics bayes --study study.yaml --paradigm resting --analysis roi_psd --dv absolute [--hypothesis NAME]
 source-analytics bayes --study study.yaml --paradigm resting --analysis roi_aperiodic --dv exponent
-source-analytics bayes ... --gate            # prior predictive + recovery/SBC + null at this design, no real fit
+source-analytics bayes ... --gate            # prior predictive, SBC, null, equivalence, recovery at this design; no real fit
 source-analytics bayes --study study.yaml --paradigm resting   # every outcome in bayes.outcomes
 ```
 
@@ -42,7 +42,7 @@ bayes:
   prior_sets: [W, I]                 # default: [W, I] when priors.I is set, else [W]
   priors: {I: priors/informative.yaml}   # relative to the study YAML
   fit: {chains: 4, iter: 2000, warmup: 1000, seed: 1}
-  gate: {reps: {sbc: 100, null: 100, recovery: 10}, reduced_bands: [Theta, Low Gamma]}
+  gate: {reps: {sbc: 100, null: 100, recovery: 10, equivalence: 100}, reduced_bands: [Theta, Low Gamma]}
   outcomes: {roi_psd: [absolute], roi_aperiodic: [exponent]}
 ```
 
@@ -67,13 +67,21 @@ JSON (`{x_<band>_<group>: [mean, sd]}`) is still read, unchecked.
   gate). Python calls `Rscript`, as the emmeans modules do.
 - **Regression:** `tests/bayes/test_e0_regression.py` replays the E0 fixtures (FORGE's fits and gate verdicts, frozen
   2026-10-28 outside the repository; `SA_BAYES_E0`) and requires them digit for digit.
+- **Tests (E5):** `tests/bayes/`. Fast tests (no sampling) run by default: the job, the `bayes:` block and prior file,
+  coding and priors, gate ids, the template guard on an empty fit, the gate's boundary draw. Tests marked `slow`
+  compile and sample (minutes; `SA_BAYES_SLOW=1`, scratch under `SA_BAYES_SCRATCH`): a tiny portable fit with a
+  single-band and a multi-band outcome (same seed gives the same draws, fresh or through a template; the guard on a
+  compiled template; the HDI covers the simulated effect), a gate smoke run with an equivalence hypothesis and both
+  prior sets through the CLI, and the E3 end-to-end run.
 
 ## 3. Model
 
 The outcome is standardised before fitting, per band: z = (y - band mean) / s_b. Here s_b is the within-group
 between-subject SD within ROI x band, pooled over ROIs and groups. This is the unit of a per-cell Hedges g. The total SD over all rows is not used,
-because ROI differences in absolute dB would inflate it. Effects, priors, the ROPE and `mode: sd` margins are all in
-these units.
+because ROI differences in absolute dB would inflate it. Effects, priors and the ROPE are in these units. A `mode: sd`
+equivalence margin is not: it is margin x the model's residual SD (sigma, per band and draw; section 4), as in the
+emmeans adapter (`.equivalence_margin()`: margin x the residual SD of its subject-intercept model). In FORGE sigma is
+0.55-0.88 of s_b, so a 0.25 margin is 0.14-0.22 in these units.
 
 **Band power, bands pooled:**
 
@@ -167,7 +175,15 @@ At the study's actual design (subjects per group, ROIs, bands), before any real 
    the truth among 100 thinned draws. Covers every hypothesis estimand, per band and per cell. Uniformity by
    chi-square, and coverage of the 95% HDI.
 3. **Null:** every group effect 0. Rates of each decision rule claiming an effect, per hypothesis.
-4. **Recovery:** at the full design and the job's real-fit chains/iter/warmup. HDI coverage of the ROI-average
+4. **Equivalence (E5, 2026-10-28; only with equivalence hypotheses):** the null draw, then each band's group levels
+   moved (the least shift) so that every equivalence contrast lies exactly at +-margin (x the drawn sigma), signs drawn
+   per hypothesis; hypotheses whose weights are linearly dependent are placed one per replication, in turn. At the
+   margin "equivalent" is the wrong call. Rule: its rate per hypothesis x band (ROI-average) at most 0.05
+   (`equiv_max_false`). Reported: the cells' rate, and from null replications how often equivalence is shown when the
+   groups are equal (`shown_when_equal_*`: the design's power to show equivalence). Equivalence hypotheses are scored by
+   their own rule (`.decide_equivalence`); before E5 the gate scored them only by the contrast rule (still read by the
+   null rule), so a false "equivalent" was never measured.
+5. **Recovery:** at the full design and the job's real-fit chains/iter/warmup. HDI coverage of the ROI-average
    estimands at least 0.85, and convergence (below).
 
 **Convergence: R-hat on what is decided (the Conductor, 2026-10-21).** The rule is R-hat < 1.05 (`BAYES_RHAT_MAX`)

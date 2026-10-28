@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .job import BayesJob
 
-GATE_MODES = ("prior_pred", "sbc", "null", "recovery", "summarize")
+GATE_MODES = ("prior_pred", "sbc", "null", "equivalence", "recovery", "summarize")
 
 
 def r_dir() -> Path:
@@ -51,9 +51,10 @@ def check_env(manifest: Path | None = None) -> int:
     return subprocess.run(cmd, text=True, check=False).returncode
 
 
-def run_gate(job: BayesJob, bands: list[str] | None = None, reps: tuple[int, int, int] = (100, 100, 10),
+def run_gate(job: BayesJob, bands: list[str] | None = None, reps: dict[str, int] | None = None,
              workers: int = 5, timeout: float | None = None) -> int:
-    """The gate in order (R/bayes/gate.R), for each of the job's prior sets: prior predictive, SBC and null at
+    """The gate in order (R/bayes/gate.R), for each of the job's prior sets: prior predictive, SBC, null and
+    equivalence (each equivalence contrast at its margin; skipped by R without equivalence hypotheses) at
     ``bands`` (a reduced design; None = all), recovery at the full design with the real fit's sampler settings
     (the job's chains/iter/warmup; the Conductor 2026-10-19: 2-chain recovery fits missed R-hat < 1.05), then the verdict
     (``<work_dir>/gate/<dv>/gate.json``; ``gate_I.json`` for set I). Finished replications are skipped on a re-run.
@@ -62,7 +63,9 @@ def run_gate(job: BayesJob, bands: list[str] | None = None, reps: tuple[int, int
         raise FileNotFoundError(f"bayes: input table not found: {job.data_csv}")
     job_file = _write_job(job)
     gate_r = r_dir() / "bayes" / "gate.R"
-    n = {"sbc": reps[0], "null": reps[1], "recovery": reps[2]}
+    n = {"sbc": 100, "null": 100, "recovery": 10, "equivalence": 100}             # engine defaults, then the study's
+    n.update({k: v for k, v in (job.gate_settings or {}).items() if k in n and v is not None})
+    n.update(reps or {})
     for prior_set in job.prior_sets:
         for mode in GATE_MODES:
             cmd = ["Rscript", str(gate_r), "--job", str(job_file), "--mode", mode,
@@ -71,7 +74,7 @@ def run_gate(job: BayesJob, bands: list[str] | None = None, reps: tuple[int, int
                 cmd += ["--reps", str(n[mode])]
             if mode == "recovery":
                 cmd += ["--chains", str(job.chains), "--iter", str(job.iter), "--warmup", str(job.warmup)]
-            if bands and mode in ("sbc", "null"):
+            if bands and mode in ("sbc", "null", "equivalence"):
                 cmd += ["--bands", ",".join(bands)]
             res = subprocess.run(cmd, text=True, timeout=timeout, check=False)
             if res.returncode != 0:

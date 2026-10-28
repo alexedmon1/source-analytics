@@ -16,14 +16,14 @@ suppressMessages(library(digest))
 #' The engine's behaviour version: bump it when the model, priors, readout or gate change what they compute. It is
 #' part of every gate id, so a gate from an older engine stops counting. (The package version and git commit are
 #' recorded in the manifest, not in the id: a commit that changes only docs must not invalidate gates.)
-BAYES_ENGINE_VERSION <- "2026.10.28"
+BAYES_ENGINE_VERSION <- "2026.10.28.2"   # .2: the gate scores equivalence hypotheses by their own rule (E5)
 
 #' Gate thresholds, locked engine defaults (decision B3); part of the gate id.
 BAYES_GATE_RULES <- list(prior_pred_lo = 0.05, prior_pred_hi = 0.95, sbc_alpha = 0.01, sbc_min_coverage = 0.85,
                          null_max_claim_effect = 0.05, null_max_claim_dir = 0.10, recovery_min_coverage = 0.85,
-                         rhat_max = BAYES_RHAT_MAX)
+                         rhat_max = BAYES_RHAT_MAX, equiv_max_false = 0.05)
 
-BAYES_GATE_DEFAULTS <- list(sbc = 100L, null = 100L, recovery = 10L, reduced_bands = NULL)
+BAYES_GATE_DEFAULTS <- list(sbc = 100L, null = 100L, recovery = 10L, equivalence = 100L, reduced_bands = NULL)
 
 .sha_text <- function(x) digest(paste(x, collapse = "\n"), algo = "sha256", serialize = FALSE)
 bayes_sha_file <- function(path) digest(path, algo = "sha256", file = TRUE)
@@ -35,7 +35,7 @@ bayes_gate_settings <- function(job) {
   out <- BAYES_GATE_DEFAULTS
   for (k in intersect(names(g), names(out))) out[[k]] <- g[[k]]
   out$reduced_bands <- if (length(out$reduced_bands)) as.character(unlist(out$reduced_bands)) else NULL
-  for (k in c("sbc", "null", "recovery")) out[[k]] <- as.integer(out[[k]])
+  for (k in c("sbc", "null", "recovery", "equivalence")) out[[k]] <- as.integer(out[[k]])
   out$recovery_chains <- as.integer(job$chains); out$recovery_iter <- as.integer(job$iter)
   out$recovery_warmup <- as.integer(job$warmup)
   out

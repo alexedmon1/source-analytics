@@ -94,7 +94,7 @@ def build_job(config: StudyConfig, analysis: str, dv: str, bayes: BayesConfig | 
         sets = [s for s in sets if s in prior_sets]
     sets = [s for s in sets if s != "I" or info is not None]
     f, g = bayes.fit, bayes.gate
-    gate_settings = {"sbc": g.sbc, "null": g.null, "recovery": g.recovery,
+    gate_settings = {"sbc": g.sbc, "null": g.null, "recovery": g.recovery, "equivalence": g.equivalence,
                      "reduced_bands": list(g.reduced_bands) if g.reduced_bands and tab.band_col else None}
     provenance = {"source_analytics": _package(),
                   "study": _file_record(study_path),

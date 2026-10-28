@@ -7,8 +7,8 @@
         I: priors/forge_informative.yaml      # relative to the study YAML (bayes/priors.py)
       fit: {chains: 4, iter: 2000, warmup: 1000, seed: 1}
       gate:
-        reps: {sbc: 100, null: 100, recovery: 10}
-        reduced_bands: [Theta, Low Gamma]     # SBC and null only; recovery runs at the full design
+        reps: {sbc: 100, null: 100, recovery: 10, equivalence: 100}   # equivalence: only with equivalence hypotheses
+        reduced_bands: [Theta, Low Gamma]     # SBC, null and equivalence; recovery runs at the full design
       outcomes:                               # what `source-analytics bayes` runs when --analysis/--dv are not given
         roi_psd: [absolute]
         roi_aperiodic: [exponent]
@@ -43,11 +43,12 @@ class GateSettings:
     sbc: int = 100
     null: int = 100
     recovery: int = 10
+    equivalence: int = 100     # replications with each equivalence contrast at its margin (engine E5)
     reduced_bands: tuple[str, ...] | None = None
 
     @property
-    def reps(self) -> tuple[int, int, int]:
-        return (self.sbc, self.null, self.recovery)
+    def reps(self) -> dict[str, int]:
+        return {"sbc": self.sbc, "null": self.null, "recovery": self.recovery, "equivalence": self.equivalence}
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,7 @@ def parse_bayes_config(block: dict | None, base_dir: Path) -> BayesConfig:
     reps = gate.get("reps") or {}
     if isinstance(reps, dict):   # YAML reads the key `null` as None, not the string: `reps: {null: 100}` means null
         reps = {("null" if k is None else k): v for k, v in reps.items()}
-    _check_keys(reps, {"sbc", "null", "recovery"}, "bayes.gate.reps")
+    _check_keys(reps, {"sbc", "null", "recovery", "equivalence"}, "bayes.gate.reps")
     bands = gate.get("reduced_bands")
     if bands is not None and (isinstance(bands, str) or not isinstance(bands, list) or not bands
                               or not all(isinstance(b, str) for b in bands)):

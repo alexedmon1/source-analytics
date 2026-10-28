@@ -96,14 +96,19 @@ for (cs in cases) {
     for (set in unlist(L$job$prior_sets)) {
       sfx <- if (set == "W") "" else paste0("_", set)
       out <- system2("Rscript", c(gate_r, "--job", jf, "--mode", "summarize", "--set", set), stdout = TRUE, stderr = TRUE)
-      # the verdict's rules and pass/fail, byte for byte; provenance fields added since E0 (E3: gate_id,
-      # gate_inputs, engine_version, versions, complete) are not part of the fixture
+      # the verdict's rules, byte for byte; provenance fields added since E0 (E3: gate_id, gate_inputs,
+      # engine_version, versions, complete) are not part of the fixture. Since E5 a spec with equivalence hypotheses
+      # also needs the equivalence rule, which the E0 replications do not have: the verdict must then fail.
       strip <- function(f) { x <- fromJSON(f, simplifyVector = FALSE)
-        x[setdiff(names(x), c("gate_id", "gate_inputs", "engine_version", "versions", "complete"))] }
+        x[setdiff(names(x), c("gate_id", "gate_inputs", "engine_version", "versions", "complete", "passed"))] }
       a <- strip(file.path(wd, "gate", L$job$dv, sprintf("gate%s.json", sfx)))
       b <- strip(file.path(gd, sprintf("stored_gate%s.json", sfx)))
       if (!identical(toJSON(a, auto_unbox = TRUE, digits = NA), toJSON(b, auto_unbox = TRUE, digits = NA)))
         fail <- c(fail, sprintf("%s %s: gate verdict differs", cs, set))
+      has_eq <- any(vapply(L$job$hypotheses, function(h) identical(h$kind, "equivalence"), logical(1)))
+      got_p <- fromJSON(file.path(wd, "gate", L$job$dv, sprintf("gate%s.json", sfx)))$passed
+      want_p <- fromJSON(file.path(gd, sprintf("stored_gate%s.json", sfx)))$passed && !has_eq
+      if (!identical(got_p, want_p)) fail <- c(fail, sprintf("%s %s: gate passed = %s, expected %s", cs, set, got_p, want_p))
       cat(sprintf("%s %s: gate verdict checked\n", cs, set))
     }
   }

@@ -865,8 +865,8 @@ def cmd_bayes(args):
             if args.gate:
                 g = bayes.gate
                 bands = job.gate_settings["reduced_bands"]    # None for a band-less outcome
-                print(f"bayes gate: {analysis} / {dv} (sbc/null bands: {bands or 'all'}; reps sbc,null,recovery "
-                      f"= {g.reps}) -> {job.work_dir}/gate/{dv}/gate.json")
+                print(f"bayes gate: {analysis} / {dv} (sbc/null/equivalence bands: {bands or 'all'}; reps "
+                      f"{g.reps}) -> {job.work_dir}/gate/{dv}/gate.json")
                 if run_gate(job, bands=bands, reps=g.reps, workers=args.workers) != 0:
                     failures.append(f"{analysis}/{dv}")
                 continue

@@ -5,6 +5,8 @@
 #   Rscript R/bayes/gate.R --job <job.json> --mode prior_pred
 #   Rscript R/bayes/gate.R --job <job.json> --mode sbc      --reps 100 --workers 5 [--bands "Theta,Low Gamma"]
 #   Rscript R/bayes/gate.R --job <job.json> --mode null     --reps 100 --workers 5 [--bands ...]
+#   Rscript R/bayes/gate.R --job <job.json> --mode equivalence --reps 100 --workers 5 [--bands ...]
+#                                                           (only when the spec has equivalence hypotheses)
 #   Rscript R/bayes/gate.R --job <job.json> --mode recovery --reps 10  --workers 5 --chains 4 --iter 2000 --warmup 1000
 #                                                           (full design; the CLI passes the job's real-fit settings)
 #   Rscript R/bayes/gate.R --job <job.json> --mode summarize
@@ -13,8 +15,10 @@
 # sbc / null may run at a reduced design (a subset of bands, every subject and ROI): the model's structure per band is
 # the same, so calibration transfers; recovery runs at the full design to confirm (the Conductor, 2026-10-14).
 # Parameters are drawn in R from the stated priors (independently of Stan), data simulated at the design, the
-# template refitted; ranks of the truth among 100 thinned draws (SBC), HDI coverage, and decision-rule rates when every
-# group effect is 0 (null). Outputs in <work_dir>/gate/; summarize writes gate.json (pass/fail per rule).
+# template refitted; ranks of the truth among 100 thinned draws (SBC), HDI coverage, decision-rule rates when every
+# group effect is 0 (null), and how often an equivalence hypothesis is called "equivalent" when its contrast lies
+# exactly at the margin (equivalence: the false-equivalence rate, engine E5). Outputs in <work_dir>/gate/; summarize
+# writes gate.json (pass/fail per rule).
 
 suppressMessages({ library(optparse); library(jsonlite); library(parallel) })
 script_dir <- local({
@@ -68,6 +72,26 @@ draw_params <- function(prep, null = FALSE) {
        sigma = setNames(exp(rnorm(length(prep$bands), log(0.5), 0.5)), prep$bands))
 }
 
+#' Equivalence at its margin (mode equivalence): the null draw, then each band's group levels moved so that every
+#' equivalence contrast sits exactly at +-(margin x the drawn sigma), signs drawn per hypothesis, the shift of least
+#' size. When the hypotheses' weights are linearly dependent (they cannot all be placed at once), one hypothesis per
+#' replication, in turn. p$placed names the hypotheses at their margin.
+boundary_params <- function(prep, r) {
+  eq <- Filter(function(h) h$kind == "equivalence", spec$hypotheses)
+  p <- draw_params(prep, null = TRUE)
+  W <- do.call(rbind, lapply(eq, function(h) weight_vector(h, prep$levels)[prep$levels]))
+  if (qr(W)$rank < nrow(W)) { k <- (r - 1) %% length(eq) + 1; eq <- eq[k]; W <- W[k, , drop = FALSE] }
+  s <- sample(c(-1, 1), length(eq), replace = TRUE)
+  mg <- vapply(eq, function(h) as.numeric(h$margin$value), numeric(1))
+  for (b in prep$bands) {
+    dl <- t(W) %*% solve(W %*% t(W), s * mg * p$sigma[[b]])      # least-size level shift with W dl = target
+    M <- prep$lmap[[b]][prep$levels, , drop = FALSE]                # groups x this band's fixed parameters
+    p$b[colnames(M)] <- p$b[colnames(M)] + as.numeric(solve(M, dl))
+  }
+  p$placed <- vapply(eq, `[[`, "", "name")
+  p
+}
+
 simulate_z <- function(prep, p) {
   d <- prep$data
   bnd <- as.character(d$band); roi <- as.character(d$roi)
@@ -82,11 +106,15 @@ simulate_z <- function(prep, p) {
   as.numeric(mu + p$sigma[bnd] * rnorm(nrow(d)))
 }
 
-#' Truth and posterior draws of every contrast/equivalence estimand: band x (ROI-average, each ROI).
+#' Truth and posterior draws of every contrast/equivalence estimand: band x (ROI-average, each ROI). Equivalence
+#' hypotheses are scored by both rules: the contrast rule (claim_*, read by the null rule) and their own
+#' (.decide_equivalence, margin per draw = margin x posterior sigma: claim_equiv; the truth's margin uses the drawn
+#' sigma: margin_true; at_margin = placed at its margin by boundary_params).
 estimand_table <- function(prep, p, fit) {
   dr <- as.data.frame(as_draws_df(fit))
   cols <- prep$terms$col; fx <- prep$fixed$col
   B <- as.matrix(dr[, paste0("b_", fx)]); colnames(B) <- fx
+  sig <- exp(as.matrix(dr[, paste0("b_sigma_bd_", prep$bands), drop = FALSE])); colnames(sig) <- prep$bands
   rois <- levels(prep$data$roi)
   P0 <- list(b = matrix(p$b[fx], 1, dimnames = list(NULL, fx)), r = p$r)
   set.seed(1); pd <- .prior_effect_draws(prep, n = 20000)
@@ -103,6 +131,9 @@ estimand_table <- function(prep, p, fit) {
                             prep, b, w)
       x0 <- .contrast_draws(pd$b, if (sp == "all") NULL else pd$r, prep, b, w)
       dec <- .decide(x, .dens0(x0), job$rope_sd)
+      is_eq <- hyp$kind == "equivalence"
+      if (is_eq && !identical(hyp$margin$mode %||% "sd", "sd")) stop("bayes gate: equivalence margin mode 'sd' only")
+      eqd <- if (is_eq) .decide_equivalence(x, .dens0(x0), hyp$margin$value * sig[, b]) else NULL
       cv <- .estimand_conv(x, dr$.chain)
       out[[length(out) + 1]] <- data.frame(hypothesis = hyp$name, band = b, spatial = sp, truth = t0,
                                            rank = sum(x[keep] < t0), mean = mean(x), sd = sd(x),
@@ -110,7 +141,10 @@ estimand_table <- function(prep, p, fit) {
                                            covered = as.numeric(t0 >= dec$hdi_lo & t0 <= dec$hdi_hi),
                                            claim_effect = as.numeric(dec$decision == "effect"),
                                            claim_dir = as.numeric(dec$p_direction >= 0.975),
-                                           claim_bf3 = as.numeric(dec$log10_bf10 >= log10(3)))
+                                           claim_bf3 = as.numeric(dec$log10_bf10 >= log10(3)),
+                                           claim_equiv = if (is_eq) as.numeric(eqd$decision == "equivalent") else NA,
+                                           margin_true = if (is_eq) hyp$margin$value * p$sigma[[b]] else NA,
+                                           at_margin = as.numeric(hyp$name %in% p$placed))
     }
   }
   np <- nuts_params(fit)
@@ -144,8 +178,8 @@ run_reps <- function(mode, bands) {
   clusterExport(cl, "tpl_f", envir = environment())
   clusterEvalQ(cl, { suppressMessages({ library(brms); library(posterior) }); tpl <- readRDS(tpl_f); NULL })
   one_rep <- function(r) try({
-    set.seed(10000 * match(mode, c("sbc", "null", "recovery")) + r)
-    p <- draw_params(prep, null = mode == "null")
+    set.seed(10000 * match(mode, c("sbc", "null", "recovery", "equivalence")) + r)
+    p <- if (mode == "equivalence") boundary_params(prep, r) else draw_params(prep, null = mode == "null")
     pr <- prep; pr$data$z <- simulate_z(prep, p)
     fit <- update(tpl, newdata = pr$data, recompile = FALSE, chains = opt$chains, cores = opt$chains,
                   iter = opt$iter, warmup = opt$warmup, seed = r, refresh = 0)
@@ -164,11 +198,12 @@ run_reps <- function(mode, bands) {
 bands <- if (is.null(opt$bands)) NULL else trimws(strsplit(opt$bands, ",")[[1]])
 GS <- bayes_gate_settings(job)                 # the study's bayes.gate (E3); absent in pre-E3 job files
 LEGACY <- is.null(job$gate_settings)
+HAS_EQ <- any(vapply(spec$hypotheses, function(h) identical(h$kind, "equivalence"), logical(1)))
 if (!LEGACY) {
-  if (opt$mode %in% c("sbc", "null", "recovery") && opt$reps != GS[[opt$mode]])
+  if (opt$mode %in% c("sbc", "null", "recovery", "equivalence") && opt$reps != GS[[opt$mode]])
     stop(sprintf("bayes gate: --reps %d differs from the study's bayes.gate.reps.%s (%d)", opt$reps, opt$mode,
                  GS[[opt$mode]]))
-  if (opt$mode %in% c("sbc", "null") && !identical(bands, GS$reduced_bands))
+  if (opt$mode %in% c("sbc", "null", "equivalence") && !identical(bands, GS$reduced_bands))
     stop("bayes gate: --bands differs from the study's bayes.gate.reduced_bands")
 }
 if (opt$mode == "prior_pred") {
@@ -190,6 +225,8 @@ if (opt$mode == "prior_pred") {
   print(out, digits = 3)
 } else if (opt$mode %in% c("sbc", "null")) {
   run_reps(opt$mode, bands)
+} else if (opt$mode == "equivalence") {
+  if (HAS_EQ) run_reps("equivalence", bands) else cat("bayes gate: no equivalence hypotheses; nothing to run\n")
 } else if (opt$mode == "recovery") {
   run_reps("recovery", NULL)
 } else if (opt$mode == "summarize") {
@@ -241,6 +278,25 @@ if (opt$mode == "prior_pred") {
                                cells_mean_claim_dir = mean(f$claim_dir[f$spatial != "all"]),
                                pass = max(avg$claim_effect) <= RU$null_max_claim_effect && max(avg$claim_dir) <= RU$null_max_claim_dir)
   }
+  eqv <- if (HAS_EQ) read_mode("^equivalence_") else NULL
+  if (!is.null(eqv)) {
+    # at the margin, "equivalent" is the wrong call: its rate per hypothesis x band (ROI-average) is gated. Reported:
+    # the cells, and (from null replications written since E5) how often equivalence is shown when the groups are equal
+    m <- eqv[eqv$at_margin == 1, ]
+    f <- aggregate(claim_equiv ~ hypothesis + band + spatial, data = m, FUN = function(v) c(rate = mean(v), n = length(v)))
+    f <- do.call(data.frame, f); names(f) <- sub("^claim_equiv\\.", "", names(f))
+    write.csv(f, file.path(GDIR, sprintf("equivalence_summary%s.csv", SFX)), row.names = FALSE)
+    avg <- f[f$spatial == "all", ]
+    shown <- if (!is.null(nul) && "claim_equiv" %in% names(nul)) {
+      z <- nul[nul$spatial == "all" & !is.na(nul$claim_equiv), ]
+      if (nrow(z)) range(tapply(z$claim_equiv, paste(z$hypothesis, z$band), mean)) else c(NA, NA)
+    } else c(NA, NA)
+    verdict$rules$equivalence <- list(n_reps = length(unique(eqv$rep)), min_n_at_margin = min(avg$n),
+                                      max_false_equiv = max(avg$rate), cells_mean_false_equiv =
+                                        mean(f$rate[f$spatial != "all"]),
+                                      shown_when_equal_min = shown[1], shown_when_equal_max = shown[2],
+                                      pass = max(avg$rate) <= RU$equiv_max_false)
+  }
   rec <- read_mode("^recovery_")
   if (!is.null(rec)) {
     # R-hat on what is decided (the Conductor, 2026-10-21): every estimand (ROI-average and cells) and the scales; the
@@ -260,11 +316,14 @@ if (opt$mode == "prior_pred") {
   }
   # every configured replication present (a resumable gate summarized half way must not pass)
   found <- c(sbc = if (is.null(sbc)) 0L else length(unique(sbc$rep)), null = if (is.null(nul)) 0L else
-    length(unique(nul$rep)), recovery = if (is.null(rec)) 0L else length(unique(rec$rep)))
-  complete <- lapply(c(sbc = "sbc", null = "null", recovery = "recovery"), function(m)
-    list(found = found[[m]], wanted = GS[[m]]))
+    length(unique(nul$rep)), recovery = if (is.null(rec)) 0L else length(unique(rec$rep)),
+    equivalence = if (is.null(eqv)) 0L else length(unique(eqv$rep)))
+  wanted <- GS[c("sbc", "null", "recovery", "equivalence")]
+  if (!HAS_EQ) wanted$equivalence <- 0L                 # no equivalence hypotheses: the rule does not apply
+  complete <- lapply(c(sbc = "sbc", null = "null", recovery = "recovery", equivalence = "equivalence"), function(m)
+    list(found = found[[m]], wanted = wanted[[m]]))
   is_complete <- all(vapply(complete, function(x) x$found >= x$wanted, logical(1)))
-  verdict$passed <- length(verdict$rules) == 4 && all(vapply(verdict$rules, function(r) isTRUE(r$pass), logical(1))) &&
+  verdict$passed <- length(verdict$rules) == 4 + HAS_EQ && all(vapply(verdict$rules, function(r) isTRUE(r$pass), logical(1))) &&
     is_complete
   verdict$complete <- complete
   verdict$gate_id <- gid$id

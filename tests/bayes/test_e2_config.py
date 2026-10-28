@@ -28,7 +28,7 @@ def _prior_file(tmp_path, entries):
 def test_defaults():
     c = parse_bayes_config(None, Path("."))
     assert c.rope_sd == 0.1 and c.prior_sets == ("W",) and c.informative is None   # no set-I file: W only
-    assert c.fit.chains == 4 and c.fit.iter == 2000 and c.gate.reps == (100, 100, 10)
+    assert c.fit.chains == 4 and c.fit.iter == 2000 and c.gate.reps == {"sbc": 100, "null": 100, "recovery": 10, "equivalence": 100}
 
 
 @pytest.mark.parametrize("block, msg", [
@@ -52,7 +52,7 @@ def test_bad_blocks_fail_with_a_message(block, msg, tmp_path):
 
 def test_null_reps_key_survives_yaml():
     block = yaml.safe_load("gate: {reps: {sbc: 10, null: 20, recovery: 3}}")
-    assert parse_bayes_config(block, Path(".")).gate.reps == (10, 20, 3)
+    assert parse_bayes_config(block, Path(".")).gate.reps == {"sbc": 10, "null": 20, "recovery": 3, "equivalence": 100}
 
 
 def test_relative_prior_path_resolves_against_the_study(tmp_path):
