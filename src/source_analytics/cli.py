@@ -813,47 +813,65 @@ def cmd_init(args):
 
 def cmd_bayes(args):
     """Bayesian hypothesis adapter (docs/methods/BAYES_ENGINE.md): fits the declared hypotheses on a module's
-    per-subject table with brms and writes ``<analysis>_hypotheses_bayes.csv``. Never touches frequentist output."""
-    from .bayes import build_job, run_gate, run_job
+    per-subject table with brms and writes ``<analysis>_hypotheses_bayes.csv``. Never touches frequentist output.
+    Settings come from the study YAML's ``bayes:`` block; a bad block stops here, before R starts."""
+    from .bayes import BayesConfigError, build_job, parse_bayes_config, run_gate, run_job
 
     config = StudyConfig.from_yaml(args.study)
+    try:
+        bayes = parse_bayes_config(config.raw.get("bayes"), Path(args.study).resolve().parent)
+    except BayesConfigError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
     if getattr(args, "profile", None):
         config = config.for_profile(args.profile)
-    if config.has_paradigms:
-        if not args.paradigm:
-            print("ERROR: multi-paradigm config: --paradigm is required for bayes")
+    if args.analysis:
+        dvs = [x.strip() for x in args.dv.split(",")] if args.dv else list(bayes.outcomes.get(args.analysis, ()))
+        if not dvs:
+            print(f"ERROR: no --dv and no bayes.outcomes entry for {args.analysis}")
             sys.exit(1)
-        config = config.for_paradigm_analysis(args.paradigm, args.analysis)
-    sets = tuple(s.strip() for s in args.prior_sets.split(","))
-    if "I" in sets and not args.informative:
-        print("WARNING: prior set I requested without --informative; fitting W only. An informative set needs "
-              "entries derived from a logged literature search (BAYES_ENGINE.md section 5).")
+        runs = [(args.analysis, dvs)]
+    else:
+        if args.dv:
+            print("ERROR: --dv needs --analysis")
+            sys.exit(1)
+        runs = [(a, list(d)) for a, d in bayes.outcomes.items()]
+        if not runs:
+            print("ERROR: no --analysis and no bayes.outcomes in the study YAML")
+            sys.exit(1)
+    if config.has_paradigms and not args.paradigm:
+        print("ERROR: multi-paradigm config: --paradigm is required for bayes")
+        sys.exit(1)
+    sets = tuple(s.strip() for s in args.prior_sets.split(",")) if args.prior_sets else None
     hyps = [h.strip() for h in args.hypothesis.split(",")] if args.hypothesis else None
     failures = []
-    for dv in (x.strip() for x in args.dv.split(",")):
-        try:
-            job = build_job(config, args.analysis, dv, hypotheses=hyps, prior_sets=sets,
-                            informative=args.informative, rope_sd=args.rope_sd, gate=args.gate,
-                            chains=args.chains, iter=args.iter, warmup=args.warmup, seed=args.seed,
-                            out_dir=args.out)
-        except ValueError as exc:
-            print(f"ERROR: {exc}")
-            sys.exit(1)
-        if args.gate:
-            bands = [b.strip() for b in args.gate_bands.split(",")] if args.gate_bands else None
-            reps = tuple(int(x) for x in args.gate_reps.split(","))
-            print(f"bayes gate: {args.analysis} / {dv} (sbc/null bands: {bands or 'all'}; reps sbc,null,recovery "
-                  f"= {reps}) -> {job.work_dir}/gate/{dv}/gate.json")
-            if run_gate(job, bands=bands, reps=reps, workers=args.workers) != 0:
-                failures.append(dv)
-            continue
-        print(f"bayes: {args.analysis} / {dv} -> {job.table_out}")
-        res = run_job(job)
-        if res.returncode != 0:
-            failures.append(dv)
+    for analysis, dvs in runs:
+        cfg = config.for_paradigm_analysis(args.paradigm, analysis) if config.has_paradigms else config
+        out = (Path(args.out) / analysis if len(runs) > 1 else Path(args.out)) if args.out else None
+        for dv in dvs:
+            try:
+                job = build_job(cfg, analysis, dv, bayes, hypotheses=hyps, prior_sets=sets, gate=args.gate,
+                                out_dir=out)
+            except ValueError as exc:
+                print(f"ERROR: {exc}")
+                sys.exit(1)
+            if "I" in bayes.prior_sets and "I" not in job.prior_sets and (sets is None or "I" in sets):
+                print(f"WARNING: {analysis} / {dv}: the set-I file has no entry for this outcome; fitting W only")
+            if args.gate:
+                g = bayes.gate
+                bands = list(g.reduced_bands) if g.reduced_bands else None
+                print(f"bayes gate: {analysis} / {dv} (sbc/null bands: {bands or 'all'}; reps sbc,null,recovery "
+                      f"= {g.reps}) -> {job.work_dir}/gate/{dv}/gate.json")
+                if run_gate(job, bands=bands, reps=g.reps, workers=args.workers) != 0:
+                    failures.append(f"{analysis}/{dv}")
+                continue
+            print(f"bayes: {analysis} / {dv} -> {job.table_out}")
+            if run_job(job).returncode != 0:
+                failures.append(f"{analysis}/{dv}")
     if failures:
-        print(f"ERROR: bayes failed for dv(s): {', '.join(failures)}")
+        print(f"ERROR: bayes failed for: {', '.join(failures)}")
         sys.exit(1)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -992,31 +1010,23 @@ def main():
         help="Bayesian hypothesis adapter (brms): posterior per declared hypothesis on a module's table "
              "(writes <analysis>_hypotheses_bayes.csv; see docs/methods/BAYES_ENGINE.md)",
     )
-    p_bayes.add_argument("--study", required=True, type=Path, help="Path to study YAML config")
+    p_bayes.add_argument("--study", required=True, type=Path,
+                         help="Study YAML; its bayes: block holds every setting that changes a number "
+                              "(BAYES_ENGINE.md section 2)")
     p_bayes.add_argument("--paradigm", help="Paradigm name (multi-paradigm configs)")
-    p_bayes.add_argument("--analysis", required=True, help="Module whose table is read (roi_psd, roi_aperiodic)")
-    p_bayes.add_argument("--dv", required=True, help="Outcome column(s), comma-separated (e.g. absolute; exponent)")
+    p_bayes.add_argument("--analysis", help="Module whose table is read (roi_psd, roi_aperiodic); "
+                                            "default: every analysis in bayes.outcomes")
+    p_bayes.add_argument("--dv", help="Outcome column(s), comma-separated; default: bayes.outcomes for the analysis")
     p_bayes.add_argument("--profile", metavar="NAME", help="Profile block narrowing bands/ROIs/hypotheses")
     p_bayes.add_argument("--hypothesis", help="Comma-separated declared hypothesis(es); default all")
-    p_bayes.add_argument("--prior-sets", default="W,I", help="Prior sets to fit (default W,I; I needs --informative)")
-    p_bayes.add_argument("--informative", type=Path, help="JSON {term: [mean, sd]} for set I (from a logged search)")
-    p_bayes.add_argument("--rope-sd", type=float, default=None,
-                         help="ROPE half-width for plain contrasts, between-subject SD units "
-                              "(default: study YAML bayes.rope.value, else 0.1)")
+    p_bayes.add_argument("--prior-sets", help="Fit only these of the study's bayes.prior_sets (comma-separated)")
     p_bayes.add_argument("--gate", action="store_true",
                          help="Run the gate (prior predictive, SBC, null, recovery) at this design instead of a real "
                               "fit; writes gate.json, which later real fits record as gate_passed")
-    p_bayes.add_argument("--gate-bands", help="Reduced design for SBC and null: comma-separated bands (default all)")
-    p_bayes.add_argument("--gate-reps", default="100,100,10",
-                         help="Replications: sbc,null,recovery (default 100,100,10; null 100: the Conductor, B3 2026-10-16)")
-    p_bayes.add_argument("--workers", type=int, default=5, help="Parallel gate fits (2 chains each)")
+    p_bayes.add_argument("--workers", type=int, default=5, help="Parallel gate fits")
     p_bayes.add_argument("--out", type=Path,
                          help="Write the table and fits here instead of the study's results/analytics trees "
                               "(use when the study's results are frozen)")
-    p_bayes.add_argument("--chains", type=int, default=4)
-    p_bayes.add_argument("--iter", type=int, default=2000)
-    p_bayes.add_argument("--warmup", type=int, default=1000)
-    p_bayes.add_argument("--seed", type=int, default=1)
     p_bayes.set_defaults(func=cmd_bayes)
 
     args = parser.parse_args()

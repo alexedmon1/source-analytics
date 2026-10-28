@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import StudyConfig
+from .config import BayesConfig, parse_bayes_config
+from .priors import load_informative
 from .tables import BAYES_TABLES
 
 
@@ -53,12 +54,16 @@ def resolve_paths(config: StudyConfig, analysis: str) -> tuple[Path, Path, Path]
     return data_dir / BAYES_TABLES[analysis].csv, tbl_dir, data_dir / "bayes"
 
 
-def build_job(config: StudyConfig, analysis: str, dv: str, hypotheses: list[str] | None = None,
-              prior_sets: tuple[str, ...] = ("W", "I"), informative: Path | None = None, rope_sd: float | None = None,
-              gate: bool = False, chains: int = 4, iter: int = 2000, warmup: int = 1000, seed: int = 1,
+def build_job(config: StudyConfig, analysis: str, dv: str, bayes: BayesConfig | None = None,
+              hypotheses: list[str] | None = None, prior_sets: tuple[str, ...] | None = None, gate: bool = False,
               out_dir: Path | None = None) -> BayesJob:
-    """One job. ``out_dir`` redirects the table and the fits (``<out_dir>/<analysis>_hypotheses_bayes.csv``,
-    ``<out_dir>/bayes/``) away from the study tree, e.g. when the study's results are frozen."""
+    """One job. Everything that changes a number comes from ``bayes`` (the study's ``bayes:`` block, bayes/config.py;
+    default: parsed from ``config.raw`` with paths relative to the working directory). The other arguments say what
+    to run and where: ``hypotheses`` and ``prior_sets`` select from what the study declares; ``out_dir`` redirects the
+    table and the fits (``<out_dir>/<analysis>_hypotheses_bayes.csv``, ``<out_dir>/bayes/``) away from the study
+    tree, e.g. when the study's results are frozen. Set I is dropped when its file has no entry for ``dv``."""
+    if bayes is None:
+        bayes = parse_bayes_config(config.raw.get("bayes"), Path.cwd())
     tab = BAYES_TABLES.get(analysis)
     if tab is None:
         raise ValueError(f"bayes: analysis '{analysis}' not supported (known: {', '.join(BAYES_TABLES)})")
@@ -68,16 +73,24 @@ def build_job(config: StudyConfig, analysis: str, dv: str, hypotheses: list[str]
     if out_dir is not None:
         tbl_dir, work = Path(out_dir), Path(out_dir) / "bayes"
     design, hyps = design_payload(config)
+    info = None
+    if bayes.informative is not None:
+        bands = list(config.bands) if tab.band_col and config.bands else None
+        info = load_informative(bayes.informative, dv, design, hyps, bands=bands) or None
     if hypotheses:
         unknown = set(hypotheses) - {h["name"] for h in hyps}
         if unknown:
             raise ValueError(f"bayes: unknown hypothesis(es): {', '.join(sorted(unknown))}")
         hyps = [h for h in hyps if h["name"] in hypotheses]
-    bayes_cfg = config.raw.get("bayes", {}) or {}
-    rope = rope_sd if rope_sd is not None else float((bayes_cfg.get("rope") or {}).get("value", 0.1))
-    info = json.loads(Path(informative).read_text()) if informative else None
-    sets = [s for s in prior_sets if s != "I" or info is not None]
+    sets = list(bayes.prior_sets)
+    if prior_sets is not None:
+        extra = set(prior_sets) - set(sets)
+        if extra:
+            raise ValueError(f"bayes: prior set(s) {', '.join(sorted(extra))} not in the study's bayes.prior_sets")
+        sets = [s for s in sets if s in prior_sets]
+    sets = [s for s in sets if s != "I" or info is not None]
+    f = bayes.fit
     return BayesJob(data_csv=str(csv), dv=dv, spatial_col=tab.spatial_col, band_col=tab.band_col, design=design,
-                    hypotheses=hyps, prior_sets=sets, informative=info, rope_sd=rope,
+                    hypotheses=hyps, prior_sets=sets, informative=info, rope_sd=bayes.rope_sd,
                     table_out=str(tbl_dir / f"{analysis}_hypotheses_bayes.csv"), work_dir=str(work), gate=gate,
-                    chains=chains, iter=iter, warmup=warmup, seed=seed)
+                    chains=f.chains, iter=f.iter, warmup=f.warmup, seed=f.seed)

@@ -29,7 +29,34 @@ A separate CLI step, not a flag on the existing modules:
 source-analytics bayes --study study.yaml --paradigm resting --analysis roi_psd --dv absolute [--hypothesis NAME]
 source-analytics bayes --study study.yaml --paradigm resting --analysis roi_aperiodic --dv exponent
 source-analytics bayes ... --gate            # prior predictive + recovery/SBC + null at this design, no real fit
+source-analytics bayes --study study.yaml --paradigm resting   # every outcome in bayes.outcomes
 ```
+
+**Settings (E2, 2026-10-28):** everything that changes a number is in the study YAML's `bayes:` block, and the CLI
+says only what to run and where (`--analysis`, `--dv`, `--hypothesis`, `--prior-sets` as a subset, `--gate`,
+`--workers`, `--out`). A bad block stops before R starts. Schema: `src/source_analytics/bayes/config.py`.
+
+```yaml
+bayes:
+  rope: {mode: sd, value: 0.1}
+  prior_sets: [W, I]                 # default: [W, I] when priors.I is set, else [W]
+  priors: {I: priors/informative.yaml}   # relative to the study YAML
+  fit: {chains: 4, iter: 2000, warmup: 1000, seed: 1}
+  gate: {reps: {sbc: 100, null: 100, recovery: 10}, reduced_bands: [Theta, Low Gamma]}
+  outcomes: {roi_psd: [absolute], roi_aperiodic: [exponent]}
+```
+
+The set-I file is written in hypothesis x band terms, each entry with its source (`bayes/priors.py`):
+
+```yaml
+version: 1
+entries:
+  - {dv: absolute, hypothesis: disease_effect, band: Low Gamma, prior: {mean: 0.5, sd: 0.8},
+     source: priors/lit/2026-10-07_fmr1_resting_state.md, derivation: "pooled rule ..."}
+```
+
+An entry's hypothesis must be one group minus the reference; the engine maps it to its internal term. The pre-E2
+JSON (`{x_<band>_<group>: [mean, sd]}`) is still read, unchecked.
 
 - **Inputs:** the step reads the module's existing `data/*.csv` (the analytics working tree). It needs no subject
   processing, so the frequentist pipeline is untouched.

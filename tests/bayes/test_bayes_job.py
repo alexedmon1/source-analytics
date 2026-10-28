@@ -8,7 +8,7 @@ import subprocess
 import pytest
 
 from source_analytics.config import StudyConfig
-from source_analytics.bayes import BAYES_TABLES, build_job, design_payload, r_dir
+from source_analytics.bayes import BAYES_TABLES, build_job, design_payload, parse_bayes_config, r_dir
 
 ENGINE = r_dir() / "bayes" / "engine.R"
 
@@ -78,14 +78,18 @@ def test_set_I_needs_informative(cfg, tmp_path):
     assert build_job(a, "roi_psd", "absolute").prior_sets == ["W"]
     info = tmp_path / "I.json"
     info.write_text(json.dumps({"x_Delta_KO": [-0.3, 0.3]}))
-    job = build_job(a, "roi_psd", "absolute", informative=info)
+    bayes = parse_bayes_config({"priors": {"I": str(info)}}, tmp_path)
+    job = build_job(a, "roi_psd", "absolute", bayes)
     assert job.prior_sets == ["W", "I"] and job.informative == {"x_Delta_KO": [-0.3, 0.3]}
+    assert build_job(a, "roi_psd", "absolute", bayes, prior_sets=("W",)).prior_sets == ["W"]   # select, not add
+    with pytest.raises(ValueError, match="not in the study"):
+        build_job(a, "roi_psd", "absolute", parse_bayes_config(None, tmp_path), prior_sets=("I",))
 
 
-def test_rope_from_study_then_flag(cfg):
+def test_settings_come_from_the_study(cfg):
     a = cfg.for_paradigm_analysis("arm", "roi_psd")
-    assert build_job(a, "roi_psd", "absolute").rope_sd == 0.2
-    assert build_job(a, "roi_psd", "absolute", rope_sd=0.1).rope_sd == 0.1
+    job = build_job(a, "roi_psd", "absolute")
+    assert job.rope_sd == 0.2 and (job.chains, job.iter, job.warmup, job.seed) == (4, 2000, 1000, 1)
 
 
 def test_unknown_analysis_and_dv(cfg):
