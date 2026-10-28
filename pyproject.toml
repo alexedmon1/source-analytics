@@ -55,6 +55,7 @@ where = ["src"]
 # looks after the repo checkout. MANIFEST.in grafts R/ into the sdist.
 [tool.setuptools.data-files]
 "share/source-analytics/R" = ["R/*.R"]
+"share/source-analytics/R/bayes" = ["R/bayes/*.R"]
 
 [tool.black]
 line-length = 99

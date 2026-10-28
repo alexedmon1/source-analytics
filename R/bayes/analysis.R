@@ -1,9 +1,9 @@
 #!/usr/bin/env Rscript
-# R/bayes_analysis.R — entry point of the separate `bayes` step (src/source_analytics/hypothesis/bayes.py writes the
+# R/bayes/analysis.R — entry point of the separate `bayes` step (src/source_analytics/bayes/ writes the
 # job file). One outcome (dv) per run; each prior set in the job is fitted and read out, and the rows for this dv are
 # written into <analysis>_hypotheses_bayes.csv (rows of other dvs in that file are kept).
 #
-#   Rscript R/bayes_analysis.R --job <job.json>
+#   Rscript R/bayes/analysis.R --job <job.json>
 
 suppressMessages({ library(optparse); library(jsonlite) })
 script_dir <- local({
@@ -11,8 +11,7 @@ script_dir <- local({
   f <- sub("^--file=", "", a[grepl("^--file=", a)])
   if (length(f)) dirname(normalizePath(f)) else "R"
 })
-source(file.path(script_dir, "hypothesis.R"))
-source(file.path(script_dir, "bayes_hypothesis.R"))
+source(file.path(script_dir, "engine.R"))   # loads ../hypothesis.R, then the engine
 
 opt <- parse_args(OptionParser(option_list = list(make_option("--job", type = "character"))))
 job <- fromJSON(opt$job, simplifyVector = FALSE)
@@ -22,7 +21,7 @@ prep <- bayes_prepare(dat, spec, job$dv, job$spatial_col, job$band_col)   # W co
 cat(sprintf("bayes: %s, %d rows, %d subjects, %d bands, %d groups\n", job$dv, nrow(prep$data),
             nlevels(prep$data$subject), length(prep$bands), length(prep$levels)))
 
-# the gate (R/bayes_gate.R) writes gate.json (W) / gate_I.json (I); a real fit records the verdict of its own prior set
+# the gate (R/bayes/gate.R) writes gate.json (W) / gate_I.json (I); a real fit records the verdict of its own prior set
 # (NA when no gate has run at this design and coding)
 gate_verdict <- function(set) {
   gf <- file.path(job$work_dir, "gate", job$dv, sprintf("gate%s.json", if (set == "W") "" else paste0("_", set)))

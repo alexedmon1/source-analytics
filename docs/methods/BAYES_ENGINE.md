@@ -33,9 +33,13 @@ source-analytics bayes ... --gate            # prior predictive + recovery/SBC +
 
 - **Inputs:** the step reads the module's existing `data/*.csv` (the analytics working tree). It needs no subject
   processing, so the frequentist pipeline is untouched.
-- **Python:** a thin wrapper (`hypothesis/bayes.py`: paths, design spec to JSON, `Rscript`).
-- **R:** the model, priors, gate and readout in `R/bayes_hypothesis.R` and `R/bayes_gate.R`. Python calls `Rscript`,
-  as the emmeans modules do.
+- **Python:** a thin wrapper, the subpackage `source_analytics.bayes` (`tables.py`: the outcome tables; `job.py`:
+  paths, design spec to JSON; `run.py`: `Rscript`).
+- **R:** `R/bayes/`. `engine.R` loads the engine: `model.R` (coding, formula, priors), `fit.R` (templates and the
+  guard), `readout.R` (readout and the decision rules). The entry scripts are `analysis.R` (fits) and `gate.R` (the
+  gate). Python calls `Rscript`, as the emmeans modules do.
+- **Regression:** `tests/bayes/test_e0_regression.py` replays the E0 fixtures (FORGE's fits and gate verdicts, frozen
+  2026-10-28 outside the repository; `SA_BAYES_E0`) and requires them digit for digit.
 
 ## 3. Model
 

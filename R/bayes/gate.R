@@ -1,13 +1,13 @@
 #!/usr/bin/env Rscript
-# R/bayes_gate.R — the gate of the Bayesian adapter (docs/methods/BAYES_ENGINE.md section 6), generated from the spec,
+# R/bayes/gate.R — the gate of the Bayesian adapter (docs/methods/BAYES_ENGINE.md section 6), generated from the spec,
 # run at the study's actual design before any real fit. The outcome is read only for the prior predictive spread.
 #
-#   Rscript R/bayes_gate.R --job <job.json> --mode prior_pred
-#   Rscript R/bayes_gate.R --job <job.json> --mode sbc      --reps 100 --workers 5 [--bands "Theta,Low Gamma"]
-#   Rscript R/bayes_gate.R --job <job.json> --mode null     --reps 100 --workers 5 [--bands ...]
-#   Rscript R/bayes_gate.R --job <job.json> --mode recovery --reps 10  --workers 5 --chains 4 --iter 2000 --warmup 1000
+#   Rscript R/bayes/gate.R --job <job.json> --mode prior_pred
+#   Rscript R/bayes/gate.R --job <job.json> --mode sbc      --reps 100 --workers 5 [--bands "Theta,Low Gamma"]
+#   Rscript R/bayes/gate.R --job <job.json> --mode null     --reps 100 --workers 5 [--bands ...]
+#   Rscript R/bayes/gate.R --job <job.json> --mode recovery --reps 10  --workers 5 --chains 4 --iter 2000 --warmup 1000
 #                                                           (full design; the CLI passes the job's real-fit settings)
-#   Rscript R/bayes_gate.R --job <job.json> --mode summarize
+#   Rscript R/bayes/gate.R --job <job.json> --mode summarize
 # Add --set I to gate prior set I (parameters drawn from I; outputs and verdict suffixed _I: gate_I.json).
 #
 # sbc / null may run at a reduced design (a subset of bands, every subject and ROI): the model's structure per band is
@@ -22,8 +22,7 @@ script_dir <- local({
   f <- sub("^--file=", "", a[grepl("^--file=", a)])
   if (length(f)) dirname(normalizePath(f)) else "R"
 })
-source(file.path(script_dir, "hypothesis.R"))
-source(file.path(script_dir, "bayes_hypothesis.R"))
+source(file.path(script_dir, "engine.R"))   # loads ../hypothesis.R, then the engine
 
 opt <- parse_args(OptionParser(option_list = list(
   make_option("--job"), make_option("--mode"), make_option("--reps", type = "integer", default = 100),

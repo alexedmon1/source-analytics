@@ -1,4 +1,5 @@
-"""Python side of the Bayesian hypothesis adapter (hypothesis/bayes.py): job building only, no R or Stan."""
+"""The Bayesian engine (source_analytics.bayes, R/bayes/): job building, R scripts parse, and model-coding checks
+that need R but no sampling."""
 from __future__ import annotations
 
 import json
@@ -7,7 +8,9 @@ import subprocess
 import pytest
 
 from source_analytics.config import StudyConfig
-from source_analytics.hypothesis.bayes import BAYES_TABLES, R_DIR, build_job, design_payload
+from source_analytics.bayes import BAYES_TABLES, build_job, design_payload, r_dir
+
+ENGINE = r_dir() / "bayes" / "engine.R"
 
 YAML = """
 name: t
@@ -95,8 +98,9 @@ def test_unknown_analysis_and_dv(cfg):
 
 
 def test_r_scripts_parse():
-    for f in ("bayes_hypothesis.R", "bayes_analysis.R", "bayes_gate.R"):
-        r = subprocess.run(["Rscript", "-e", f"invisible(parse(file='{R_DIR / f}'))"], capture_output=True, text=True)
+    for f in ("engine.R", "model.R", "fit.R", "readout.R", "analysis.R", "gate.R"):
+        r = subprocess.run(["Rscript", "-e", f"invisible(parse(file='{r_dir() / 'bayes' / f}'))"],
+                           capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
 
 
@@ -104,7 +108,7 @@ def test_template_guard_rejects_other_prior_set():
     """brms writes priors into the compiled code, so update(recompile=FALSE) on a W template would run W priors
     whatever set is asked for; bayes_check_template must refuse it (empty brmsfit: no compiling, no sampling)."""
     code = f"""
-    suppressMessages({{ source('{R_DIR / "hypothesis.R"}'); source('{R_DIR / "bayes_hypothesis.R"}') }})
+    suppressMessages({{ source('{ENGINE}') }})
     d <- expand.grid(subject = paste0('s', 1:6), roi = c('r1', 'r2'), stringsAsFactors = FALSE)
     d$group <- ifelse(d$subject %in% c('s1', 's2', 's3'), 'WT', 'KO'); set.seed(1); d$value <- rnorm(nrow(d))
     spec <- parse_design_spec(list(design = list(factor = 'group', reference = 'WT', levels = list('WT', 'KO'))))
@@ -123,7 +127,7 @@ def test_template_guard_rejects_other_prior_set():
 
 
 _THREE_GROUPS = f"""
-    suppressMessages({{ source('{R_DIR / "hypothesis.R"}'); source('{R_DIR / "bayes_hypothesis.R"}') }})
+    suppressMessages({{ source('{ENGINE}') }})
     d <- expand.grid(subject = paste0('s', 1:9), roi = c('r1', 'r2'), band = c('Alpha', 'Beta'), stringsAsFactors = FALSE)
     d$group <- c('WT', 'KO', 'TR')[(as.integer(sub('s', '', d$subject)) - 1) %/% 3 + 1]
     set.seed(1); d$value <- rnorm(nrow(d))
@@ -174,7 +178,7 @@ def test_estimand_rhat_ignores_a_ridge_no_contrast_sees():
     """R-hat on what is decided (2026-10-21): two parameters that trade a chain-specific constant (a level against
     a roi:band offset, held only by the prior) each fail R-hat, while their sum, the identified direction, passes."""
     code = f"""
-    suppressMessages({{ source('{R_DIR / "hypothesis.R"}'); source('{R_DIR / "bayes_hypothesis.R"}') }})
+    suppressMessages({{ source('{ENGINE}') }})
     set.seed(3); ch <- rep(1:4, each = 1000); u <- c(-1, -0.3, 0.4, 1)[ch]
     a <- rnorm(4000) + u; b <- rnorm(4000) - u
     cat(.estimand_conv(a, ch)[['rhat']], .estimand_conv(b, ch)[['rhat']], .estimand_conv(a + b, ch)[['rhat']],

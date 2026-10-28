@@ -814,7 +814,7 @@ def cmd_init(args):
 def cmd_bayes(args):
     """Bayesian hypothesis adapter (docs/methods/BAYES_ENGINE.md): fits the declared hypotheses on a module's
     per-subject table with brms and writes ``<analysis>_hypotheses_bayes.csv``. Never touches frequentist output."""
-    from .hypothesis.bayes import build_job, run_gate, run_job
+    from .bayes import build_job, run_gate, run_job
 
     config = StudyConfig.from_yaml(args.study)
     if getattr(args, "profile", None):
