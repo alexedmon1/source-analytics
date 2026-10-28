@@ -16,6 +16,16 @@
 
 ### Added
 
+- **Minimum detectable effect on every tabular hypothesis row** (for DUET OPEN.md #151, which reads each
+  finding's size against it). New columns `mde` (`(qt(0.975, df) + qt(0.80, df)) * SE`, normal quantiles when
+  df is infinite), `mde_percent` (of the reference group's mean; blank for slopes, omnibus rows, and a reference
+  mean within one residual SD of zero), `mde_power` (0.80), `mde_alpha` (0.05, nominal: no multiple-comparison
+  correction, by decision) and `mde_note` (`not computed: <reason>` wherever `mde` is blank). Written by the
+  emmeans adapter (contrast, TOST, emtrends; omnibus gets the note), the directed-edge adapter, the Python
+  tabular adapter, and the `stats_utils.R` post-hoc tables (`run_posthoc_global` also gains `emmean_a` /
+  `emmean_b`). Cluster-permutation and NBS rows carry the note. The existing `SE` column is the contract's
+  standard error. Helpers: `mde_from_se` (R/hypothesis.R), `source_analytics.hypothesis.power`.
+
 - **`compute_connectivity_matrix(metrics=...)`** computes only the requested metrics (a family that shares a
   pass is computed together), with values identical to a full call; `roi_connectivity` passes its selected
   metrics, so `--metric` now saves the compute as well as the columns. Unknown names raise.

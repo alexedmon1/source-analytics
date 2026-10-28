@@ -7,6 +7,9 @@
 #   - Post-hoc: emmeans(fit, pairwise ~ group | spatial), Holm correction
 #   - FDR (BH) correction across bands per contrast
 #   - power_type: "relative" or "absolute"
+#   - Every post-hoc row carries the minimum detectable effect (mde, mde_percent
+#     of group_b's emmean, mde_power, mde_alpha, mde_note); the helper .add_mde
+#     lives in hypothesis.R, which every caller sources.
 
 library(dplyr)
 library(tidyr)
@@ -211,6 +214,7 @@ run_posthoc_emmeans <- function(band_df, contrasts, bands, omnibus_df,
             hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
             hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
             significant = con_df$q_value[i] < 0.05,
+            .resid_sd = resid_sd,
             stringsAsFactors = FALSE
           )
         }
@@ -222,7 +226,13 @@ run_posthoc_emmeans <- function(band_df, contrasts, bands, omnibus_df,
     }
   }
 
+  # Minimum detectable effect per row (DUET #151; .add_mde in hypothesis.R, which
+  # every caller sources): group_b is the legacy reference, so its emmean scales
+  # mde_percent, left NA when it is within one residual SD of zero.
   posthoc_df <- bind_rows(results)
+  posthoc_df <- .add_mde(posthoc_df, ref_mean = posthoc_df$emmean_b,
+                         resid_sd = posthoc_df$.resid_sd)
+  posthoc_df$.resid_sd <- NULL
   return(posthoc_df)
 }
 
@@ -427,6 +437,7 @@ run_posthoc_emmeans_region <- function(band_df, contrasts, bands, roi_categories
             hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
             hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
             significant = con_df$q_value[i] < 0.05,
+            .resid_sd = resid_sd,
             stringsAsFactors = FALSE
           )
         }
@@ -438,7 +449,13 @@ run_posthoc_emmeans_region <- function(band_df, contrasts, bands, roi_categories
     }
   }
 
+  # Minimum detectable effect per row (DUET #151; .add_mde in hypothesis.R, which
+  # every caller sources): group_b is the legacy reference, so its emmean scales
+  # mde_percent, left NA when it is within one residual SD of zero.
   posthoc_df <- bind_rows(results)
+  posthoc_df <- .add_mde(posthoc_df, ref_mean = posthoc_df$emmean_b,
+                         resid_sd = posthoc_df$.resid_sd)
+  posthoc_df$.resid_sd <- NULL
   return(posthoc_df)
 }
 
@@ -590,7 +607,7 @@ sig_stars <- function(q) {
 #' @param dv_col name of dependent variable column (default "dv")
 #' @param dv_label character label for the DV in output (e.g., "absolute", "relative", "exponent")
 #' @param band_label optional band name (for multi-band analyses)
-#' @return data.frame with one row per contrast: contrast, dv, band, estimate, SE, df, t_ratio, p_value, q_value, hedges_g, significant, sig_label
+#' @return data.frame with one row per contrast: contrast, dv, band, estimate, SE, df, t_ratio, p_value, emmean_a, emmean_b, hedges_g, mde, mde_percent, mde_power, mde_alpha, mde_note, q_value, significant, sig_label
 run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
                                dv_col = "dv", dv_label = "",
                                band_label = NA_character_) {
@@ -614,6 +631,9 @@ run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
 
       emm <- emmeans(fit, pairwise ~ group)
       con_df <- as.data.frame(summary(emm$contrasts, infer = c(TRUE, TRUE)))
+      emm_df <- as.data.frame(emm$emmeans)
+      emm_a <- emm_df$emmean[as.character(emm_df$group) == ga]
+      emm_b <- emm_df$emmean[as.character(emm_df$group) == gb]
 
       resid_sd <- sigma(fit)
       hg <- con_df$estimate[1] / resid_sd
@@ -631,9 +651,12 @@ run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
         df = con_df$df[1],
         t_ratio = con_df$t.ratio[1],
         p_value = con_df$p.value[1],
+        emmean_a = if (length(emm_a) > 0) emm_a[1] else NA_real_,
+        emmean_b = if (length(emm_b) > 0) emm_b[1] else NA_real_,
         hedges_g = hg,
         hedges_g_lcl = con_df$lower.CL[1] / resid_sd,
         hedges_g_ucl = con_df$upper.CL[1] / resid_sd,
+        .resid_sd = resid_sd,
         stringsAsFactors = FALSE
       )
     }, warning = function(w) {
@@ -646,6 +669,11 @@ run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
   }
 
   global_df <- bind_rows(results)
+  # Minimum detectable effect (DUET #151): scaled by group_b's marginal emmean,
+  # left NA when it is within one residual SD of zero.
+  global_df <- .add_mde(global_df, ref_mean = global_df$emmean_b,
+                        resid_sd = global_df$.resid_sd)
+  global_df$.resid_sd <- NULL
   if (nrow(global_df) > 0) {
     # No cross-band correction: per-band p-values reported directly
     global_df$q_value <- global_df$p_value
@@ -731,6 +759,7 @@ run_posthoc_emmeans_region_nested <- function(band_df, contrasts, bands, roi_cat
             hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
             hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
             significant = con_df$q_value[i] < 0.05,
+            .resid_sd = resid_sd,
             stringsAsFactors = FALSE
           )
         }
@@ -742,7 +771,13 @@ run_posthoc_emmeans_region_nested <- function(band_df, contrasts, bands, roi_cat
     }
   }
 
+  # Minimum detectable effect per row (DUET #151; .add_mde in hypothesis.R, which
+  # every caller sources): group_b is the legacy reference, so its emmean scales
+  # mde_percent, left NA when it is within one residual SD of zero.
   posthoc_df <- bind_rows(results)
+  posthoc_df <- .add_mde(posthoc_df, ref_mean = posthoc_df$emmean_b,
+                         resid_sd = posthoc_df$.resid_sd)
+  posthoc_df$.resid_sd <- NULL
   return(posthoc_df)
 }
 

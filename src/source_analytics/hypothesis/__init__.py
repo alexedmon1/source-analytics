@@ -8,7 +8,8 @@ The spec dataclasses (``Hypothesis`` / ``DesignSpec``) live in ``config.py`` and
 re-exported here for convenience. The permutation adapter — group-contrast and omnibus
 tests over per-subject vertex maps, with a map+cluster result contract — lives in
 ``permutation.py``. The edge/NBS adapter — the same kinds over per-subject connectivity
-matrices, with a subnetwork (component-table) contract — lives in ``edge.py``. See
+matrices, with a subnetwork (component-table) contract — lives in ``edge.py``. The
+minimum detectable effect every tabular row carries is in ``power.py``. See
 ``DESIGN_SPEC.md`` and ``HYPOTHESIS.md``.
 """
 
@@ -23,11 +24,15 @@ from .permutation import (
     run_hypothesis_permutation,
     write_module_hypotheses_perm,
 )
+from .power import MDE_ALPHA, MDE_POWER, mde_from_se
 from .tabular import write_module_hypotheses_tabular
 
 __all__ = [
     "DesignSpec",
     "Hypothesis",
+    "MDE_ALPHA",
+    "MDE_POWER",
+    "mde_from_se",
     "run_hypothesis_edge",
     "run_hypothesis_permutation",
     "write_module_hypotheses_edge",
