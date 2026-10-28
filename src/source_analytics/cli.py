@@ -811,6 +811,22 @@ def cmd_init(args):
 
 
 
+def cmd_benchmark(args):
+    """Score arms' claims tables against a frozen cohort set (source_analytics.bayes.benchmark)."""
+    from .bayes.benchmark import BenchmarkError, CohortSet, read_claims, score
+
+    try:
+        cs = CohortSet.load(args.cohorts)
+        compare = [tuple(c.split(":", 1)) for c in (args.compare or [])]
+        if any(len(c) != 2 for c in compare):
+            raise BenchmarkError("--compare takes ARM_A:ARM_B (each 'arm' or 'arm/prior_set')")
+        tabs = score(read_claims(args.claims), cs, out=args.out, leak_rule=args.leak_rule, compare=compare)
+    except BenchmarkError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
+    print(f"benchmark: {len(tabs['rows'])} claims scored -> {args.out}/summary.txt")
+
+
 def cmd_bayes(args):
     """Bayesian hypothesis adapter (docs/methods/BAYES_ENGINE.md): fits the declared hypotheses on a module's
     per-subject table with brms and writes ``<analysis>_hypotheses_bayes.csv``. Never touches frequentist output.
@@ -1036,6 +1052,24 @@ def main():
                          help="Write the table and fits here instead of the study's results/analytics trees "
                               "(use when the study's results are frozen)")
     p_bayes.set_defaults(func=cmd_bayes)
+
+    p_bench = subparsers.add_parser(
+        "benchmark",
+        help="Score methods' claims tables against a frozen simulated cohort set with known truth "
+             "(bias, coverage, false claims, attribution, power by N; source_analytics.bayes.benchmark)",
+    )
+    bench_sub = p_bench.add_subparsers(dest="benchmark_command", required=True)
+    p_score = bench_sub.add_parser("score", help="Score claims tables; writes one CSV per table and summary.txt")
+    p_score.add_argument("--cohorts", type=Path, required=True, help="Cohort set (the directory with MANIFEST.json)")
+    p_score.add_argument("--claims", type=Path, nargs="+", required=True,
+                         help="Claims CSVs, or directories searched for them")
+    p_score.add_argument("--out", type=Path, required=True, help="Output directory")
+    p_score.add_argument("--leak-rule", choices=["truth_unit", "row_rope"], default="truth_unit",
+                         help="'leaked but real': path truth beyond 0.1 x the band's real-data unit (default), or "
+                              "beyond each row's rope_db (the EE3 pilot's rule)")
+    p_score.add_argument("--compare", nargs="*", metavar="A:B",
+                         help="Paired differences B - A by cohort (arm or arm/prior_set)")
+    p_score.set_defaults(func=cmd_benchmark)
 
     args = parser.parse_args()
     setup_logging(args.verbose)
