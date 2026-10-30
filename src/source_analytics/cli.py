@@ -827,6 +827,21 @@ def cmd_benchmark(args):
     print(f"benchmark: {len(tabs['rows'])} claims scored -> {args.out}/summary.txt")
 
 
+def cmd_benchmark_location(args):
+    """Score methods' region probabilities (source_analytics.bayes.benchmark_location)."""
+    from .bayes.benchmark import BenchmarkError, CohortSet, read_claims
+    from .bayes.benchmark_location import read_hierarchy, score_location
+
+    try:
+        diff = read_claims(args.differ) if args.differ else None
+        tabs = score_location(read_claims(args.probs), CohortSet.load(args.cohorts), read_hierarchy(args.hierarchy),
+                              diff=diff, out=args.out)
+    except BenchmarkError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
+    print(f"benchmark location: {len(tabs['tables'])} tables scored -> {args.out}/summary.txt")
+
+
 def cmd_bayes(args):
     """Bayesian hypothesis adapter (docs/methods/BAYES_ENGINE.md): fits the declared hypotheses on a module's
     per-subject table with brms and writes ``<analysis>_hypotheses_bayes.csv``. Never touches frequentist output.
@@ -1070,6 +1085,14 @@ def main():
     p_score.add_argument("--compare", nargs="*", metavar="A:B",
                          help="Paired differences B - A by cohort (arm or arm/prior_set)")
     p_score.set_defaults(func=cmd_benchmark)
+    p_loc = bench_sub.add_parser("location", help="Score region probabilities: where is the signal, does it differ")
+    p_loc.add_argument("--cohorts", type=Path, required=True, help="Cohort set (the directory with MANIFEST.json)")
+    p_loc.add_argument("--hierarchy", type=Path, required=True, help="CSV: roi, compartment, hemisphere, group")
+    p_loc.add_argument("--probs", type=Path, nargs="+", required=True,
+                       help="Region-probability CSVs, or directories searched for them")
+    p_loc.add_argument("--differ", type=Path, nargs="*", help="Group-difference CSVs, or directories")
+    p_loc.add_argument("--out", type=Path, required=True, help="Output directory")
+    p_loc.set_defaults(func=cmd_benchmark_location)
 
     args = parser.parse_args()
     setup_logging(args.verbose)
