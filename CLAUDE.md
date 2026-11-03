@@ -76,6 +76,9 @@ figures → summary`. `DEFAULT_RUN_STEPS` excludes `figures`.
   never fail a run. A new hypothesis-table column needs a description in
   `results_spec.columns`, or the module's spec is not written (logged). Opted in:
   `roi_aperiodic`.
+- `source-analytics gallery build` (`gallery.py`) runs each opted-in module's
+  `figures()` from its tables, lists the figures in `analysis.json`, and calls
+  `neurobox.gallery.build`; source-lightbox is being retired in its favour.
 - Band power CSVs carry `absolute` (mean power density, dB/Hz) and `relative`.
   There is no `dB` column.
 

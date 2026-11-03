@@ -4,6 +4,17 @@
 
 ### Added
 
+- **`source-analytics gallery build --study study.yaml`: the study's gallery through the shared shell**
+  (neurobox-dev's `neurobox.gallery`; Esprit's results plan, step 5). For each module with a `RESULTS_SPEC`
+  and an `analysis.json` (today `roi_aperiodic`), it runs the module's figures step from its tables (R figures
+  and brain mosaics), copies the figures into the analysis folder and lists them in `analysis.json` (kind
+  inferred from the name, `drawn_by`), checks the folder again, and builds one static gallery for the study,
+  with the localization summaries source-localization's `study qc` writes. Settings from `gallery.yaml` beside
+  the study config, else from the config (`gallery_title`, `groups`, `group_order`, `paths.gallery`). The
+  shell refuses to replace a folder it did not build, so today's source-lightbox gallery at `paths.gallery`
+  is safe: pass `--out`. On FORGE treatment `roi_based` (in scratch): the same 24 `roi_aperiodic` figures as
+  today's gallery, 7.8 MB in all against 3.2 GB. The `results` extra now pins neurobox-dev `4fb16ed`.
+
 - **`roi_aperiodic` describes its results by the shared results specification** (neurobox-dev, schema 0.4;
   Esprit's results plan, step 4). With the new optional extra `results` installed
   (`pip install 'source-analytics[results]'`, also in `all`), a run that computes statistics writes, beside the
