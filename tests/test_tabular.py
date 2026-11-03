@@ -18,12 +18,15 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
+from scipy import stats as st
 
 from source_analytics.config import DesignSpec, Hypothesis
 from source_analytics.hypothesis.tabular import (
     _adapt_cell,
     _apply_fdr,
     _fdr_family_label,
+    omega2_ci,
     write_module_hypotheses_tabular,
 )
 
@@ -80,6 +83,22 @@ def test_contrast_matches_pooled_one_way():
     assert res["df"] == N - k
     assert res["effect_size_type"] == "hedges_g"
     assert res["group_a"] == "KO_VEH" and res["group_b"] == "WT_VEH"
+    # sample sizes and the effect's interval (the estimate's, over the residual SD)
+    assert res["n"] == N
+    assert (res["n_a"], res["n_b"]) == (by_group["KO_VEH"].size, by_group["WT_VEH"].size)
+    tcrit = st.t.ppf(0.975, N - k)
+    assert abs(res["effect_size_lcl"] - (est - tcrit * se) / s) < 1e-9
+    assert abs(res["effect_size_ucl"] - (est + tcrit * se) / s) < 1e-9
+
+
+@pytest.mark.parametrize("f, df1, df2, lo, hi", [
+    # effectsize::F_to_omega2(f, df1, df2, ci = 0.95, alternative = "two.sided")
+    (5.2, 4, 40, 0.0204, 0.4454), (0.8, 4, 40, 0.0, 0.0), (30, 2, 100, 0.2121, 0.4822),
+    (1.3, 4, 60, 0.0, 0.0561), (2.5, 1, 20, 0.0, 0.3311),
+])
+def test_omega2_interval_matches_effectsize(f, df1, df2, lo, hi):
+    got = omega2_ci(f, df1, df2)
+    assert abs(got[0] - lo) < 1e-4 and abs(got[1] - hi) < 1e-4, got
 
 
 def test_spatial_specificity_and_schema(tmp_path):

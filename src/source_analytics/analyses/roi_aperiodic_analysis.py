@@ -14,6 +14,7 @@ from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
 from ..spectral.psd import compute_psd_multiroi
 from ..spectral.aperiodic import fit_aperiodic_multiroi, resolve_freq_range
+from ..results_spec import ResultsSpec, SpecTable
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,30 @@ class ROIAperiodicAnalysis(BaseAnalysis):
 
     name = "roi_aperiodic"
     SELECTABLE = {"hypothesis": "declared hypothesis"}
+    RESULTS_SPEC = ResultsSpec(
+        domain="aperiodic",
+        measures={"exponent": "aperiodic_exponent", "offset": "aperiodic_offset"},
+        units={"exponent": "unitless (the 1/f exponent)", "offset": "log10 power (the 1 Hz-referenced offset)"},
+        input_file="aperiodic_params.csv",
+        method="a linear mixed model per parameter (lme4/lmerTest: parameter ~ group * ROI "
+               "+ (1 | subject), Satterthwaite df) with emmeans contrasts of the declared "
+               "hypotheses; equivalence by two one-sided tests",
+        tables=(
+            SpecTable("_global_hypotheses.csv", "tests",
+                      "one declared hypothesis on one aperiodic parameter, on the group means "
+                      "marginalized over every ROI",
+                      "the declared hypotheses over the whole cortex", element=False, headline=True),
+            SpecTable("_region_hypotheses.csv", "elements",
+                      "one declared hypothesis on one parameter in one region (the ROIs of a region "
+                      "category averaged)",
+                      "the declared hypotheses per region", element=True),
+            SpecTable("_hypotheses.csv", "elements",
+                      "one declared hypothesis on one parameter in one ROI",
+                      "the declared hypotheses per ROI", element=True),
+        ),
+        caveats=(("The offset is referenced to 1 Hz, so it is coupled to the exponent; "
+                  "aperiodic_params.csv also carries offset_centered, which is not tested here."),),
+    )
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)

@@ -335,4 +335,25 @@ ok(near(de_ab$mde, mde_from_se(de_ab$SE, de_ab$df)) &&
 ok(all(de_om$mde_note == "not computed: omnibus F test") && all(is.na(de_om$mde)),
    "directed-edge omnibus rows: note, no mde")
 
+# sample sizes and the effect's interval (the results specification's contract)
+n_subj <- length(unique(df$subject))
+n_ko <- length(unique(df$subject[df$group == "KO_VEH"]))
+n_wt <- length(unique(df$subject[df$group == "WT_VEH"]))
+ok(all(new_con$n == n_ko + n_wt) && all(new_con$n_a == n_ko) && all(new_con$n_b == n_wt),
+   sprintf("per-contrast fit: n %d (the subjects fitted), with n_a and n_b for the pair", n_ko + n_wt))
+sd_con <- new_con$effect_size / (new_con$estimate)     # 1 / residual SD, per row
+ok(isTRUE(all.equal(new_con$effect_size_lcl, new_con$estimate_lcl * sd_con)) &&
+     isTRUE(all.equal(new_con$effect_size_ucl, new_con$estimate_ucl * sd_con)) &&
+     all(new_con$effect_size_lcl <= new_con$effect_size & new_con$effect_size <= new_con$effect_size_ucl),
+   "contrast rows: the effect's interval is the estimate's over the residual SD")
+o2 <- .omega2_with_ci(5.2, 4, 40)
+ok(near(o2[1], 0.27184, 1e-4) && near(o2[2], 0.0204, 1e-4) && near(o2[3], 0.4454, 1e-4),
+   "omega2 interval (F 5.2 on 4, 40): 0.272 [0.020, 0.445], as tabular.omega2_ci pins it")
+ok(all(!is.na(new_omni4$effect_size_lcl)) && all(is.na(new_omni4$n_a)) &&
+     all(new_omni4$n == n_subj), "omnibus rows: omega2 interval and n; no pair")
+ok(all(!is.na(new_reg$effect_size_lcl)) && all(new_reg$effect_size_lcl <= new_reg$effect_size),
+   "regression rows: standardized slope with its interval")
+ok(all(de_ab$n_a + de_ab$n_b <= de_ab$n) && !is.na(de_ab$effect_size_lcl) &&
+     all(!is.na(de_om$effect_size_ucl)), "directed edges: n, n_a, n_b and intervals")
+
 cat("\nAll hypothesis-layer checks passed.\n")

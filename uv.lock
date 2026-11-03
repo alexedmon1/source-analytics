@@ -1008,6 +1008,11 @@ wheels = [
 ]
 
 [[package]]
+name = "neurobox-dev"
+version = "0.4.0"
+source = { git = "https://github.com/alexedmon1/neurobox-dev?rev=4333c6a4dcbf13a82d27c456a52aebdf1c7d559d#4333c6a4dcbf13a82d27c456a52aebdf1c7d559d" }
+
+[[package]]
 name = "nibabel"
 version = "5.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2038,7 +2043,7 @@ wheels = [
 
 [[package]]
 name = "source-analytics"
-version = "0.8.0"
+version = "0.8.2"
 source = { editable = "." }
 dependencies = [
     { name = "joblib" },
@@ -2064,6 +2069,7 @@ all = [
     { name = "mne" },
     { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "neurobox-dev" },
     { name = "nibabel" },
     { name = "pytest" },
     { name = "ruff" },
@@ -2092,6 +2098,9 @@ network = [
 render = [
     { name = "markdown" },
 ]
+results = [
+    { name = "neurobox-dev" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2101,6 +2110,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.7" },
     { name = "mne", marker = "extra == 'mne'", specifier = ">=1.5" },
     { name = "networkx", marker = "extra == 'network'", specifier = ">=3.0" },
+    { name = "neurobox-dev", marker = "extra == 'results'", git = "https://github.com/alexedmon1/neurobox-dev?rev=4333c6a4dcbf13a82d27c456a52aebdf1c7d559d" },
     { name = "nibabel", specifier = ">=5.0" },
     { name = "nibabel", marker = "extra == 'atlas'", specifier = ">=5.0" },
     { name = "numpy", specifier = ">=1.24" },
@@ -2110,10 +2120,10 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "scikit-learn", marker = "extra == 'mvpa'", specifier = ">=1.3" },
     { name = "scipy", specifier = ">=1.10" },
-    { name = "source-analytics", extras = ["mne", "atlas", "mvpa", "network", "render", "dev"], marker = "extra == 'all'" },
+    { name = "source-analytics", extras = ["mne", "atlas", "mvpa", "network", "render", "results", "dev"], marker = "extra == 'all'" },
     { name = "specparam", specifier = ">=2.0.0rc6" },
 ]
-provides-extras = ["mne", "atlas", "mvpa", "network", "render", "dev", "all"]
+provides-extras = ["mne", "atlas", "mvpa", "network", "render", "results", "dev", "all"]
 
 [[package]]
 name = "specparam"
