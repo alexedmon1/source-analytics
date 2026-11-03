@@ -214,6 +214,34 @@ contrasts_from_spec <- function(spec) {
           scope, method, key, axis, length(members), h)
 }
 
+#' Name the multiple-comparison correction a results table's q-values received.
+#'
+#' Read from each row's `fdr_family` label (written by .apply_fdr), so a summary
+#' sentence or a figure subtitle never names a correction the numbers did not
+#' get: the method is set per hypothesis in the design spec (default BH), so it
+#' cannot be written as a constant. A table without `fdr_family` comes from a
+#' legacy post-hoc path, whose correction is `default`. Pass the whole table,
+#' not only its significant rows, so the label survives when nothing is
+#' significant.
+correction_phrase <- function(df, default = "Holm correction") {
+  if (is.null(df) || !is.data.frame(df) || nrow(df) == 0 ||
+      !"fdr_family" %in% names(df)) return(default)
+  fam <- unique(as.character(stats::na.omit(df$fdr_family)))
+  fam <- fam[grepl("method=", fam, fixed = TRUE)]
+  if (length(fam) == 0) return(default)
+  methods <- unique(sub("^.*method=([^ ]+).*$", "\\1", fam))
+  if (all(methods == "none")) return("no multiple-comparison correction")
+  named <- c(BH = "Benjamini-Hochberg FDR", fdr = "Benjamini-Hochberg FDR",
+             BY = "Benjamini-Yekutieli FDR", holm = "Holm", hochberg = "Hochberg",
+             hommel = "Hommel", bonferroni = "Bonferroni")
+  used <- methods[methods != "none"]
+  shown <- unique(unname(ifelse(used %in% names(named), named[used], used)))
+  phrase <- paste0(paste(sort(shown), collapse = " / "),
+                   " correction within each hypothesis family")
+  if ("none" %in% methods) phrase <- paste0(phrase, "; some families uncorrected")
+  phrase
+}
+
 # ---- Helpers ---------------------------------------------------------------
 
 #' Align a hypothesis's weights to factor `levels` (0-fill), in level order.

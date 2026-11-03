@@ -265,3 +265,42 @@ def test_psd_region_tier_falls_back_to_the_file_when_config_has_none(tmp_path, d
     assert "Loaded roi_categories from:" in log
     labels = _psd_region_labels(out)
     assert labels and labels <= {"Front", "Back"}, labels
+
+
+def test_psd_summary_names_the_correction_its_tables_used(tmp_path, design_config):
+    """The summary names the correction the q-values actually received, read from the
+    tables' fdr_family: BH by default, or what a hypothesis's fdr: sets. It used to say
+    Holm over BH q-values (seen in FORGE roi_aperiodic), and to claim omnibus gating the
+    hypothesis layer does not do."""
+    data = tmp_path / "data"
+    _psd_band_power_csv(data)
+    out = tmp_path / "bh"
+    _run("roi_psd_analysis.R", data, design_config, out)
+    summary = (out / "ANALYSIS_SUMMARY.md").read_text()
+    assert "Holm" not in summary
+    assert "Benjamini-Hochberg FDR correction within each hypothesis family" in summary
+    assert "not gated on the omnibus" in summary
+    assert "gated on significant omnibus effects" not in summary
+
+    cfg = yaml.safe_load(design_config.read_text())
+    cfg["hypotheses"][1]["fdr"] = {"method": "holm"}
+    holm = tmp_path / "holm.yaml"
+    holm.write_text(yaml.safe_dump(cfg))
+    out2 = tmp_path / "holm"
+    _run("roi_psd_analysis.R", data, holm, out2)
+    assert "Holm correction within each hypothesis family" in (out2 / "ANALYSIS_SUMMARY.md").read_text()
+
+
+def test_correction_phrase_reads_fdr_family_and_keeps_legacy_holm():
+    code = (
+        f'source("{R_DIR / "hypothesis.R"}"); '
+        'cat(correction_phrase(data.frame(fdr_family = "scope=band method=BH key=k members=roi[6] hash=1")), "|", '
+        'correction_phrase(data.frame(p_value = 0.01)), "|", '
+        'correction_phrase(data.frame(fdr_family = "scope=none method=none key=k members=row[1] hash=1")))'
+    )
+    res = subprocess.run(["Rscript", "-e", code], capture_output=True, text=True, timeout=120)
+    assert res.returncode == 0, res.stderr
+    bh, legacy, none = [part.strip() for part in res.stdout.split("|")]
+    assert bh == "Benjamini-Hochberg FDR correction within each hypothesis family"
+    assert legacy == "Holm correction"
+    assert none == "no multiple-comparison correction"

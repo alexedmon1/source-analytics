@@ -599,7 +599,7 @@ plot_pac_significance_heatmap <- function(posthoc_df, output_dir) {
       ) +
       labs(x = "Frequency Pair", y = NULL,
            title = paste0("Region x Freq Pair Significance: ", cname),
-           subtitle = "* = significant after Holm correction") +
+           subtitle = paste0("* = q < 0.05 (", correction_phrase(posthoc_df), ")")) +
       theme_pub() +
       theme(
         axis.text.y = element_text(size = 9),
@@ -680,7 +680,10 @@ write_pac_summary <- function(global_df, global_ttest_df,
       "averaged within. LMM: z_score ~ group * region + (1|subject). ",
       "Type III ANOVA with Satterthwaite df. ",
       "FDR (BH) across freq_pairs. ",
-      "Post-hoc: emmeans pairwise group contrasts per region, Holm correction. ",
+      if ("fdr_family" %in% names(posthoc_region_df))
+        paste0("Per-contrast tests: the planned hypotheses in the study's design spec, as emmeans ",
+               "contrasts per region (hypothesis layer); ", correction_phrase(posthoc_region_df), ". ")
+      else "Post-hoc: emmeans pairwise group contrasts per region, Holm correction. ",
       "Hedges' g = emmean difference / residual SD."
     )
   }
@@ -741,7 +744,8 @@ write_pac_summary <- function(global_df, global_ttest_df,
     if (nrow(posthoc_region_df) > 0) {
       sig_ph <- posthoc_region_df %>% filter(significant == TRUE)
       if (nrow(sig_ph) > 0) {
-        add("Significant region group differences (Holm-corrected q < 0.05):")
+        add("Significant region group differences (q < 0.05; ",
+            correction_phrase(posthoc_region_df), "):")
         add("")
         for (fp in unique(sig_ph$freq_pair)) {
           fp_sig <- sig_ph %>% filter(freq_pair == fp)
@@ -758,7 +762,7 @@ write_pac_summary <- function(global_df, global_ttest_df,
           add("")
         }
       } else {
-        add("No individual regions reached significance after Holm correction.")
+        add("No individual regions reached q < 0.05 (", correction_phrase(posthoc_region_df), ").")
         add("")
       }
       add("**Total regions tested:** ", length(unique(posthoc_region_df$region)),

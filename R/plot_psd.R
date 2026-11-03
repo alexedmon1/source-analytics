@@ -373,7 +373,7 @@ plot_significance_heatmap <- function(posthoc_df, output_dir) {
         ) +
         labs(x = "Frequency Band", y = NULL,
              title = paste0("ROI x Band Significance: ", cname, " (", ptype, ")"),
-             subtitle = "* = significant after Holm correction") +
+             subtitle = paste0("* = q < 0.05 (", correction_phrase(posthoc_df), ")")) +
         theme_pub() +
         theme(
           axis.text.y = element_text(size = 9),
@@ -431,7 +431,7 @@ plot_region_significance_heatmap <- function(posthoc_region_df, output_dir) {
         ) +
         labs(x = "Frequency Band", y = NULL,
              title = paste0("Region x Band Significance: ", cname, " (", ptype, ")"),
-             subtitle = "* = significant after Holm correction") +
+             subtitle = paste0("* = q < 0.05 (", correction_phrase(posthoc_region_df), ")")) +
         theme_pub() +
         theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
