@@ -742,6 +742,15 @@ interval: the estimate's interval over the residual SD for a standardized
 difference, partial omega squared's interval for an omnibus row (as
 `effectsize::F_to_omega2` gives it), the standardized slope's for a regression.
 
+**The study gallery.** `source-analytics gallery build --study study.yaml [--out DIR]`
+(with the `results` extra) builds one static gallery for the study with neurobox-dev's
+shared shell, the same for every tool: it draws each opted-in module's figures from its
+tables, lists them in its `analysis.json`, and adds the localization summaries that
+source-localization's `study qc` writes. Settings come from a `gallery.yaml` beside the
+study config (sections, links, group labels; the format is in `neurobox.gallery`), or
+from the config itself. It will not replace a folder it did not build, such as a
+source-lightbox gallery.
+
 **The shared results specification.** With the `results` extra installed, a module
 that declares a `RESULTS_SPEC` (today `roi_aperiodic`) describes its hypothesis
 tables by neurobox-dev's results specification whenever its statistics run: an

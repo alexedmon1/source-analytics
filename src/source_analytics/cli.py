@@ -678,6 +678,19 @@ _INIT_BANDS = {
 _INIT_DEFAULT_ANALYSES = ["roi_psd", "roi_aperiodic", "roi_connectivity"]
 
 
+def cmd_gallery(args):
+    """Build the study's gallery through the shared shell (neurobox-dev)."""
+    from .gallery import build
+
+    try:
+        index = build(Path(args.study), out=Path(args.out) if args.out else None,
+                      paradigms=args.paradigm or None, draw=not args.no_draw)
+    except Exception as exc:  # noqa: BLE001 - say why, plainly
+        print(f"ERROR: gallery not built: {exc}")
+        sys.exit(1)
+    print(f"Gallery: {index}")
+
+
 def cmd_init(args):
     """Scaffold a study YAML (design:/hypotheses: + paradigms:) from a reconstruction dir.
 
@@ -921,6 +934,15 @@ def main():
     p_fig.set_defaults(func=cmd_figure)
 
     # init
+    p_gal = subparsers.add_parser(
+        "gallery", help="Build the study's gallery (needs the `results` extra)")
+    p_gal.add_argument("action", choices=["build"], help="build: draw, list figures, write the gallery")
+    p_gal.add_argument("--study", required=True, help="Path to study YAML config")
+    p_gal.add_argument("--out", help="Gallery folder (default: gallery.yaml's or the config's paths.gallery)")
+    p_gal.add_argument("--paradigm", action="append", help="Only this paradigm (repeatable)")
+    p_gal.add_argument("--no-draw", action="store_true", help="List the figures already drawn; draw nothing")
+    p_gal.set_defaults(func=cmd_gallery)
+
     p_init = subparsers.add_parser(
         "init",
         help="Scaffold a study YAML (design/hypotheses + one paradigm) from a "

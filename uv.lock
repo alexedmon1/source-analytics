@@ -1010,7 +1010,7 @@ wheels = [
 [[package]]
 name = "neurobox-dev"
 version = "0.4.0"
-source = { git = "https://github.com/alexedmon1/neurobox-dev?rev=4333c6a4dcbf13a82d27c456a52aebdf1c7d559d#4333c6a4dcbf13a82d27c456a52aebdf1c7d559d" }
+source = { git = "https://github.com/alexedmon1/neurobox-dev?rev=4fb16ed72480c99256130325ff76f7f8c84a3f1f#4fb16ed72480c99256130325ff76f7f8c84a3f1f" }
 
 [[package]]
 name = "nibabel"
@@ -2110,7 +2110,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.7" },
     { name = "mne", marker = "extra == 'mne'", specifier = ">=1.5" },
     { name = "networkx", marker = "extra == 'network'", specifier = ">=3.0" },
-    { name = "neurobox-dev", marker = "extra == 'results'", git = "https://github.com/alexedmon1/neurobox-dev?rev=4333c6a4dcbf13a82d27c456a52aebdf1c7d559d" },
+    { name = "neurobox-dev", marker = "extra == 'results'", git = "https://github.com/alexedmon1/neurobox-dev?rev=4fb16ed72480c99256130325ff76f7f8c84a3f1f" },
     { name = "nibabel", specifier = ">=5.0" },
     { name = "nibabel", marker = "extra == 'atlas'", specifier = ">=5.0" },
     { name = "numpy", specifier = ">=1.24" },
