@@ -686,7 +686,7 @@ plot_aperiodic_significance_heatmap <- function(posthoc_df, output_dir) {
       ) +
       labs(x = "Dependent Variable", y = NULL,
            title = paste0("ROI x DV Significance: ", cname),
-           subtitle = "* = significant after Holm correction") +
+           subtitle = paste0("* = q < 0.05 (", correction_phrase(posthoc_df), ")")) +
       theme_pub() +
       theme(
         axis.text.y = element_text(size = 7),
@@ -750,10 +750,22 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
       "Region-level analysis: ROIs averaged within anatomical regions, ",
       "then dv ~ group * region + (1|subject). ")
   }
-  stats_lines <- paste0(stats_lines,
-    "Post-hoc: emmeans pairwise group contrasts per ROI/region, gated on significant ",
-    "omnibus effects, Holm correction. Hedges' g = emmean difference / residual SD. ",
-    "No FDR correction across bands (single DV per model).")
+  # Per-contrast tests come from the hypothesis layer when its table carries
+  # fdr_family; its correction is whatever the design spec set, read from the rows.
+  posthoc_all <- dplyr::bind_rows(posthoc_df, posthoc_region_df)
+  if ("fdr_family" %in% names(posthoc_all)) {
+    stats_lines <- paste0(stats_lines,
+      "Per-contrast tests: the planned hypotheses in the study's design spec, as emmeans ",
+      "contrasts per ROI/region (hypothesis layer), not gated on the omnibus, which is ",
+      "diagnostic; ", correction_phrase(posthoc_all), ". ",
+      "Hedges' g = emmean difference / residual SD. ",
+      "No FDR correction across bands (single DV per model).")
+  } else {
+    stats_lines <- paste0(stats_lines,
+      "Post-hoc: emmeans pairwise group contrasts per ROI/region, gated on significant ",
+      "omnibus effects, Holm correction. Hedges' g = emmean difference / residual SD. ",
+      "No FDR correction across bands (single DV per model).")
+  }
   add(stats_lines)
   add("")
 
@@ -789,7 +801,8 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
       add("### Region-Level Post-Hoc")
       add("")
       if (nrow(sig_region) > 0) {
-        add("Significant region-level group differences (Holm-corrected q < 0.05):")
+        add("Significant region-level group differences (q < 0.05; ",
+            correction_phrase(posthoc_region_df), "):")
         add("")
         add("| DV | Region | Estimate | SE | t | q | Hedges' g |")
         add("| --- | --- | --- | --- | --- | --- | --- |")
@@ -801,7 +814,7 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
         }
         add("")
       } else {
-        add("No individual regions reached significance after Holm correction.")
+        add("No individual regions reached q < 0.05 (", correction_phrase(posthoc_region_df), ").")
         add("")
       }
     } else {
@@ -839,7 +852,8 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
   if (nrow(posthoc_df) > 0) {
     sig_posthoc <- posthoc_df %>% filter(significant == TRUE)
     if (nrow(sig_posthoc) > 0) {
-      add("Significant ROI-level group differences (Holm-corrected q < 0.05):")
+      add("Significant ROI-level group differences (q < 0.05; ",
+          correction_phrase(posthoc_df), "):")
       add("")
       for (dv_name in unique(sig_posthoc$dv)) {
         dv_sig <- sig_posthoc %>% filter(dv == dv_name)
@@ -856,7 +870,7 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
         add("")
       }
     } else {
-      add("No individual ROIs reached significance after Holm correction.")
+      add("No individual ROIs reached q < 0.05 (", correction_phrase(posthoc_df), ").")
       add("")
     }
     add("**Total ROIs tested:** ", length(unique(posthoc_df$spatial)))

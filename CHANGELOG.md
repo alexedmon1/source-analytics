@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Summaries and heatmap subtitles name the correction the q-values actually received.** The modules whose
+  per-contrast tests come from the hypothesis layer (`roi_psd`, `electrode` at channel level, `roi_aperiodic`,
+  `roi_pac`, `roi_transfer_entropy`) still wrote "Holm correction" and "gated on significant omnibus effects".
+  Their q-values are in fact corrected within each hypothesis family by the method the design spec sets (BH by
+  default), and they are not gated. FORGE `roi_aperiodic` (written 2026-09-10) shows it: all six of its tables'
+  q-values match Benjamini-Hochberg in every family and none matches Holm, yet its `ANALYSIS_SUMMARY.md` said
+  Holm. The wording is now read from each table's `fdr_family` (`correction_phrase()` in `R/hypothesis.R`), so a
+  hypothesis with `fdr: {method: holm}` is reported as Holm. Tables without `fdr_family` come from the legacy
+  post-hoc paths that do apply Holm (`roi_evoked`, `electrode_evoked`, `roi_connectivity`, `electrode`
+  region-nested), and keep saying so. No number changes. **Re-run an analysis to regenerate its
+  `ANALYSIS_SUMMARY.md` and figure subtitles.**
+
 ### Changed
 
 - **Transfer entropy's history lag is band-matched by default.** `compute_transfer_entropy(lag="band")` sets the

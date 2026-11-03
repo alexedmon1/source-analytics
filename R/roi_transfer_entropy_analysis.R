@@ -661,7 +661,7 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
     if (nrow(posthoc_df) > 0) {
       sig_ph <- posthoc_df %>% filter(significant == TRUE)
       if (nrow(sig_ph) > 0) {
-        add("### Significant Region-Pair Contrasts (Holm q < 0.05)")
+        add("### Significant Region-Pair Contrasts (q < 0.05; ", correction_phrase(posthoc_df), ")")
         add("")
         add("| Band | Region Pair | Estimate | SE | t | q | Hedges' g |")
         add("| --- | --- | --- | --- | --- | --- | --- |")
@@ -673,7 +673,7 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
         }
         add("")
       } else {
-        add("No region pairs reached significance after Holm correction.")
+        add("No region pairs reached q < 0.05 (", correction_phrase(posthoc_df), ").")
         add("")
       }
     } else {

@@ -52,7 +52,8 @@ format_omnibus_table <- function(df) {
   df
 }
 
-format_posthoc_section <- function(sig_df, spatial_col = "spatial") {
+format_posthoc_section <- function(sig_df, spatial_col = "spatial",
+                                   correction = "Holm correction") {
   lines <- character()
   add <- function(...) lines <<- c(lines, paste0(...))
 
@@ -60,7 +61,7 @@ format_posthoc_section <- function(sig_df, spatial_col = "spatial") {
   label <- if (spatial_col == "region") "Region" else "ROI"
 
   if (nrow(sig_df) > 0) {
-    add("Significant ", tolower(label), "-level group differences (Holm-corrected q < 0.05):")
+    add("Significant ", tolower(label), "-level group differences (q < 0.05; ", correction, "):")
     add("")
 
     for (pt in unique(sig_df$dv)) {
@@ -80,7 +81,7 @@ format_posthoc_section <- function(sig_df, spatial_col = "spatial") {
       }
     }
   } else {
-    add("No individual ", tolower(label), "s reached significance after Holm correction.")
+    add("No individual ", tolower(label), "s reached q < 0.05 (", correction, ").")
     add("")
   }
 
@@ -161,10 +162,20 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
   }
   stats_lines <- paste0(stats_lines,
     "Type III ANOVA with Satterthwaite df (lme4/lmerTest). ",
-    "FDR (BH) correction across bands within each contrast x power type. ",
-    "Post-hoc: emmeans pairwise group contrasts, gated on significant omnibus effects. ",
-    "Holm correction within each band. ",
-    "Hedges' g = emmean difference / residual SD.")
+    "FDR (BH) correction across bands within each contrast x power type. ")
+  # Per-contrast tests come from the hypothesis layer when its table carries
+  # fdr_family; its correction is whatever the design spec set, read from the rows.
+  if ("fdr_family" %in% names(posthoc_df)) {
+    stats_lines <- paste0(stats_lines,
+      "Per-contrast tests: the planned hypotheses in the study's design spec, as emmeans ",
+      "contrasts (hypothesis layer), not gated on the omnibus, which is diagnostic; ",
+      correction_phrase(posthoc_df), ". ")
+  } else {
+    stats_lines <- paste0(stats_lines,
+      "Post-hoc: emmeans pairwise group contrasts, gated on significant omnibus effects. ",
+      "Holm correction within each band. ")
+  }
+  stats_lines <- paste0(stats_lines, "Hedges' g = emmean difference / residual SD.")
   add(stats_lines)
   add("")
 
@@ -181,7 +192,8 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
     add("")
     if (nrow(posthoc_region_df) > 0) {
       sig_region <- posthoc_region_df %>% filter(significant == TRUE)
-      add_lines(format_posthoc_section(sig_region, "region"))
+      add_lines(format_posthoc_section(sig_region, "region",
+                                       correction_phrase(posthoc_region_df)))
       add("**Total regions tested:** ", length(unique(posthoc_region_df$region)),
           " across ", length(unique(posthoc_region_df$band)), " band(s)")
       add("")
@@ -206,7 +218,8 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
     add("")
     if (nrow(posthoc_region_nested_df) > 0) {
       sig_region_nested <- posthoc_region_nested_df %>% filter(significant == TRUE)
-      add_lines(format_posthoc_section(sig_region_nested, "region"))
+      add_lines(format_posthoc_section(sig_region_nested, "region",
+                                       correction_phrase(posthoc_region_nested_df)))
       add("**Total regions tested:** ", length(unique(posthoc_region_nested_df$region)),
           " across ", length(unique(posthoc_region_nested_df$band)), " band(s)")
       add("")
@@ -233,7 +246,7 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
   add("")
   if (nrow(posthoc_df) > 0) {
     sig_posthoc <- posthoc_df %>% filter(significant == TRUE)
-    add_lines(format_posthoc_section(sig_posthoc, "spatial"))
+    add_lines(format_posthoc_section(sig_posthoc, "spatial", correction_phrase(posthoc_df)))
     add("**Total ROIs tested:** ", length(unique(posthoc_df$spatial)),
         " across ", length(unique(posthoc_df$band)), " band(s)")
     add("")
