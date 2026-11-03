@@ -34,14 +34,17 @@ dependencies = [
 #   mvpa    -> roi_signature / electrode_signature (scikit-learn)
 #   network -> roi_graph / roi_nbs / roi_network (networkx)
 #   atlas   -> (kept so old install commands work; nibabel is now core)
+#   results -> neurobox-dev: analysis.json and column dictionaries beside the tables
+#              (the shared results specification; without it the tables are unchanged)
 [project.optional-dependencies]
 mne = ["mne>=1.5"]
 atlas = ["nibabel>=5.0"]
 mvpa = ["scikit-learn>=1.3"]
 network = ["networkx>=3.0"]
 render = ["markdown>=3.4"]
+results = ["neurobox-dev @ git+https://github.com/alexedmon1/neurobox-dev@4333c6a4dcbf13a82d27c456a52aebdf1c7d559d"]
 dev = ["pytest>=7.0", "black", "ruff"]
-all = ["source-analytics[mne,atlas,mvpa,network,render,dev]"]
+all = ["source-analytics[mne,atlas,mvpa,network,render,results,dev]"]
 
 [project.scripts]
 source-analytics = "source_analytics.cli:main"

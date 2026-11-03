@@ -97,6 +97,10 @@ run** — add `--steps …,figures` or use `source-analytics figure`.
 pip install -e ".[all]"   # or:  uv pip install -e ".[all]"
 ```
 
+The optional `results` extra (in `all`) installs neurobox-dev, the shared results
+specification; with it, modules that opt in also write `analysis.json` and column
+dictionaries beside their tables (see *Output structure*).
+
 Core dependencies (always installed): numpy, scipy, pandas, pyyaml, specparam,
 joblib, matplotlib. The rest are **extras** — the package imports and the CLI
 works without them, and a module that needs one fails with an ImportError naming
@@ -704,6 +708,7 @@ inside the analysis working directory.
     <analysis>_hypotheses.csv  # the hypothesis-layer result (one row per band×cell)
     <analysis>_subnetwork_edges.csv  # roi_nbs only: per-edge membership of each NBS component
     provenance.json            # what produced these tables (see below)
+    analysis.json, <table>.json  # with the `results` extra, for modules that opt in (below)
     …                          # any module-specific diagnostic tables
 <results>/[<profile>/]figures/<paradigm>/<analysis>/
     *.png                      # ggplot2 / glass-brain / matplotlib figures (figures step only)
@@ -729,6 +734,25 @@ comparisons. Omnibus F, cluster-permutation and NBS rows carry the note instead 
 a number. The existing `SE` column is the standard error the MDE is computed
 from. DUET reads each finding's size against this number, so a null says what the
 study could have seen; see `docs/methods/HYPOTHESIS.md` §4a.
+
+**Sample size and the effect's interval.** Every hypothesis-layer row also gives `n`
+(subjects in the fitted model), `n_a` / `n_b` (each side of a two-group contrast,
+empty otherwise) and `effect_size_lcl` / `effect_size_ucl`, the effect's 95%
+interval: the estimate's interval over the residual SD for a standardized
+difference, partial omega squared's interval for an omnibus row (as
+`effectsize::F_to_omega2` gives it), the standardized slope's for a regression.
+
+**The shared results specification.** With the `results` extra installed, a module
+that declares a `RESULTS_SPEC` (today `roi_aperiodic`) describes its hypothesis
+tables by neurobox-dev's results specification whenever its statistics run: an
+`analysis.json` saying what the analysis is (id `eeg/<type>/<name>/<paradigm>`,
+domain, task, atlas, the correction families from `fdr_family`, caveats), a column
+dictionary `<table>.json` beside each hypothesis table, and the specification's
+fields added to `provenance.json`. Any reader can then use the tables without this
+package, and `python -m neurobox check <tables dir>` checks them. In those tables R's
+`NA` becomes an empty cell and a `measure` column gives the vocabulary's name for
+`dv` (`aperiodic_exponent`). Without the extra nothing is written and nothing else
+changes. The writer is `results_spec.py`.
 
 > Figures are **render-on-demand** — they are not auto-regenerated when data
 > changes. Re-run the `figures` step (or `source-analytics figure …`) before

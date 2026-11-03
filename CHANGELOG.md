@@ -2,7 +2,30 @@
 
 ## Unreleased
 
+### Added
+
+- **`roi_aperiodic` describes its results by the shared results specification** (neurobox-dev, schema 0.4;
+  Esprit's results plan, step 4). With the new optional extra `results` installed
+  (`pip install 'source-analytics[results]'`, also in `all`), a run that computes statistics writes, beside the
+  published tables, an `analysis.json` (id `eeg/roi/aperiodic/<paradigm>`, `domain` aperiodic, `task` rest, the
+  atlas, the correction families read from `fdr_family`, caveats), a column dictionary for each of its three
+  hypothesis tables (global = `tests`, region and ROI = `elements`), and the specification's fields in
+  `provenance.json`, whose existing fields stay as they are for source-lightbox. The writer
+  (`results_spec.py`) is generic over the hypothesis layer; a module opts in with a `RESULTS_SPEC`. Writing it
+  turns R's `NA` into empty cells in those three tables and adds a `measure` column (the vocabulary's name for
+  `dv`). Without the extra nothing changes; a folder that does not conform is logged, never fails a run. On a
+  fresh FORGE treatment `roi_based` run (60 animals, 746 rows): conforms, no warnings.
+- **Every hypothesis-layer row gives its sample size and an interval for its effect:** `n` (subjects in the
+  fitted model), `n_a` / `n_b` (each side of a two-group contrast), and `effect_size_lcl` / `effect_size_ucl`,
+  95%. For a standardized difference the interval is the estimate's over the residual SD (treated as known, so
+  slightly narrow); for omnibus rows it is partial omega squared's two-sided interval, exactly as
+  `effectsize::F_to_omega2` computes it (the Python side, `hypothesis.tabular.omega2_ci`, reproduces it to
+  1e-4); for regressions, the standardized slope's. R and Python adapters alike.
+
 ### Fixed
+
+- **`uv.lock` matches `pyproject.toml` again** (it recorded 0.8.0; KNOWN_ISSUES 2), so `uv run` no longer
+  rewrites it.
 
 - **Summaries and heatmap subtitles name the correction the q-values actually received.** The modules whose
   per-contrast tests come from the hypothesis layer (`roi_psd`, `electrode` at channel level, `roi_aperiodic`,

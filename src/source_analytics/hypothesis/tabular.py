@@ -195,6 +195,45 @@ def _apply_fdr(
             r["fdr_family"] = label
 
 
+def _omega2_from_f(f: float, df1: float, df2: float) -> float:
+    """Partial omega^2 from F (effectsize::F_to_omega2), floored at 0."""
+    if not np.isfinite(f):
+        return float("nan")
+    return float(max(0.0, (f - 1) * df1 / (f * df1 + df2 + 1)))
+
+
+def omega2_ci(f: float, df1: float, df2: float, level: float = 0.95) -> tuple[float, float]:
+    """Two-sided interval of partial omega^2, exactly as effectsize::F_to_omega2 gives it.
+
+    effectsize rebuilds an F from the omega^2 estimate as if it were eta^2,
+    finds the noncentrality bounds at which that F is the noncentral F's
+    ``alpha/2`` and ``1 - alpha/2`` quantile (a bound is 0 where the central F
+    already reaches it), and reports each bound ``ncp`` as ``ncp / (ncp + df2)``.
+    Copied, not improved, so the R and Python tables agree.
+    """
+    from scipy.optimize import brentq
+
+    w = _omega2_from_f(f, df1, df2)
+    if not (np.isfinite(w) and df1 > 0 and df2 > 0):
+        return float("nan"), float("nan")
+    alpha = 1 - level
+    f2 = max(0.0, (w / df1) / ((1 - w) / df2))
+
+    def ncp_at(prob: float) -> float:
+        if f2 <= float(st.f.ppf(prob, df1, df2)):   # the central F already reaches it
+            return 0.0
+        def g(ncp: float) -> float:
+            return float(st.ncf.cdf(f2, df1, df2, ncp)) - prob
+
+        hi = max(10.0, f2 * df1 * 4)
+        while g(hi) > 0:
+            hi *= 2
+        return float(brentq(g, 0.0, hi, xtol=1e-10))
+
+    lo, hi = ncp_at(1 - alpha / 2), ncp_at(alpha / 2)
+    return lo / (lo + df2), hi / (hi + df2)
+
+
 # --------------------------------------------------------------------------- #
 # Per-cell kind adapter (mirror of R .adapt_cell — between-subjects one-way model)
 # --------------------------------------------------------------------------- #
@@ -229,12 +268,15 @@ def _adapt_cell(by_group: dict[str, np.ndarray], hyp: Hypothesis,
         # partial omega^2 from F (matches effectsize::F_to_omega2)
         omega2 = (df_num * (f - 1)) / (df_num * (f - 1) + N) if np.isfinite(f) else float("nan")
         omega2 = float(max(0.0, omega2)) if np.isfinite(omega2) else float("nan")
+        o_lo, o_hi = omega2_ci(f, df_num, df_res)
         return {
             "spatial": None, "estimate": float("nan"), "SE": float("nan"),
             "df": float(df_res), "df_num": float(df_num), "stat": float(f),
             "stat_type": "F", "p_value": p, "estimate_lcl": float("nan"),
             "estimate_ucl": float("nan"), "effect_size": omega2,
-            "effect_size_type": "omega2_partial", "group_a": None, "group_b": None,
+            "effect_size_type": "omega2_partial",
+            "effect_size_lcl": o_lo, "effect_size_ucl": o_hi,
+            "group_a": None, "group_b": None, "n": N, "n_a": None, "n_b": None,
             **mde_not_computed("omnibus F test"),
         }
 
@@ -254,8 +296,14 @@ def _adapt_cell(by_group: dict[str, np.ndarray], hyp: Hypothesis,
         "estimate_lcl": est - tcrit * se, "estimate_ucl": est + tcrit * se,
         "effect_size": est / resid_sd if resid_sd > 0 else float("nan"),
         "effect_size_type": "hedges_g",
+        # the estimate's interval over the residual SD (treated as known), as in R
+        "effect_size_lcl": (est - tcrit * se) / resid_sd if resid_sd > 0 else float("nan"),
+        "effect_size_ucl": (est + tcrit * se) / resid_sd if resid_sd > 0 else float("nan"),
         "group_a": pos[0] if len(pos) == 1 else None,
         "group_b": neg[0] if len(neg) == 1 else None,
+        "n": N,
+        "n_a": int(ns[groups.index(pos[0])]) if len(pos) == 1 else None,
+        "n_b": int(ns[groups.index(neg[0])]) if len(neg) == 1 else None,
     }
     rw = reference_weights(weights, groups, reference)
     row.update(mde_columns(se, df_res,
