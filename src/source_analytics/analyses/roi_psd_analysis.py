@@ -20,6 +20,7 @@ from ..spectral.band_power import (
     extract_band_power_multiroi,
     relative_power_kwargs,
 )
+from ..results_spec import POWER_CAVEATS, POWER_MEASURES, POWER_UNITS, ResultsSpec, SpecTable
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,34 @@ class ROIPsdAnalysis(BaseAnalysis):
 
     name = "roi_psd"
     SELECTABLE = {"band": "frequency band", "hypothesis": "declared hypothesis"}
+
+    RESULTS_SPEC = ResultsSpec(
+        domain="spectral",
+        measures=POWER_MEASURES,
+        units=POWER_UNITS,
+        input_file="band_power.csv",
+        method="a linear mixed model per band and power measure (lme4/lmerTest: power ~ group * ROI "
+               "+ (1 | subject), Satterthwaite df) with emmeans contrasts of the declared hypotheses, "
+               "per ROI, per region (the ROIs of a region category averaged, the same model over "
+               "regions) and on the group means marginalized over every ROI; equivalence by two "
+               "one-sided tests",
+        tables=(
+            SpecTable("_global_hypotheses.csv", "tests",
+                      "one declared hypothesis on one power measure in one band, on the group means "
+                      "marginalized over every ROI",
+                      "the declared hypotheses over the whole cortex, per band", element=False,
+                      headline=True),
+            SpecTable("_region_hypotheses.csv", "elements",
+                      "one declared hypothesis on one power measure in one band and one region (the "
+                      "ROIs of a region category averaged)",
+                      "the declared hypotheses per region and band", element=True,
+                      spatial="the region tested (empty on omnibus rows)"),
+            SpecTable("_hypotheses.csv", "elements",
+                      "one declared hypothesis on one power measure in one band and one ROI",
+                      "the declared hypotheses per ROI and band", element=True),
+        ),
+        caveats=POWER_CAVEATS,
+    )
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
