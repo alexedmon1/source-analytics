@@ -10,10 +10,12 @@ shell (``neurobox.gallery.build``). The study's localization summaries
 (source-localization's ``study qc`` with its ``results`` extra) are included from
 the study config's ``paths.localizations``.
 
-Settings come from ``gallery.yaml`` beside the study config, if there is one
-(the format every tool shares; see ``neurobox.gallery``), and otherwise from the
-study config: its ``gallery_title`` or ``name``, ``groups`` and ``group_order``.
-Needs the optional ``results`` extra.
+The gallery goes where every tool puts one: ``<study>/gallery/``, at the top of the
+study's folder, the nearest folder above the study config that has a ``study.toml``
+(the config's own folder when none does). Settings come from ``gallery.yaml`` there
+(the format every tool shares; see ``neurobox.gallery``), or beside the study config,
+and otherwise from the study config: its ``gallery_title`` or ``name``, ``groups`` and
+``group_order``. Needs the optional ``results`` extra.
 """
 
 from __future__ import annotations
@@ -84,13 +86,24 @@ def attach_figures(analysis: Any, drawn_now: set[str] | None = None) -> int:
     return len(entries)
 
 
-def settings_for(config: Any, study_yaml: Path) -> dict:
-    """The gallery settings: ``gallery.yaml`` beside the study config, else from the config."""
+def study_root(study_yaml: Path) -> Path:
+    """The study's folder: the nearest one at or above the config's with a ``study.toml``."""
+    here = Path(study_yaml).resolve().parent
+    for folder in (here, *here.parents):
+        if (folder / "study.toml").is_file():
+            return folder
+    return here
+
+
+def settings_for(config: Any, study_yaml: Path) -> tuple[dict, Path]:
+    """The gallery settings and the folder their paths are relative to: ``gallery.yaml`` at
+    the study's top or beside the study config, else from the config (relative to the study)."""
     import yaml
 
-    own = Path(study_yaml).parent / "gallery.yaml"
-    if own.is_file():
-        return yaml.safe_load(own.read_text()) or {}
+    root = study_root(study_yaml)
+    for own in (root / "gallery.yaml", Path(study_yaml).resolve().parent / "gallery.yaml"):
+        if own.is_file():
+            return yaml.safe_load(own.read_text()) or {}, own.parent
     raw = config.raw
     study_dir = Path(study_yaml).parent
     results = [Path(config.results_dir) / "tables"]
@@ -101,13 +114,14 @@ def settings_for(config: Any, study_yaml: Path) -> dict:
             if (qc / "analysis.json").is_file():
                 results.append(qc)
     groups = raw.get("groups") or {}
+    gallery = (raw.get("paths") or {}).get("gallery")
     return {
         "name": raw.get("gallery_title") or config.name,
         "paths": {"results": [str(p) for p in results],
-                  "gallery": (raw.get("paths") or {}).get("gallery") or "gallery"},
+                  "gallery": str((study_dir / gallery).resolve()) if gallery else "gallery"},
         "groups": groups if isinstance(groups, dict) else {},
         "group_order": raw.get("group_order") or [],
-    }
+    }, root
 
 
 def build(study_yaml: Path, out: Path | None = None, paradigms: list[str] | None = None,
@@ -149,6 +163,6 @@ def build(study_yaml: Path, out: Path | None = None, paradigms: list[str] | None
                 drawn = {p.name for p in Path(module.fig_dir).glob("*.png") if p.stat().st_mtime >= started - 1}
             n = attach_figures(module, drawn)
             logger.info("Gallery: %s/%s: %d figure(s) listed", pname, aname, n)
-    settings = settings_for(config, study_yaml)
+    settings, base = settings_for(config, study_yaml)
     settings["generator"] = f"source-analytics {__version__}"
-    return shell.build(study_yaml.parent, settings, out)
+    return shell.build(base, settings, out)

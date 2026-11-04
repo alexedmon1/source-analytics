@@ -47,10 +47,26 @@ def test_settings_come_from_the_study_config_without_a_gallery_yaml(tmp_path):
     (loc / "qc").mkdir(parents=True)
     (loc / "qc" / "analysis.json").write_text("{}")
     config = SimpleNamespace(name="Study", results_dir=tmp_path / "results", raw={
-        "gallery_title": "FORGE", "groups": {"KO": "Knock-out"}, "group_order": ["WT", "KO"],
+        "gallery_title": "A study", "groups": {"KO": "Knock-out"}, "group_order": ["WT", "KO"],
         "paths": {"localizations": [{"label": "MC", "path": "./loc"}, {"label": "gone", "path": "./nope"}]}})
-    s = g.settings_for(config, tmp_path / "study.yaml")
-    assert s["name"] == "FORGE" and s["groups"] == {"KO": "Knock-out"} and s["paths"]["gallery"] == "gallery"
+    s, base = g.settings_for(config, tmp_path / "study.yaml")
+    assert s["name"] == "A study" and s["groups"] == {"KO": "Knock-out"} and s["paths"]["gallery"] == "gallery"
     assert s["paths"]["results"] == [str(tmp_path / "results" / "tables"), str((loc / "qc").resolve())]
+    assert base == tmp_path.resolve()
     (tmp_path / "gallery.yaml").write_text("name: Own\n")
-    assert g.settings_for(config, tmp_path / "study.yaml") == {"name": "Own"}
+    assert g.settings_for(config, tmp_path / "study.yaml") == ({"name": "Own"}, tmp_path.resolve())
+
+
+def test_the_gallery_goes_to_the_top_of_the_study(tmp_path):
+    """<study>/gallery, beside study.toml, wherever the study config sits below it."""
+    study = tmp_path / "study"
+    (study / "analyses" / "config").mkdir(parents=True)
+    (study / "study.toml").write_text('[study]\nname = "s"\n')
+    yml = study / "analyses" / "config" / "study.yaml"
+    config = SimpleNamespace(name="S", results_dir=study / "analyses" / "results", raw={})
+    assert g.study_root(yml) == study.resolve()
+    s, base = g.settings_for(config, yml)
+    assert base == study.resolve() and s["paths"]["gallery"] == "gallery"
+    (study / "gallery.yaml").write_text("name: At the top\n")
+    assert g.settings_for(config, yml) == ({"name": "At the top"}, study.resolve())
+    assert g.study_root(tmp_path / "elsewhere" / "study.yaml") == (tmp_path / "elsewhere").resolve()
