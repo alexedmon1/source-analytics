@@ -309,7 +309,7 @@ def variant(config, analysis_id: str, paradigm: str | None, profile: str | None)
     """This paradigm as one variant of the analysis (spec 0.4.1 §3.7), or None.
 
     Paradigms that share a ``display.group`` in the study config are variants of each other
-    (FORGE's three localizations, all "Resting"); a lone paradigm is not. Only the default
+    (the same recordings localized several ways); a lone paradigm is not. Only the default
     profile is a variant: a profile's run is its own analysis.
     """
     raw = getattr(config, "raw", None) or {}
