@@ -223,3 +223,15 @@ def test_a_set_with_no_truth_cell_scores_noise_only(cs):
     t = score_location(table("f", finds_source, cells=("noise", "A_nodiff")), cs, H, question="difference")
     assert t["location"].empty and t["reliable"].empty
     assert set(one(t, "noise", "f").cell) == {"noise", "A_nodiff"}
+
+
+def test_tied_tops_split_the_answer(cs):
+    # Aud_R (the truth in A) ties with Aud_L; Thal and Cb tie on noise, with "none" below them
+    def tied(c, r):
+        return {"Aud_R": 0.4, "Aud_L": 0.4, "Thal": 0.2} if c == "A" else {"Thal": 0.4, "Cb": 0.4, "Aud_R": 0.2} \
+            if c == "B" else {"Thal": 0.45, "Cb": 0.45, NONE: 0.1}
+    t = score_location(table("t", tied), cs, H, question="signal")
+    a = one(t, "location", "t", cell="A", level="roi").iloc[0]
+    b = one(t, "location", "t", cell="B", level="roi").iloc[0]
+    assert a.accuracy == 0.5 and b.accuracy == 0.5 and b.accuracy_baseline == 0.5    # noise: Thal one of two tops
+    assert (one(t, "tables", "t", cell="A", level="roi").n_top == 2).all()

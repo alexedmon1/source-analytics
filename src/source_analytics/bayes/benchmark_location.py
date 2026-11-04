@@ -57,6 +57,7 @@ NONE = "none"
 EPS = 1e-3
 RELIABLE = {"set90_coverage": 0.85, "noise_confident": 0.05}
 CONFIDENT, SET_MASS, DIFFERS = 0.9, 0.9, 0.95
+TIE = 1e-6          # relative: regions within this of the top probability share the top
 METHOD = ["arm", "prior_set", "cohort", "n_per_group", "band", "level"]
 BY = ["arm", "prior_set", "cell", "n_per_group", "band", "level"]
 PROB_COLS = ("cohort", "n_per_group", "arm", "prior_set", "band", "level", "region", "prob")
@@ -151,20 +152,28 @@ def expand_levels(d: pd.DataFrame, h: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(out, ignore_index=True)
 
 
+def _top_share(region: np.ndarray, prob: np.ndarray, regions: set[str]) -> float:
+    """The share of the top regions that are in ``regions``: tied tops split the answer, so a tie between a right and a
+    wrong region counts half (a singular fit, or rounded probabilities, can tie)."""
+    top = prob >= prob.max() * (1 - TIE)
+    return float(np.isin(region[top], list(regions)).mean())
+
+
 def _table_scores(region: np.ndarray, prob: np.ndarray, truth: set[str]) -> dict:
     o = np.argsort(-prob, kind="stable")
     region, prob = region[o], prob[o]
     k = int(np.searchsorted(np.cumsum(prob), SET_MASS - 1e-12) + 1)
     p = prob[prob > 0]
     return dict(p_true=float(prob[np.isin(region, list(truth))].sum()), top_region=region[0], top_prob=float(prob[0]),
-                hit=region[0] in truth, set90_size=k, set90_hit=bool(set(region[:k]) & truth),
-                entropy_bits=float(-(p * np.log2(p)).sum()))
+                n_top=int((prob >= prob[0] * (1 - TIE)).sum()), hit=_top_share(region, prob, truth), set90_size=k,
+                set90_hit=bool(set(region[:k]) & truth), entropy_bits=float(-(p * np.log2(p)).sum()))
 
 
 def score_tables(d: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, question: str) -> pd.DataFrame:
     """One row per method x cohort x N x band x level, scored against its own cell's truth for the question. Also
     p_source and top_at_source: the probability on the planted source's regions and whether the top region is one of
-    them, whatever the question (NaN with nothing planted)."""
+    them, whatever the question (NaN with nothing planted). ``hit`` and ``top_at_source`` split tied tops (``n_top``
+    regions tied); ``top_region`` is the first of them."""
     rows = []
     for key, x in d.groupby(METHOD, sort=False):
         cell = key[2].split("/")[0]
@@ -173,7 +182,7 @@ def score_tables(d: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, question: str)
         s = _table_scores(x.region.to_numpy(), x.prob.to_numpy(), truth)
         rows.append({**dict(zip(METHOD, key)), "cell": cell, "rep": int(key[2].rsplit("rep", 1)[1]), **s,
                      "p_source": float(x.prob[x.region.isin(src)].sum()) if src else np.nan,
-                     "top_at_source": float(s["top_region"] in src) if src else np.nan})
+                     "top_at_source": _top_share(x.region.to_numpy(), x.prob.to_numpy(), src) if src else np.nan})
     return pd.DataFrame(rows)
 
 
@@ -200,10 +209,11 @@ def location_table(d: pd.DataFrame, t: pd.DataFrame, cs: CohortSet, h: pd.DataFr
                  clipped=float((x.p_true.to_numpy() < EPS).mean()))
         if len(base):
             bs = base.groupby("cohort").apply(lambda y: y.prob[y.region.isin(truth)].sum(), include_groups=False)
-            top = base.loc[base.groupby("cohort").prob.idxmax()]
+            top = base.groupby("cohort").apply(lambda y: _top_share(y.region.to_numpy(), y.prob.to_numpy(), truth),
+                                               include_groups=False)
             lb = np.log2(np.maximum(bs.to_numpy(float), EPS))
             lo, hi = _boot_mean_diff(lp, lb, rng)
-            r.update(accuracy_baseline=top.region.isin(truth).mean(), p_true_baseline=bs.mean(),
+            r.update(accuracy_baseline=top.mean(), p_true_baseline=bs.mean(),
                      bits_gained=lp.mean() - lb.mean(), bits_lo=lo, bits_hi=hi)
         else:
             r.update(accuracy_baseline=np.nan, p_true_baseline=np.nan, bits_gained=np.nan, bits_lo=np.nan, bits_hi=np.nan)
