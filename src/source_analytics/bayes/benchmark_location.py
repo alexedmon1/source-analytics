@@ -4,6 +4,16 @@ Two questions, scored against a frozen cohort set's truth: where is the signal, 
 Like ``benchmark``, this reads files only and knows nothing about a method's internals or the atlas: the regions come
 from a hierarchy table, the truth from the cohort set's ``MANIFEST.json`` (a cell's ``planted_rois``, ``effect_sd``).
 
+**Which question the probabilities answer** (``question``, required; there is no default because the truth differs):
+
+    signal       "where is the source?"  Truth: the cell's planted ROIs; "none" where nothing is planted.
+    difference   "where do the groups differ?"  Truth: the planted ROIs where effect_sd > 0, else "none". A cell with a
+                 source in both groups and no difference (bayes-sl L5, ``<region>_nodiff``) is a no-truth cell here.
+
+No-truth cells are the baseline: Q1's bits, and the noise table. For a no-truth cell that still holds a source (L5 under
+``difference``), the noise table also gives how often the top region is the source's (``top_at_source``) and the mean
+probability there (``p_source``): a method that finds the source and calls it a difference scores high on both.
+
 **Hierarchy** (CSV, one row per ROI): roi, compartment, hemisphere, group.
 
 **Region probabilities** (Q1; CSV, one row per method x cohort x N x band x level x region):
@@ -26,7 +36,8 @@ against how often the region is the truth, per bin, on single-truth cells. A cel
 level cannot test that level (``informative`` False).
 
 **Noise:** "no plant" is not "no signal": these cohorts hold real mice, whose own fields a method may locate correctly.
-So a confident location here is a claim the plant did not cause, not necessarily a wrong one.
+So a confident location here is a claim the plant did not cause, not necessarily a wrong one. Under ``difference``,
+"noise" means every no-truth cell, with or without a source.
 
 **Finest reliable level** (rule fixed 2026-10-30, before any method was scored): at that N, in every informative plant
 cell, set90_coverage >= 0.85 and the bits' interval above 0; on noise, a confident location (top_prob >= 0.9) at most
@@ -50,6 +61,19 @@ METHOD = ["arm", "prior_set", "cohort", "n_per_group", "band", "level"]
 BY = ["arm", "prior_set", "cell", "n_per_group", "band", "level"]
 PROB_COLS = ("cohort", "n_per_group", "arm", "prior_set", "band", "level", "region", "prob")
 DIFF_COLS = ("cohort", "n_per_group", "arm", "prior_set", "band", "region", "p_differs")
+QUESTIONS = ("signal", "difference")
+
+
+def _check_question(question: str) -> None:
+    if question not in QUESTIONS:
+        raise BenchmarkError(f"question must be one of {QUESTIONS}; got {question!r}")
+
+
+def no_truth_cells(cs: CohortSet, question: str) -> set[str]:
+    """Cells where the question's answer is "none": nothing planted, or (``difference``) no difference planted."""
+    _check_question(question)
+    return {c for c, v in cs.cells.items()
+            if not v["planted_rois"] or (question == "difference" and float(v["effect_sd"]) == 0)}
 
 
 def read_hierarchy(path: Path | str) -> pd.DataFrame:
@@ -66,15 +90,22 @@ def _level_regions(h: pd.DataFrame, level: str) -> list[str]:
     return sorted(h[level].unique())
 
 
-def truth_regions(cs: CohortSet, h: pd.DataFrame, cell: str, level: str) -> set[str]:
-    """The regions of a level that hold the cell's planted ROIs; {"none"} when nothing is planted."""
+def source_regions(cs: CohortSet, h: pd.DataFrame, cell: str, level: str) -> set[str]:
+    """The regions of a level that hold the cell's planted ROIs, whatever the question; empty when nothing is planted."""
     planted = cs.cells[cell]["planted_rois"]
     if not planted:
-        return {NONE}
+        return set()
     x = h[h.roi.isin(planted)]
     if len(x) != len(set(planted)):
         raise BenchmarkError(f"cell {cell}: planted ROIs missing from the hierarchy")
     return set(x[level])
+
+
+def truth_regions(cs: CohortSet, h: pd.DataFrame, cell: str, level: str, question: str) -> set[str]:
+    """The regions of a level that answer the question for this cell; {"none"} in a no-truth cell."""
+    if cell in no_truth_cells(cs, question):
+        return {NONE}
+    return source_regions(cs, h, cell, level)
 
 
 def validate_probs(probs: pd.DataFrame, cs: CohortSet, h: pd.DataFrame) -> pd.DataFrame:
@@ -130,14 +161,19 @@ def _table_scores(region: np.ndarray, prob: np.ndarray, truth: set[str]) -> dict
                 entropy_bits=float(-(p * np.log2(p)).sum()))
 
 
-def score_tables(d: pd.DataFrame, cs: CohortSet, h: pd.DataFrame) -> pd.DataFrame:
-    """One row per method x cohort x N x band x level, scored against its own cell's truth."""
+def score_tables(d: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, question: str) -> pd.DataFrame:
+    """One row per method x cohort x N x band x level, scored against its own cell's truth for the question. Also
+    p_source and top_at_source: the probability on the planted source's regions and whether the top region is one of
+    them, whatever the question (NaN with nothing planted)."""
     rows = []
     for key, x in d.groupby(METHOD, sort=False):
         cell = key[2].split("/")[0]
-        truth = truth_regions(cs, h, cell, key[5])
-        rows.append({**dict(zip(METHOD, key)), "cell": cell, "rep": int(key[2].rsplit("rep", 1)[1]),
-                     **_table_scores(x.region.to_numpy(), x.prob.to_numpy(), truth)})
+        truth = truth_regions(cs, h, cell, key[5], question)
+        src = source_regions(cs, h, cell, key[5])
+        s = _table_scores(x.region.to_numpy(), x.prob.to_numpy(), truth)
+        rows.append({**dict(zip(METHOD, key)), "cell": cell, "rep": int(key[2].rsplit("rep", 1)[1]), **s,
+                     "p_source": float(x.prob[x.region.isin(src)].sum()) if src else np.nan,
+                     "top_at_source": float(s["top_region"] in src) if src else np.nan})
     return pd.DataFrame(rows)
 
 
@@ -147,14 +183,14 @@ def _boot_mean_diff(a: np.ndarray, b: np.ndarray, rng, n: int = 2000) -> tuple[f
     return float(np.quantile(q, 0.025)), float(np.quantile(q, 0.975))
 
 
-def location_table(d: pd.DataFrame, t: pd.DataFrame, cs: CohortSet, h: pd.DataFrame) -> pd.DataFrame:
-    """Q1 per method x plant cell x N x level, with the same method's no-plant cohorts as baseline."""
+def location_table(d: pd.DataFrame, t: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, question: str) -> pd.DataFrame:
+    """Q1 per method x cell with a truth x N x level, with the same method's no-truth cohorts as baseline."""
     rng = np.random.default_rng(20261030)
-    noise_cells = {c for c, v in cs.cells.items() if not v["planted_rois"]}
+    noise_cells = no_truth_cells(cs, question)
     rows = []
     for key, x in t[~t.cell.isin(noise_cells)].groupby(BY):
         k = dict(zip(BY, key))
-        truth = truth_regions(cs, h, k["cell"], k["level"])
+        truth = truth_regions(cs, h, k["cell"], k["level"], question)
         lp = np.log2(np.maximum(x.p_true.to_numpy(), EPS))
         base = d[(d.arm == k["arm"]) & (d.prior_set == k["prior_set"]) & (d.n_per_group == k["n_per_group"]) &
                  (d.band == k["band"]) & (d.level == k["level"]) & d.cohort.str.split("/").str[0].isin(noise_cells)]
@@ -175,19 +211,19 @@ def location_table(d: pd.DataFrame, t: pd.DataFrame, cs: CohortSet, h: pd.DataFr
     return pd.DataFrame(rows)
 
 
-def noise_table(d: pd.DataFrame, t: pd.DataFrame, cs: CohortSet) -> pd.DataFrame:
-    """What each method says with nothing planted."""
-    noise_cells = {c for c, v in cs.cells.items() if not v["planted_rois"]}
-    x = t[t.cell.isin(noise_cells)].copy()
+def noise_table(d: pd.DataFrame, t: pd.DataFrame, cs: CohortSet, question: str) -> pd.DataFrame:
+    """What each method says where the question's answer is "none" (per no-truth cell)."""
+    x = t[t.cell.isin(no_truth_cells(cs, question))].copy()
     if x.empty:
         return pd.DataFrame()
     x["confident"] = (x.top_prob >= CONFIDENT) & (x.top_region != NONE)
     return x.groupby(BY).agg(reps=("rep", "nunique"), p_none=("p_true", "mean"), top_prob=("top_prob", "mean"),
                              entropy_bits=("entropy_bits", "mean"), set90_size=("set90_size", "mean"),
-                             confident=("confident", "mean")).reset_index()
+                             confident=("confident", "mean"), p_source=("p_source", "mean"),
+                             top_at_source=("top_at_source", "mean")).reset_index()
 
 
-def reliability_table(d: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, bins: int = 10) -> pd.DataFrame:
+def reliability_table(d: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, question: str, bins: int = 10) -> pd.DataFrame:
     """Stated probability against how often the region is the truth, on single-truth cells (a cell with several true
     regions has no one true region per table). Regions a table left out count as stated 0."""
     rows = []
@@ -195,7 +231,7 @@ def reliability_table(d: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, bins: int
         regions = _level_regions(h, lv) + ([NONE] if (x.region == NONE).any() else [])
         stated, true = [], []
         for coh, y in x.groupby(["cohort", "n_per_group", "band"]):
-            tr = truth_regions(cs, h, coh[0].split("/")[0], lv)
+            tr = truth_regions(cs, h, coh[0].split("/")[0], lv, question)
             if len(tr) != 1:
                 continue
             p = y.set_index("region").prob.reindex(regions, fill_value=0.0)
@@ -221,7 +257,10 @@ def calibration_error(rel: pd.DataFrame) -> pd.DataFrame:
 
 
 def reliable_table(loc: pd.DataFrame, noi: pd.DataFrame) -> pd.DataFrame:
-    """Per method x band x N x level, the rule's parts, and each method x band x N's finest level that meets them all."""
+    """Per method x band x N x level, the rule's parts, and each method x band x N's finest level that meets them all.
+    Empty when no cell has a truth (e.g. bayes-sl L5 under ``difference``): the rule needs plant cells."""
+    if loc.empty:
+        return pd.DataFrame()
     x = loc[loc.informative]
     if x.empty:
         return pd.DataFrame()
@@ -263,13 +302,15 @@ def differ_table(diff: pd.DataFrame, cs: CohortSet) -> pd.DataFrame:
         says_negligible=("says_negligible", "mean"), brier=("brier", "mean")).reset_index()
 
 
-def score_location(probs: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, diff: pd.DataFrame | None = None,
-                   out: Path | str | None = None) -> dict[str, pd.DataFrame]:
-    """Every table; written to ``out`` (one CSV per table and summary.txt) when given."""
+def score_location(probs: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, *, question: str,
+                   diff: pd.DataFrame | None = None, out: Path | str | None = None) -> dict[str, pd.DataFrame]:
+    """Every table; written to ``out`` (one CSV per table and summary.txt) when given. ``question`` says what the
+    probabilities answer: "signal" (where is the source) or "difference" (where do the groups differ)."""
+    _check_question(question)
     d = expand_levels(validate_probs(probs, cs, h), h)
-    t = score_tables(d, cs, h)
-    loc, noi = location_table(d, t, cs, h), noise_table(d, t, cs)
-    rel = reliability_table(d, cs, h)
+    t = score_tables(d, cs, h, question)
+    loc, noi = location_table(d, t, cs, h, question), noise_table(d, t, cs, question)
+    rel = reliability_table(d, cs, h, question)
     tabs = {"tables": t, "location": loc, "noise": noi, "reliability": rel, "calibration_error": calibration_error(rel),
             "reliable": reliable_table(loc, noi)}
     if diff is not None:
@@ -279,7 +320,7 @@ def score_location(probs: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, diff: pd
         out.mkdir(parents=True, exist_ok=True)
         for k, v in tabs.items():
             v.to_csv(out / f"{k}.csv", index=False)
-        lines = ["Location scorecard (source_analytics.bayes.benchmark_location)", ""]
+        lines = ["Location scorecard (source_analytics.bayes.benchmark_location)", f"Question: {question}", ""]
         if len(tabs["reliable"]):
             f = tabs["reliable"].groupby(["arm", "prior_set", "band", "n_per_group"]).finest_reliable.first()
             lines += ["Finest reliable level:", f.fillna("none").to_string(), ""]

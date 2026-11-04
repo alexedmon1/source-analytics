@@ -835,7 +835,7 @@ def cmd_benchmark_location(args):
     try:
         diff = read_claims(args.differ) if args.differ else None
         tabs = score_location(read_claims(args.probs), CohortSet.load(args.cohorts), read_hierarchy(args.hierarchy),
-                              diff=diff, out=args.out)
+                              question=args.question, diff=diff, out=args.out)
     except BenchmarkError as exc:
         print(f"ERROR: {exc}")
         sys.exit(1)
@@ -1090,6 +1090,9 @@ def main():
     p_loc.add_argument("--hierarchy", type=Path, required=True, help="CSV: roi, compartment, hemisphere, group")
     p_loc.add_argument("--probs", type=Path, nargs="+", required=True,
                        help="Region-probability CSVs, or directories searched for them")
+    p_loc.add_argument("--question", choices=("signal", "difference"), required=True,
+                       help="What the probabilities answer: where the source is (truth: planted ROIs), or where the "
+                            "groups differ (truth: planted ROIs with effect_sd > 0, else none)")
     p_loc.add_argument("--differ", type=Path, nargs="*", help="Group-difference CSVs, or directories")
     p_loc.add_argument("--out", type=Path, required=True, help="Output directory")
     p_loc.set_defaults(func=cmd_benchmark_location)
