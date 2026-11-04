@@ -61,8 +61,13 @@ class SpecTable:
     role: str            # tests | elements
     rows: str            # what one row is
     description: str
-    element: bool        # `spatial` names the element (ROI, region)
+    element: bool        # `spatial` names the element (ROI, region, channel, edge)
     headline: bool = False
+    file: str | None = None      # the table's whole file name, when it is not module name + suffix
+    spatial: str | None = None   # what `spatial` holds, when the module's default wording does not fit
+
+    def filename(self, module: str) -> str:
+        return self.file or f"{module}{self.suffix}"
 
 
 @dataclass(frozen=True)
@@ -77,7 +82,24 @@ class ResultsSpec:
     input_file: str | None = None      # the per-subject table in the module's data/
     caveats: tuple[str, ...] = ()
     name: str | None = None            # the id's name; default: module name minus its level
+    facet: str = "band"                # FacetName of the `band` column (spec §5.2): band, freq_pair
+    facet_description: str = "frequency band"
+    element: str = "ROI"               # what one spatial cell is, in words: ROI, electrode
 
+
+#: Band power, as roi_psd and electrode_psd name it (spectral/band_power.py).
+POWER_MEASURES = {"absolute": "band_power", "relative": "relative_power",
+                  "delta_ref": "delta_referenced_power"}
+POWER_UNITS = {"absolute": "dB/Hz (10*log10 of the band's mean power density)",
+               "relative": "a fraction of the total power over the relative-power range (unitless)",
+               "delta_ref": "dB relative to the power density of the delta_reference anchor window"}
+POWER_CAVEATS = (
+    ("Relative power is not computed for bands above the relative-power range (relative_power.fmax "
+     "in the study config), so those bands have no relative rows."),
+    ("delta_ref, when the study config has a delta_reference block, is each band's power density "
+     "referenced to the anchor window, in dB; bands in delta_reference.exclude_bands (the anchor's "
+     "own) are not tested on it."),
+)
 
 #: Caveats every hypothesis-layer analysis carries (docs/KNOWN_ISSUES.md).
 COMMON_CAVEATS = (
@@ -174,12 +196,18 @@ def columns(cols: list[str], rows: list[dict[str, str]], table: SpecTable, spec:
         "test": {"Description": "what the row tests",
                  "Levels": {"difference": "a difference (or omnibus F)",
                             "equivalence": "equivalence within a margin"}},
-        "band": ({"Description": "frequency band", "Standard": "facet", "FacetName": "band"}
-                 if has_band else {"Description": "frequency band; empty, as the measure is broadband"}),
-        "spatial": ({"Description": "the spatial cell tested (empty on omnibus rows)",
+        "band": ({"Description": spec.facet_description, "Standard": "facet", "FacetName": spec.facet}
+                 if has_band else {"Description": f"{spec.facet_description}; empty, as the measure is "
+                                                  "broadband"}),
+        "spatial": ({"Description": table.spatial or f"the {spec.element} tested (empty on omnibus rows)",
                      "Standard": "element"} if table.element else
-                    {"Description": "empty: these tests are on group means marginalized over every ROI"}),
-        "region": {"Description": "the region the row's ROIs belong to"},
+                    {"Description": table.spatial or "empty: these tests are on group means marginalized "
+                                                     f"over every {spec.element}"}),
+        "region": {"Description": f"the region the row's {spec.element}s belong to"},
+        "source": {"Description": f"the edge's source {spec.element} (for coupling, the one whose slower "
+                                  "band is used)"},
+        "target": {"Description": f"the edge's target {spec.element} (for coupling, the one whose faster "
+                                  "band is used)"},
         "estimate": {"Description": "the contrast's estimate (the weighted difference of the groups' "
                                     "model means) or the slope, in the measure's units",
                      "Standard": "estimate", "Units": units},
@@ -247,6 +275,59 @@ def columns(cols: list[str], rows: list[dict[str, str]], table: SpecTable, spec:
     return {c: docs[c] for c in cols}
 
 
+# ------------------------------------------- contrasts and variants (0.4.1) ---
+#: What varies between paradigms that share a display group, unless the study config says
+#: (``variant_axis``): in a source-analytics study they are the same recordings localized
+#: different ways.
+DEFAULT_VARIANT_AXIS = "reconstruction"
+
+
+def contrasts(config, rows: list[dict[str, str]]) -> list[dict]:
+    """The declared hypotheses the tables test (spec 0.4.1 §3.6), in the study config's order.
+
+    A hypothesis's study ``role`` (phenotype, rescue, normalization) is the spec's ``tier``.
+    """
+    spec = getattr(config, "design_spec", None)
+    tested = {r.get("hypothesis") for r in rows}
+    out = []
+    for h in getattr(spec, "hypotheses", None) or []:
+        if h.name not in tested:
+            continue
+        c: dict[str, Any] = {"id": h.name, "kind": h.kind}
+        if h.label:
+            c["label"] = h.label
+        ends = h.pairwise_endpoints()
+        if ends:
+            c["group_a"], c["group_b"] = ends
+        if h.role:
+            c["tier"] = h.role
+        out.append(c)
+    return out
+
+
+def variant(config, analysis_id: str, paradigm: str | None, profile: str | None) -> dict | None:
+    """This paradigm as one variant of the analysis (spec 0.4.1 §3.7), or None.
+
+    Paradigms that share a ``display.group`` in the study config are variants of each other
+    (FORGE's three localizations, all "Resting"); a lone paradigm is not. Only the default
+    profile is a variant: a profile's run is its own analysis.
+    """
+    raw = getattr(config, "raw", None) or {}
+    display = raw.get("display") if isinstance(raw.get("display"), dict) else {}
+    group = display.get("group")
+    if not paradigm or profile or not group:
+        return None
+    siblings = [n for n, p in (raw.get("paradigms") or {}).items()
+                if isinstance(p, dict) and (p.get("display") or {}).get("group") == group]
+    if len(siblings) < 2 or not analysis_id.endswith("/" + paradigm):
+        return None
+    v = {"of": analysis_id[: -len(paradigm) - 1], "axis": str(raw.get("variant_axis") or DEFAULT_VARIANT_AXIS),
+         "value": analysis_id.rsplit("/", 1)[1]}
+    if display.get("label"):
+        v["label"] = str(display["label"])
+    return v
+
+
 # ------------------------------------------------------------------- writing ---
 def _r_version() -> str | None:
     try:
@@ -303,7 +384,7 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
     profile = analysis.config.profile_name
 
     tables, all_rows, fams = [], [], {}
-    found = [(t, folder / f"{analysis.name}{t.suffix}") for t in spec.tables]
+    found = [(t, folder / t.filename(analysis.name)) for t in spec.tables]
     found = [(t, p) for t, p in found if p.exists()]
     if not found:
         logger.info("Results specification: %s has no hypothesis tables to describe", analysis.name)
@@ -343,6 +424,12 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
         "caveats": [*spec.caveats, *COMMON_CAVEATS],
         "run": {"id": run_id, "label": f"{analysis.name} on {paradigm}" if paradigm else analysis.name},
     }
+    declared = contrasts(analysis.config, all_rows)
+    if declared:
+        analysis_json["contrasts"] = declared
+    var = variant(analysis.config, analysis_json["id"], paradigm, profile)
+    if var:
+        analysis_json["variant"] = var
     task = TASK_OF_CATEGORY.get(meta.get("category", ""))
     if task:
         analysis_json["task"] = task
