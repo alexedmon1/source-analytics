@@ -95,6 +95,13 @@ z ~ 0 + band + band:grp                                   group effect per band 
 
 **Aperiodic exponent:** the same model without `band`.
 
+**No ROI** (`bayes_prepare(..., spatial_col = NULL)`, 2026-11-04; bayes-sl L3): one value per subject and band, such as a
+mouse's power along a located field. Both ROI terms are dropped. The subject term is dropped too when no subject has
+more than one row in a band, because it would then be the residual under another name, identified by its prior alone.
+With one band and two groups the model is two group levels and a residual SD. The readout has one spatial cell, `all`.
+Tested in `tests/bayes/test_no_roi.py`: the formula, priors and Stan code; the ROI formula unchanged; the gate's
+simulator; and a fit whose contrast matches the conjugate shrinkage of OLS. The E0 fixtures still reproduce.
+
 **Covariates:** `design.covariates` enter mean-centred, as in `.hyp_fit()`.
 
 **Choices to confirm:**

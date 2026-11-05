@@ -65,7 +65,7 @@ draw_params <- function(prep, null = FALSE) {
       b[fx$col[k]] <- ifelse(startsWith(fx$col[k], "dx_"), 0, b[fx$col[k & fx$group == prep$ref]])
     }
   }
-  rois <- levels(prep$data$roi)
+  rois <- levels(prep$data$roi)          # with no ROI: one level, "all", whose r is never used (simulate_z)
   list(b = b, tau = tau,
        r = sapply(cols, function(cl) setNames(rnorm(length(rois), 0, tau[[cl]]), rois)),
        sd_rb = hn(BAYES_SD_ROI_BAND), sd_sub = setNames(hn(0.5, length(prep$bands)), prep$bands),
@@ -97,12 +97,16 @@ simulate_z <- function(prep, p) {
   bnd <- as.character(d$band); roi <- as.character(d$roi)
   mu <- 0
   for (cl in prep$fixed$col) mu <- mu + d[[cl]] * p$b[[cl]]
-  for (cl in prep$terms$col) mu <- mu + d[[cl]] * p$r[roi, cl]
-  rb <- paste(roi, bnd); urb <- unique(rb)
-  mu <- mu + setNames(rnorm(length(urb), 0, p$sd_rb), urb)[rb]
-  sb <- paste(d$subject, bnd); usb <- unique(sb)
-  sd_sb <- p$sd_sub[sub("^.* ", "", usb)]
-  mu <- mu + setNames(rnorm(length(usb), 0, sd_sb), usb)[sb]
+  if (!isTRUE(prep$no_roi)) {           # no ROI: neither ROI term is in the model (R/bayes/model.R)
+    for (cl in prep$terms$col) mu <- mu + d[[cl]] * p$r[roi, cl]
+    rb <- paste(roi, bnd); urb <- unique(rb)
+    mu <- mu + setNames(rnorm(length(urb), 0, p$sd_rb), urb)[rb]
+  }
+  if (!isFALSE(prep$subject_re)) {      # one row per subject and band: no subject term
+    sb <- paste(d$subject, bnd); usb <- unique(sb)
+    sd_sb <- p$sd_sub[sub("^.* ", "", usb)]
+    mu <- mu + setNames(rnorm(length(usb), 0, sd_sb), usb)[sb]
+  }
   as.numeric(mu + p$sigma[bnd] * rnorm(nrow(d)))
 }
 
@@ -115,7 +119,7 @@ estimand_table <- function(prep, p, fit) {
   cols <- prep$terms$col; fx <- prep$fixed$col
   B <- as.matrix(dr[, paste0("b_", fx)]); colnames(B) <- fx
   sig <- exp(as.matrix(dr[, paste0("b_sigma_bd_", prep$bands), drop = FALSE])); colnames(sig) <- prep$bands
-  rois <- levels(prep$data$roi)
+  rois <- .rois(prep)
   P0 <- list(b = matrix(p$b[fx], 1, dimnames = list(NULL, fx)), r = p$r)
   set.seed(1); pd <- .prior_effect_draws(prep, n = 20000)
   keep <- round(seq(1, nrow(B), length.out = L))

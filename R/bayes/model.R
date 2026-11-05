@@ -6,6 +6,9 @@
 #       + (0 + x_<band>_<group> ... || roi)               ROI deviation of each band's group effect (partial pooling)
 #       + (1 | roi:band) + (0 + bd_<band> ... || subject), ROI level per band; subject level per band
 #   sigma ~ 0 + bd_<band> ...,  family = gaussian()       (bd_<band> = 1 on rows of that band: numeric, so one band works)
+# No ROI (spatial_col = NULL; bayes-sl L3, one value per subject, e.g. its power along a located field): the two ROI
+# terms are dropped, and the subject term is kept only if some subject has more than one row in a band (with one row it
+# is the residual under another name, identified by the prior alone). The readout then has one spatial cell, "all".
 # x_<band>_<group> = 1 for rows of that band and (non-reference) group. z is the outcome standardised per band by the
 # within-group between-subject SD within ROI x band (pooled over ROIs and groups), so effects, priors, the ROPE and `mode: sd` margins are in
 # between-subject SD units (the unit of a per-cell Hedges g).
@@ -35,6 +38,7 @@ BAYES_RHAT_MAX <- 1.05  # convergence rule, on what is decided: estimands and sc
 #' Code a long table for the model, for one prior set (the set decides the fixed-effect parametrisation, see the
 #' header). `informative` is a named list x_<band>_<group> -> c(mean, sd) (group - reference) for set I; terms without
 #' an entry stay W, and entries for terms not in this design are unused. Returns the data plus the term map.
+#' spatial_col = NULL: no ROI (see the header).
 bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "band", set = "W", informative = NULL) {
   if (!set %in% BAYES_SETS) stop(sprintf("bayes: unknown prior set '%s'", set))
   d <- as.data.frame(data)
@@ -47,8 +51,11 @@ bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "b
   raw_band <- if (has_band) as.character(d[[band_col]]) else rep("all", nrow(d))
   band_labels <- if (has_band) setNames(unique(raw_band), .safe(unique(raw_band))) else c(all = NA_character_)
   d$band <- factor(.safe(raw_band))
-  d$roi <- factor(as.character(d[[spatial_col]]))
+  no_roi <- is.null(spatial_col)
+  if (!no_roi && !spatial_col %in% names(d)) stop(sprintf("bayes: no spatial column '%s' (NULL for no ROI)", spatial_col))
+  d$roi <- factor(if (no_roi) rep("all", nrow(d)) else as.character(d[[spatial_col]]))
   d$subject <- factor(as.character(d$subject))
+  subject_re <- anyDuplicated(paste(d$subject, d$band)) > 0      # some subject has repeated rows within a band
   # standardise per band by the pooled within-group between-subject SD within roi x band (the Hedges g unit)
   scale_tab <- do.call(rbind, lapply(levels(d$band), function(b) {
     x <- d[d$band == b, ]
@@ -85,7 +92,7 @@ bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "b
   list(data = d, terms = terms, fixed = do.call(rbind, unname(fixed)), lmap = lmap, set = set,
        levels = levels, ref = ref, bands = levels(d$band), band_labels = band_labels,
        covs = if (length(covs)) paste0("cov_", .safe(covs)) else character(0), scale = scale_tab,
-       dv = dv_col, spatial = spatial_col)
+       dv = dv_col, spatial = spatial_col, no_roi = no_roi, subject_re = subject_re)
 }
 
 bayes_formula <- function(prep) {
@@ -93,8 +100,9 @@ bayes_formula <- function(prep) {
   x <- paste(prep$terms$col, collapse = " + ")
   bd <- paste(paste0("bd_", prep$bands), collapse = " + ")
   cv <- if (length(prep$covs)) paste(" +", paste(prep$covs, collapse = " + ")) else ""
-  bf(as.formula(paste0("z ~ 0 + ", fx, cv, " + (0 + ", x, " || roi) + (1 | roi:band) + (0 + ", bd,
-                       " || subject)")),
+  re <- c(if (!isTRUE(prep$no_roi)) c(paste0("(0 + ", x, " || roi)"), "(1 | roi:band)"),
+          if (!isFALSE(prep$subject_re)) paste0("(0 + ", bd, " || subject)"))
+  bf(as.formula(paste("z ~", paste(c(paste0("0 + ", fx, cv), re), collapse = " + "))),
      as.formula(paste0("sigma ~ 0 + ", bd)))
 }
 
@@ -105,8 +113,8 @@ bayes_priors <- function(prep) {
   c(set_prior("normal(0, 1)", class = "b"),                            # covariates
     do.call(c, lapply(seq_len(nrow(fx)), function(k)
       set_prior(sprintf("normal(%g, %g)", fx$prior_mean[k], fx$prior_sd[k]), class = "b", coef = fx$col[k]))),
-    set_prior("normal(0, 0.25)", class = "sd", group = "roi"),
-    set_prior(sprintf("normal(0, %g)", BAYES_SD_ROI_BAND), class = "sd", group = "roi:band"),
-    set_prior("normal(0, 0.5)", class = "sd", group = "subject"),
+    if (!isTRUE(prep$no_roi)) c(set_prior("normal(0, 0.25)", class = "sd", group = "roi"),
+                                set_prior(sprintf("normal(0, %g)", BAYES_SD_ROI_BAND), class = "sd", group = "roi:band")),
+    if (!isFALSE(prep$subject_re)) set_prior("normal(0, 0.5)", class = "sd", group = "subject"),
     set_prior(sprintf("normal(%g, 0.5)", log(0.5)), class = "b", dpar = "sigma"))
 }

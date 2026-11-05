@@ -11,6 +11,9 @@
   list(b = matrix(b, n, dimnames = list(NULL, fx$col)), r = matrix(r, n, dimnames = list(NULL, cols)))
 }
 
+#' The ROIs a readout loops over besides "all": none when the model has no ROI.
+.rois <- function(prep) if (isTRUE(prep$no_roi)) character(0) else levels(prep$data$roi)
+
 .hdi <- function(x, mass = BAYES_HDI) {
   x <- sort(x); n <- length(x); k <- floor(mass * n)
   i <- which.min(x[(k + 1):n] - x[1:(n - k)]); c(x[i], x[i + k])
@@ -67,13 +70,14 @@
 }
 
 #' Read every requested hypothesis off one fit. One row per hypothesis x band x spatial cell ("all" = ROI-average,
-#' i.e. the band's population effect). Omnibus: a placeholder row (deferred).
+#' i.e. the band's population effect; with no ROI, prep$no_roi, the only cell, labelled "all"). Omnibus: a placeholder
+#' row (deferred).
 bayes_readout <- function(fit, prep, spec, rope_sd = BAYES_ROPE_SD, hypotheses = NULL) {
   set <- prep$set
   dr <- as.data.frame(as_draws_df(fit))            # plain data frame: column subsets keep no draws_df metadata
   cols <- prep$terms$col
   B <- as.matrix(dr[, paste0("b_", prep$fixed$col)]); colnames(B) <- prep$fixed$col
-  rois <- levels(prep$data$roi)
+  rois <- .rois(prep)
   Rr <- lapply(setNames(rois, rois), function(ro) {
     m <- as.matrix(dr[, sprintf("r_roi[%s,%s]", ro, cols)]); colnames(m) <- cols; m
   })
@@ -112,12 +116,13 @@ bayes_readout <- function(fit, prep, spec, rope_sd = BAYES_ROPE_SD, hypotheses =
         cv <- .estimand_conv(x, dr$.chain)
         res$rhat <- cv[["rhat"]]; res$ess_bulk <- cv[["ess_bulk"]]
         rows[[length(rows) + 1]] <- cbind(base, band = prep$band_labels[[b]] %||% b,
-                                          spatial = if (sp == "all") "ROI-average" else sp, res, status = "ok")
+                                          spatial = if (sp != "all") sp else if (isTRUE(prep$no_roi)) "all"
+                                                    else "ROI-average", res, status = "ok")
       }
     }
   }
   out <- dplyr::bind_rows(rows)
-  out$fdr_family <- "none (partial pooling across ROIs)"
+  out$fdr_family <- if (isTRUE(prep$no_roi)) "none (one spatial cell)" else "none (partial pooling across ROIs)"
   out$max_rhat_scale <- diag$max_rhat_scale
   out$max_rhat <- diag$max_rhat; out$n_divergent <- diag$n_divergent   # max_rhat: over every parameter, reported only
   out
