@@ -98,6 +98,8 @@ class ResultsSpec:
     correction: dict | None = None
     #: ``effect`` in place of the per-row effect size, e.g. ``{"measure": None, "reason": ...}``
     effect: dict | None = None
+    #: the analysis's role: exploratory (declared hypotheses, tested) or descriptive (no tests)
+    role: str = "exploratory"
 
 
 def permutation_columns(unit: str, units: str, p_col: str, p_scope: str) -> tuple[tuple[str, dict], ...]:
@@ -459,7 +461,7 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
         else meta.get("description", analysis.name),
         "description": meta.get("about") or meta.get("description") or analysis.name,
         "analysis_type": atype, "modality": "eeg", "domain": spec.domain,
-        "measures": measures, "role": "exploratory",
+        "measures": measures, "role": spec.role,
         "design": {"n": int(subjects.get("n") or 0) or max((int(r["n"]) for r in all_rows if r.get("n")),
                                                            default=0),
                    "groups": {g: int(n) for g, n in (subjects.get("groups") or {}).items()},

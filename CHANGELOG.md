@@ -4,6 +4,13 @@
 
 ### Added
 
+- **`roi_connectivity` writes descriptive tables and describes them by the shared specification** (Esprit's
+  results plan, 5b.4). Its statistics step, which did nothing, now writes `roi_connectivity_group_summary.csv`
+  (each group's mean and SD of every connectivity measure per band, over the whole network) and
+  `roi_connectivity_group_edges.csv` (the same per ROI pair: the matrices the figures draw), from the saved edges.
+  The description says `role: descriptive`: no tests, no effect; the group comparisons are `roi_nbs` and
+  `roi_graph`. The writer takes a module's role (`ResultsSpec.role`).
+
 - **`roi_signature` and `electrode_signature` describe their results by the shared specification** (Esprit's
   results plan, 5b.4): one row per contrast, band and classifier, with balanced accuracy as the effect and an
   approximate 95% interval (`balanced_accuracy_lcl`/`_ucl`: the mean of the two groups' Wilson intervals), the

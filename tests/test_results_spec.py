@@ -572,3 +572,40 @@ def test_signature_statistics_read_the_saved_features(tmp_path):
     assert module._subject_order == ["WT_s0", "WT_s1", "KO_s0", "KO_s1"] and module._ch_names == ["M1", "V1"]
     assert module._subject_data["KO_s1"]["band_power"] == {"Alpha": {"V1": 0.1, "M1": 0.1}}
     assert module._subject_groups["KO_s0"] == "KO"
+
+
+# ---------------------------------------------------------- roi_connectivity (descriptive) ---
+def test_roi_connectivity_writes_descriptive_tables_that_conform(tmp_path):
+    pytest.importorskip("neurobox")
+    import pandas as pd
+
+    from source_analytics.analyses.roi_connectivity_analysis import ConnectivityAnalysis
+
+    module = ConnectivityAnalysis.__new__(ConnectivityAnalysis)
+    module.output_dir = tmp_path / "analytics" / "roi_connectivity"
+    (module.output_dir / "data").mkdir(parents=True)
+    module.config = SimpleNamespace(paradigm_name="rest_roi", profile_name=None, results_dir=tmp_path / "results",
+                                    raw={"pipeline": {"atlas": "allen26"}}, design_spec=None)
+    module._metrics = ["coherence", "imag_coherence", "pli"]
+    pd.DataFrame([{"subject": f"{g}_s{i}", "group": g, "band": b, "roi1": r1, "roi2": r2,
+                   "coherence": 0.5 + 0.1 * i, "imag_coherence": 0.05, "pli": 0.2}
+                  for g in ("WT", "KO") for i in range(3) for b in ("Alpha",)
+                  for r1, r2 in (("V1", "M1"), ("V1", "S1"), ("M1", "S1"))]).to_csv(
+        module.output_dir / "data" / "roi_connectivity_edges.csv", index=False)
+    module.statistics()
+    summary = pd.read_csv(module.tbl_dir / "roi_connectivity_group_summary.csv")
+    assert len(summary) == 2 * 3                                           # groups x measures, one band
+    wt = summary[(summary.group == "WT") & (summary.dv == "coherence")].iloc[0]
+    assert (wt["n"], round(wt["mean"], 4), round(wt["sd"], 4)) == (3, 0.6, 0.1)
+    edges = pd.read_csv(module.tbl_dir / "roi_connectivity_group_edges.csv")
+    assert len(edges) == 2 * 3 * 3 and set(edges["spatial"]) == {"V1 -- M1", "V1 -- S1", "M1 -- S1"}
+    assert set(edges["measure"]) == {"coherence", "imcoh", "pli"}
+    shim = SimpleNamespace(name="roi_connectivity", tbl_dir=module.tbl_dir, output_dir=module.output_dir,
+                           config=module.config, RESULTS_SPEC=ConnectivityAnalysis.RESULTS_SPEC)
+    rec = dict(RECORD, subjects={"n": 6, "groups": {"WT": 3, "KO": 3}})
+    rep = rs.write(shim, rec, "2026-11-09T12:00:00+00:00")
+    assert rep is not None and rep.ok and not rep.warnings, (rep and rep.errors, rep and rep.warnings)
+    a = json.loads((module.tbl_dir / "analysis.json").read_text())
+    assert a["role"] == "descriptive" and a["effect"]["measure"] is None
+    assert a["inference"]["correction"]["p_kind"] == "none"
+    assert {t["role"] for t in a["tables"]} == {"descriptives"}
