@@ -496,6 +496,8 @@ plot_global_te_bar <- function(global_df, group_colors, group_labels,
   ggsave(file.path(output_dir, fname), p,
          width = max(8, 2 * n_bands), height = 5, dpi = 300)
   message("  Saved: ", fname)
+  record_figure(output_dir, fname, measure = dv, kind = "distribution",
+                shows = "roi_directed_global_hypotheses.csv")
 }
 
 # ===========================================================================

@@ -254,6 +254,7 @@ class ConnectivityAnalysis(BaseAnalysis):
         Produces one multi-row figure per metric × band × plot_type, with
         all contrasts combined as rows (Group A | Group B | Difference per row).
         """
+        from ..figure_record import record_figure
         from ..viz.connectivity_plots import (
             build_roi_matrix,
             build_significance_matrix,
@@ -335,6 +336,8 @@ class ConnectivityAnalysis(BaseAnalysis):
                         title=f"{band} — {metric_label}",
                         show_roi_labels=(plot_type != "circos"),
                     )
+                    record_figure(fig_dir, out, measure=metric, facets={"band": band}, kind="matrix",
+                                  shows=f"{self.name}_group_edges.csv")
                     n_figs += 1
 
                 # Significance circos per contrast (these stay per-contrast
@@ -363,6 +366,8 @@ class ConnectivityAnalysis(BaseAnalysis):
                                 group_labels=(label_a, label_b),
                                 title=f"{band} — {metric_label} (uncorrected p < 0.05)",
                             )
+                            record_figure(fig_dir, out, measure=metric, contrast=contrast.name,
+                                          facets={"band": band}, kind="matrix")
                             n_figs += 1
 
         logger.info("Generated %d connectivity figures", n_figs)

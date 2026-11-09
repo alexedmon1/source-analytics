@@ -51,3 +51,16 @@ def test_roi_signature_figures_regenerate_from_disk(sample_config_yaml, tmp_path
         p.unlink()
     analyzer.run_analysis("roi_signature", steps={"figures"})
     assert list(config.results_dir.rglob("roi_signature_importance_*.png"))
+    # each figure records its test, though contrast and classifier names hold the "_" joining them
+    from source_analytics.figure_record import read_records
+
+    fig_dir = next(config.results_dir.rglob("roi_signature_importance_*.png")).parent
+    recs = read_records(fig_dir)
+    band = next(iter(config.bands))
+    key = f"disease_effect_{band}_svm_linear".lower().replace(" ", "_")
+    for kind in ("importance", "null", "confusion"):
+        rec = recs[f"roi_signature_{kind}_{key}.png"]
+        assert (rec["contrast"], rec["facets"], rec["measure"], rec["shows"]) == (
+            "disease_effect", {"band": band, "classifier": "svm_linear"}, "balanced_accuracy",
+            "roi_signature_results.csv")
+    assert recs[f"roi_signature_importance_{key}.png"]["kind"] == "brain"

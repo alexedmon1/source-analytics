@@ -27,6 +27,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from ..config import StudyConfig
+from ..figure_record import record_figure
 from ..io.discovery import SubjectInfo
 from ..io.electrode_loader import load_eeglab_set
 from ..spectral.epoch_sampler import sample_epochs
@@ -198,6 +199,8 @@ def render_signature_comparison(
         fig.tight_layout()
         fig.savefig(fig_dir / f"signature_source_vs_sensor_{clf}.png", dpi=150)
         plt.close(fig)
+        record_figure(fig_dir, f"signature_source_vs_sensor_{clf}.png", measure=metric,
+                      facets={"classifier": clf}, kind="other", shows="signature_source_vs_sensor.csv")
     logger.info("Rendered source-vs-sensor comparison (%d matched cells)", len(merged))
 
 
@@ -565,14 +568,25 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
             if not self._load_state_from_disk():
                 return
         fig_dir = self.fig_dir
+        # result keys join contrast, band and classifier with "_", which the names themselves use
+        parts = {f"{c.name}_{b}_{clf}": (c.name, b, clf) for c in self._pairwise_contrasts()
+                 for b in self._selected_bands() for clf in self._classifiers}
+
+        def record(out: Path, key: str, kind: str) -> None:
+            if not out.exists():
+                return
+            contrast, band, clf = parts.get(key, (None, None, None))
+            record_figure(fig_dir, out, measure="balanced_accuracy", contrast=contrast,
+                          facets={"band": band, "classifier": clf} if band else None, kind=kind,
+                          shows=f"{self.name}_results.csv")
 
         for key, result in self._signature_results.items():
             safe = key.lower().replace(" ", "_")
 
             if getattr(result, "has_weights", True) and not np.all(np.isnan(result.feature_weights)):
-                self._plot_importance_topomap(
-                    result.feature_weights, f"Feature Importance — {key}",
-                    fig_dir / f"{self.name}_importance_{safe}.png")
+                out = fig_dir / f"{self.name}_importance_{safe}.png"
+                self._plot_importance_topomap(result.feature_weights, f"Feature Importance — {key}", out)
+                record(out, key, "brain")
 
             fig, ax = plt.subplots(figsize=(8, 5))
             ax.hist(result.null_distribution, bins=30, color="#3498DB",
@@ -584,6 +598,7 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
             ax.legend(); fig.tight_layout()
             fig.savefig(fig_dir / f"{self.name}_null_{safe}.png", dpi=150)
             plt.close(fig)
+            record(fig_dir / f"{self.name}_null_{safe}.png", key, "diagnostic")
 
             fig, ax = plt.subplots(figsize=(5, 4))
             preds, true = result.predictions, result.true_labels
@@ -599,6 +614,7 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
             fig.tight_layout()
             fig.savefig(fig_dir / f"{self.name}_confusion_{safe}.png", dpi=150)
             plt.close(fig)
+            record(fig_dir / f"{self.name}_confusion_{safe}.png", key, "diagnostic")
 
         self._render_source_vs_sensor(fig_dir)
 

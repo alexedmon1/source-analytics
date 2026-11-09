@@ -283,6 +283,7 @@ for (ptype in power_types) {
   ggsave(file.path(fig_dir, fname), p,
          width = 3.5 * length(band_order), height = 5, dpi = 300)
   message("  Saved: ", fname)
+  record_figure(fig_dir, fname, measure = ptype, kind = "distribution")
 }
 
 # Channel-level forest plots (post-hoc)
@@ -316,6 +317,8 @@ if (nrow(posthoc_df) > 0) {
       ggsave(file.path(fig_dir, fname), p,
              width = max(10, 4 * n_bands), height = 8, dpi = 300, limitsize = FALSE)
       message("  Saved: ", fname)
+      record_figure(fig_dir, fname, measure = ptype, contrast = cname, kind = "summary",
+                    shows = "electrode_psd_hypotheses.csv")
     }
   }
 }

@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import StudyConfig
+from ..figure_record import record_figure
 from ..io.discovery import SubjectInfo
 from ..viz.constants import BAND_ORDER as _BAND_ORDER_TITLE, CC_ROIS, order_bands
 
@@ -565,6 +566,8 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             fig.tight_layout()
             fig.savefig(fig_dir / f"fig1_correlation_{power_type}.png", dpi=300, bbox_inches="tight")
             plt.close(fig)
+            record_figure(fig_dir, f"fig1_correlation_{power_type}.png", measure=power_type, kind="other",
+                          shows="comparison_stats.csv")
             logger.info("Saved fig1_correlation_%s.png", power_type)
 
     def _plot_effect_size_comparison(self, stats_df: pd.DataFrame, fig_dir: Path) -> None:
@@ -646,6 +649,8 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                 fig.savefig(fig_dir / f"fig2_effect_sizes_{power_type}_{safe_contrast}.png",
                             dpi=300, bbox_inches="tight")
                 plt.close(fig)
+                record_figure(fig_dir, f"fig2_effect_sizes_{power_type}_{safe_contrast}.png", measure=power_type,
+                              contrast=contrast, kind="summary", shows="comparison_stats.csv")
                 logger.info("Saved fig2_effect_sizes_%s_%s.png", power_type, safe_contrast)
 
     def _plot_spatial_advantage(self, regional_df: pd.DataFrame, fig_dir: Path) -> None:
@@ -705,6 +710,9 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                 fig.savefig(fig_dir / f"fig4_spatial_advantage_{power_type}_{safe_contrast}.png",
                             dpi=300, bbox_inches="tight")
                 plt.close(fig)
+                record_figure(fig_dir, f"fig4_spatial_advantage_{power_type}_{safe_contrast}.png",
+                              measure=power_type, contrast=contrast, kind="summary",
+                              shows="regional_effect_sizes.csv")
                 logger.info("Saved fig4_spatial_advantage_%s_%s.png", power_type, safe_contrast)
 
     def summary(self) -> None:

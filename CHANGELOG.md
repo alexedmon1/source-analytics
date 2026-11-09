@@ -8,10 +8,13 @@
   (measure, contrast, facets), kind and source table in `figures.jsonl` beside the images
   (`figure_record.record_figure`; `record_figure()` in R/stats_utils.R), and `gallery build` lists them in
   `analysis.json` with the measure under the specification's name, so the gallery groups and filters figures by
-  fields, not file names. Recorded so far: the brain mosaics of roi_psd, roi_aperiodic and roi_cross_freq (PAC),
-  and roi_psd's R figures (spectra, band power, group heatmaps, significance heatmaps, band by region). Figures
-  with no record are listed as before. The results extra pins neurobox-dev `dd3b7a7` (a figure of one contrast
-  across its bands matches its tests).
+  fields, not file names. Recorded: the brain mosaics of roi_psd, roi_aperiodic and roi_cross_freq (PAC); the R
+  figures of roi_psd, roi_aperiodic, roi_cross_freq (PAC, AAC, PPC), roi_connectivity, roi_directed and
+  electrode_psd; and the Python figures of roi_connectivity (circos and matrices), roi_graph (global metrics), the
+  signature modules (importance, null, confusion: contrast, band and classifier) and electrode_comparison. A figure
+  is recorded only once it is on disk, so a run without figures records none. Figures with no record are listed as
+  before. The results extra pins neurobox-dev `dd3b7a7` (a figure of one contrast across its bands matches its
+  tests).
 
 - **`electrode_comparison` describes its results by the shared specification as a diagnostic** (Esprit's
   results plan, 5b.4): the sensor-source agreement tables (correlation across subjects, each contrast's Hedges' g

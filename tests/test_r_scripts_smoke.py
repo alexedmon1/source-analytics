@@ -16,6 +16,7 @@ Skipped when ``Rscript`` is not on PATH.
 from __future__ import annotations
 
 import itertools
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -304,3 +305,19 @@ def test_correction_phrase_reads_fdr_family_and_keeps_legacy_holm():
     assert bh == "Benjamini-Hochberg FDR correction within each hypothesis family"
     assert legacy == "Holm correction"
     assert none == "no multiple-comparison correction"
+
+
+def test_record_figure_records_only_a_saved_figure(tmp_path):
+    (tmp_path / "saved.png").write_bytes(b"\x89PNG")
+    code = (
+        f'source("{R_DIR / "stats_utils.R"}"); '
+        f'record_figure("{tmp_path}", "saved.png", measure = "exponent", contrast = "disease_effect", '
+        'facets = list(band = "Alpha"), kind = "summary", caption = NULL); '
+        f'record_figure("{tmp_path}", "stubbed.png", kind = "summary")'
+    )
+    res = subprocess.run(["Rscript", "-e", code], capture_output=True, text=True, timeout=120, check=False)
+    assert res.returncode == 0, res.stderr
+    lines = (tmp_path / "figures.jsonl").read_text().splitlines()
+    assert [json.loads(x) for x in lines] == [{"file": "saved.png", "measure": "exponent",
+                                               "contrast": "disease_effect", "kind": "summary",
+                                               "facets": {"band": "Alpha"}}]

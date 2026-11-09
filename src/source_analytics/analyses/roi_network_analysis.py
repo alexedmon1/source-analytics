@@ -328,6 +328,8 @@ class _ROINetworkBase(NetworkAnalysisBase):
         import matplotlib.pyplot as plt
         from scipy import stats as sp_stats
 
+        from ..figure_record import record_figure
+
         df = pd.read_csv(csv_path)
         global_metrics = ["global_efficiency", "modularity", "small_worldness"]
         contrasts = self._pairwise_contrasts()
@@ -411,8 +413,13 @@ class _ROINetworkBase(NetworkAnalysisBase):
                 ax.set_title(f"{gm_name.replace('_', ' ').title()} — {metric_label}")
                 ax.legend()
                 fig.tight_layout()
-                fig.savefig(fig_dir / (f"{self.name}_{metric}_{gm_name}".lower() + ".png"), dpi=150)
+                out = fig_dir / (f"{self.name}_{metric}_{gm_name}".lower() + ".png")
+                fig.savefig(out, dpi=150)
                 plt.close(fig)
+                # the stars are Welch t-tests BH-corrected over every bar (_global_pairwise.csv), not the
+                # declared hypotheses, which test the nodal metrics
+                record_figure(fig_dir, out, measure=gm_name, facets={"connectivity": metric},
+                              kind="distribution")
 
     # --------------------------------------------------------- summaries --- #
     def _write_summary(self, graph: bool = True, nbs: bool = True) -> None:

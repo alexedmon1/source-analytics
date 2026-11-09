@@ -478,6 +478,8 @@ plot_global_pac_bar <- function(global_df, group_colors, group_labels,
   ggsave(file.path(output_dir, "roi_pac_global_bar.png"), p,
          width = max(8, 1.5 * n_pairs), height = 5, dpi = 300)
   message("  Saved: roi_pac_global_bar.png")
+  record_figure(output_dir, "roi_pac_global_bar.png", measure = "z_score", kind = "summary",
+                shows = "roi_pac_global_hypotheses.csv")
 }
 
 #' Comodulogram heatmap: phase band vs amp band, mean z-score
@@ -554,6 +556,7 @@ plot_comodulogram <- function(pac, contrasts, group_colors, group_labels,
     ggsave(file.path(output_dir, fname), p,
            width = 4 * n_panels + 1, height = 5, dpi = 300)
     message("  Saved: ", fname)
+    record_figure(output_dir, fname, measure = "z_score", contrast = cname, kind = "matrix")
   }
 }
 
@@ -611,6 +614,8 @@ plot_pac_significance_heatmap <- function(posthoc_df, output_dir) {
            width = max(8, n_pairs * 1.2 + 2), height = max(5, n_regions * 0.5 + 2),
            dpi = 300, limitsize = FALSE)
     message("  Saved: ", fname)
+    record_figure(output_dir, fname, measure = "z_score", contrast = cname, kind = "summary",
+                  shows = "roi_pac_region_hypotheses.csv")
   }
 }
 

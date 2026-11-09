@@ -855,10 +855,12 @@ resolve_roi_categories <- function(config_categories, path = NULL) {
 #' reads to list the figure's test (measure in the module's name, e.g. the dv; contrast, the
 #' declared hypothesis; facets, a named list such as list(band = "Alpha")), its kind (brain,
 #' matrix, spectrum, distribution, trajectory, summary, diagnostic, other) and the table it
-#' shows. NULL tags are left out; without jsonlite nothing is recorded.
+#' shows. NULL tags are left out; a figure not on disk, or a run without jsonlite, records nothing.
 record_figure <- function(output_dir, fname, measure = NULL, contrast = NULL, facets = NULL,
                           kind = NULL, shows = NULL, caption = NULL) {
   if (!requireNamespace("jsonlite", quietly = TRUE)) return(invisible(NULL))
+  # a run without figures stubs out ggsave, so record only what was written
+  if (!file.exists(file.path(output_dir, basename(fname)))) return(invisible(NULL))
   entry <- list(file = basename(fname))
   for (tag in c("measure", "contrast", "kind", "shows", "caption")) {
     v <- get(tag)
