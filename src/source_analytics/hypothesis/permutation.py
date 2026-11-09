@@ -290,6 +290,7 @@ def run_hypothesis_permutation(
             "significant": False, "stat_type": "tost",
             "n_equivalent": n_equiv,
             "frac_equivalent": float(n_equiv / len(diff)) if len(diff) else 0.0,
+            "margin_sd": margin_val,
         }
         if vertex_rois is not None:
             # Region of the equivalent vertices (where KO≈WT), if any.

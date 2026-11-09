@@ -394,3 +394,93 @@ def test_a_statistics_only_roi_graph_run_writes_its_hypotheses(tmp_path):
     out = pd.read_csv(module.tbl_dir / "roi_graph_hypotheses.csv")
     assert set(out["graph_metric"]) == {"degree", "clustering", "betweenness"} and set(out["spatial"]) == {"V1", "M1"}
     assert not (module.tbl_dir / "roi_graph_stats.csv").exists()     # the legacy table needs the graphs
+
+
+# ------------------------------------------ permutation modules: NBS and electrode clusters ---
+def _perm_config(groups=("WT", "KO")):
+    from source_analytics.config import DesignSpec, Hypothesis
+
+    hyps = [Hypothesis(name="group_omnibus", kind="omnibus", role="phenotype"),
+            Hypothesis(name="disease_effect", kind="contrast", role="phenotype", label="Disease effect",
+                       weights={"KO": 1.0, "WT": -1.0}),
+            Hypothesis(name="normalization", kind="equivalence", role="normalization",
+                       weights={"KO": 1.0, "WT": -1.0}, margin={"mode": "sd", "value": 0.5})]
+    return SimpleNamespace(design_spec=DesignSpec(factor="group", reference="WT", levels=list(groups), fdr={},
+                                                  hypotheses=hyps),
+                           paradigm_name="rest_roi", profile_name=None, raw={"pipeline": {"atlas": "allen26"}})
+
+
+def _write_and_check(tmp_path, name, cls, cfg):
+    module = SimpleNamespace(name=name, tbl_dir=tmp_path, output_dir=tmp_path.parent / "analytics", config=cfg,
+                             RESULTS_SPEC=cls.RESULTS_SPEC)
+    rep = rs.write(module, dict(RECORD), "2026-11-09T12:00:00+00:00")
+    assert rep is not None and rep.ok and not rep.warnings, (rep and rep.errors, rep and rep.warnings)
+    return json.loads((tmp_path / "analysis.json").read_text())
+
+
+def test_roi_nbs_conforms_from_the_edge_layer(tmp_path):
+    pytest.importorskip("neurobox")
+    import numpy as np
+
+    from source_analytics.analyses.roi_network_analysis import ROINBSAnalysis
+    from source_analytics.hypothesis import write_module_hypotheses_edge
+
+    rng = np.random.default_rng(1)
+    n, groups = 6, {f"{g}{i}": g for g in ("WT", "KO") for i in range(8)}
+    cells = {}
+    for band, dv in (("Alpha", "coherence"), ("Alpha", "imag_coherence")):
+        mats = {}
+        for uid, g in groups.items():
+            m = rng.normal(0.3, 0.05, (n, n))
+            if g == "KO":
+                m[:3, :3] += 0.2                                # a planted sub-network
+            m = (m + m.T) / 2
+            np.fill_diagonal(m, 0)
+            mats[uid] = m
+        cells[(band, dv)] = mats
+    tbl = tmp_path / "results" / "tables" / "rest_roi" / "roi_nbs"
+    tbl.mkdir(parents=True)
+    cfg = _perm_config()
+    write_module_hypotheses_edge(cells, groups, cfg, tbl, prefix="roi_nbs", nbs_threshold=2.5, n_perms=50,
+                                 node_labels=[f"R{i}" for i in range(n)])
+    a = _write_and_check(tbl, "roi_nbs", ROINBSAnalysis, cfg)
+    assert a["id"] == "eeg/roi/nbs/rest_roi" and set(a["measures"]) == {"coherence", "imcoh"}
+    assert a["inference"]["correction"]["method"] == "nbs" and "families" not in a["inference"]
+    assert a["effect"]["measure"] is None and a["effect"]["reason"]
+    assert [t["role"] for t in a["tables"]] == ["elements", "other"]
+    cols = json.loads((tbl / "roi_nbs_hypotheses.json").read_text())
+    assert cols["component_id"]["ElementName"] == "component" and cols["component_p"]["PKind"] == "fwe"
+    assert cols["peak_stat"]["Standard"] == "stat"
+
+
+def test_electrode_connectivity_conforms_from_the_cluster_layer(tmp_path):
+    pytest.importorskip("neurobox")
+    import numpy as np
+
+    from source_analytics.analyses.electrode_connectivity_analysis import (
+        ElectrodeConnectivityAnalysis,
+    )
+    from source_analytics.hypothesis import write_module_hypotheses_perm
+
+    rng = np.random.default_rng(2)
+    n_ch, groups = 8, {f"{g}{i}": g for g in ("WT", "KO") for i in range(8)}
+    coords = np.array([[i * 10.0, 0.0, 0.0] for i in range(n_ch)])     # a line of electrodes, 10 mm apart
+    cells = {}
+    for band, dv in (("Alpha", "coherence"), ("Alpha", "aec")):
+        cells[(band, dv)] = {uid: rng.normal(0.3, 0.05, n_ch) + (0.15 * (np.arange(n_ch) < 3) if g == "KO" else 0)
+                             for uid, g in groups.items()}
+    tbl = tmp_path / "results" / "tables" / "rest_roi" / "electrode_connectivity"
+    tbl.mkdir(parents=True)
+    cfg = _perm_config()
+    write_module_hypotheses_perm(cells, groups, coords, cfg, tbl, prefix="electrode_connectivity", n_perms=50,
+                                 threshold=2.0, distance_mm=12.0,
+                                 node_labels=["Frontal"] * 4 + ["Occipital"] * 4)
+    a = _write_and_check(tbl, "electrode_connectivity", ElectrodeConnectivityAnalysis, cfg)
+    assert a["id"] == "eeg/sensor/connectivity/rest_roi" and a["measures"] == ["fcd"]
+    assert a["inference"]["correction"]["method"] == "cluster" and "atlas" not in a
+    cols = json.loads((tbl / "electrode_connectivity_hypotheses.json").read_text())
+    assert cols["dv"]["FacetName"] == "connectivity" and cols["measure"]["Standard"] == "measure"
+    assert cols["cluster_id"]["ElementName"] == "cluster" and cols["cluster_p"]["Standard"] == "p_value"
+    with open(tbl / "electrode_connectivity_hypotheses.csv") as fh:
+        rows = list(csv.DictReader(fh))
+    assert {r["measure"] for r in rows} == {"fcd"} and {r["dv"] for r in rows} == {"coherence", "aec"}

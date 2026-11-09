@@ -4,6 +4,17 @@
 
 ### Added
 
+- **`roi_nbs` and `electrode_connectivity` describe their results by the shared specification** (Esprit's
+  results plan, 5b.4). Each row is an element: an NBS component (sub-network) or a cluster of neighbouring
+  electrodes, with its permutation p (family-wise over the network or montage within each test,
+  `inference.correction`), its peak statistic, size and mass, and no effect size, with the reason stated
+  (`effect.measure: null`). `roi_nbs` also lists the component edges table. `electrode_connectivity`'s measure is
+  the functional connectivity density, with the connectivity measure it was computed from as a facet. The writer
+  takes a module's own column descriptions (`extra_columns`), a correction where there are no FDR families, and
+  an effect statement.
+- **The equivalence summaries of permutation modules state their margin** (`margin_sd`, in each edge's or
+  electrode's pooled SDs): the checker requires the bound on every equivalence row.
+
 - **`roi_graph` describes its results by the shared specification** (Esprit's results plan, 5b.4): degree,
   clustering and betweenness per ROI, band and connectivity measure (the graph metric is the measure, the
   connectivity measure a second facet, `FacetName` `connectivity`). The writer takes a module's measure column

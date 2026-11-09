@@ -363,7 +363,8 @@ def run_hypothesis_edge(
         sp = np.sqrt(((na - 1) * ae.var(0, ddof=1) + (nb - 1) * be.var(0, ddof=1))
                      / (na + nb - 2))
         se = sp * np.sqrt(1 / na + 1 / nb)
-        margin = float((hyp.margin or {}).get("value", 0.0)) * sp  # sd mode
+        margin_val = float((hyp.margin or {}).get("value", 0.0))
+        margin = margin_val * sp  # sd mode
         zc = stats.t.ppf(0.95, na + nb - 2)
         with np.errstate(invalid="ignore"):
             equiv = (diff - zc * se > -margin) & (diff + zc * se < margin)
@@ -375,6 +376,7 @@ def run_hypothesis_edge(
             "significant": False, "stat_type": "tost",
             "n_equivalent": n_equiv,
             "frac_equivalent": float(n_equiv / n_edges) if n_edges else 0.0,
+            "margin_sd": margin_val,
         }
         if vertex_rois is not None:
             row["region"] = ""  # edge-level TOST has no node subnetwork

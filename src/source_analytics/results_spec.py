@@ -91,6 +91,42 @@ class ResultsSpec:
     measure_col: str = "dv"
     #: further facet columns: (column, FacetName, description), e.g. a graph's connectivity metric
     extra_facets: tuple[tuple[str, str, str], ...] = ()
+    #: dictionary entries for the module's own columns, or replacing the shared ones (permutation
+    #: tables: component, mass, the permutation p)
+    extra_columns: tuple[tuple[str, dict], ...] = ()
+    #: ``inference.correction`` for tables with no ``fdr_family`` (a permutation test's FWE)
+    correction: dict | None = None
+    #: ``effect`` in place of the per-row effect size, e.g. ``{"measure": None, "reason": ...}``
+    effect: dict | None = None
+
+
+def permutation_columns(unit: str, units: str, p_col: str, p_scope: str) -> tuple[tuple[str, dict], ...]:
+    """Dictionary entries for the permutation tables (hypothesis/edge.py: NBS components;
+    hypothesis/permutation.py: clusters of a map). ``unit`` is what one row's element is
+    (component, cluster), ``units`` what it is made of (edges, electrodes); ``p_col`` holds
+    the permutation p, corrected over the whole map by the permutation maximum (FWE)."""
+    return (
+        (p_col, {"Description": f"the {unit}'s permutation p: {p_scope}", "Standard": "p_value",
+                 "PKind": "fwe", "PScope": p_scope}),
+        ("n_perms", {"Description": "label permutations in the null distribution"}),
+        ("threshold", {"Description": "the per-element statistic's threshold that forms the " + unit + "s"}),
+        ("mass", {"Description": f"the {unit}'s mass: the sum of |statistic| over its supra-threshold {units}"}),
+        ("peak_stat", {"Description": f"the largest |statistic| in the {unit}", "Standard": "stat",
+                       "StatName": "per row, as stat_type says: t or F", "StatScope": "peak"}),
+        ("stat_type", {"Description": "the per-element statistic's kind",
+                       "Levels": {"t": "t (two-group contrasts)", "F": "F (omnibus and weighted contrasts)",
+                                  "tost": f"a per-element equivalence summary, not a {unit}"}}),
+        ("significant", {"Description": f"the {unit}'s permutation p < 0.05", "Standard": "significant",
+                         "Alpha": SIGNIFICANCE_ALPHA}),
+        ("region", {"Description": f"the regions the {unit}'s nodes cover"}),
+        ("n_equivalent", {"Description": f"equivalence rows: the {units} whose two one-sided tests conclude "
+                                         "equivalence"}),
+        ("frac_equivalent", {"Description": f"equivalence rows: n_equivalent as a fraction of the {units}"}),
+        ("margin_sd", {"Description": f"equivalence rows: the margin each of the {units}' two one-sided tests "
+                                      "used, in that element's pooled SDs (the declared margin's value, "
+                                      "read as SDs)", "Standard": "margin",
+                       "Units": f"pooled SDs of each of the {units}"}),
+    )
 
 
 #: Band power, as roi_psd and electrode_psd name it (spectral/band_power.py).
@@ -261,6 +297,7 @@ def columns(cols: list[str], rows: list[dict[str, str]], table: SpecTable, spec:
                                           "specification's)"},
         **{col: {"Description": desc, "Standard": "facet", "FacetName": name}
            for col, name, desc in spec.extra_facets},
+        **dict(spec.extra_columns),
         "measure": {"Description": "the measure, by its name in the specification's vocabulary",
                     "Standard": "measure"},
         "margin_used": {"Description": "the equivalence margin, in the estimate's units",
@@ -413,7 +450,8 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
                        "n_rows": len(rows), **({"headline": True} if t.headline else {})})
 
     subjects = record.get("subjects") or {}
-    measures = [m for dv, m in spec.measures.items() if any(r.get(spec.measure_col) == dv for r in all_rows)]
+    measures = list(dict.fromkeys(m for dv, m in spec.measures.items()
+                                  if any(r.get(spec.measure_col) == dv for r in all_rows)))
     run_id = _default_run_id()
     analysis_json: dict[str, Any] = {
         "id": _analysis_id("eeg", atype, name, *(p for p in (paradigm, profile) if p)),
@@ -422,16 +460,19 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
         "description": meta.get("about") or meta.get("description") or analysis.name,
         "analysis_type": atype, "modality": "eeg", "domain": spec.domain,
         "measures": measures, "role": "exploratory",
-        "design": {"n": int(subjects.get("n") or 0) or max(int(r["n"]) for r in all_rows if r.get("n")),
+        "design": {"n": int(subjects.get("n") or 0) or max((int(r["n"]) for r in all_rows if r.get("n")),
+                                                           default=0),
                    "groups": {g: int(n) for g, n in (subjects.get("groups") or {}).items()},
                    "test_kinds": _test_kinds(all_rows)},
-        "inference": {"method": spec.method,
-                      "families": [{k: v for k, v in f.items() if not k.startswith("_")}
-                                   for f in fams.values()]},
-        "effect": {"measure": "per_row", "ci_level": 0.95,
-                   "definition": "per row, as effect_size_type says: the estimate over the model's "
-                                 "residual SD for contrasts, partial omega squared for omnibus rows, "
-                                 "the standardized slope for regressions"},
+        "inference": ({"method": spec.method, "correction": spec.correction}
+                      if spec.correction and not fams else
+                      {"method": spec.method,
+                       "families": [{k: v for k, v in f.items() if not k.startswith("_")}
+                                    for f in fams.values()]}),
+        "effect": spec.effect or {"measure": "per_row", "ci_level": 0.95,
+                                  "definition": "per row, as effect_size_type says: the estimate over the "
+                                                "model's residual SD for contrasts, partial omega squared "
+                                                "for omnibus rows, the standardized slope for regressions"},
         "tables": tables,
         "caveats": [*spec.caveats, *COMMON_CAVEATS],
         "run": {"id": run_id, "label": f"{analysis.name} on {paradigm}" if paradigm else analysis.name},

@@ -23,7 +23,7 @@ import yaml
 
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
-from ..results_spec import ResultsSpec, SpecTable
+from ..results_spec import ResultsSpec, SpecTable, permutation_columns
 from ..stats.graph_metrics import compute_graph_metrics
 from ..viz.constants import CC_ROIS, METRIC_LABELS
 from ._network_base import NetworkAnalysisBase
@@ -509,6 +509,68 @@ class ROINBSAnalysis(_ROINetworkBase):
     """ROI Network-Based Statistic, no graph metrics."""
 
     name = "roi_nbs"
+    RESULTS_SPEC = ResultsSpec(
+        domain="connectivity",
+        measures={"coherence": "coherence", "imag_coherence": "imcoh", "pli": "pli", "wpli": "wpli",
+                  "dwpli": "dwpli", "dpli": "dpli", "aec": "aec"},
+        units={"coherence": "magnitude-squared coherence (0 to 1)", "imag_coherence": "|imaginary coherence| (0 to 1)",
+               "pli": "phase lag index (0 to 1)", "wpli": "weighted PLI (0 to 1)",
+               "dwpli": "debiased weighted PLI (squared, can be slightly negative)",
+               "dpli": "directed PLI (0.5 = no lead)", "aec": "amplitude envelope correlation (Pearson r)"},
+        input_file="roi_connectivity_edges.csv (roi_connectivity's)",
+        method="the network-based statistic (Zalesky et al. 2010) per band and connectivity measure: a "
+               "statistic per ROI-pair edge for each declared hypothesis (t for two-group contrasts, F for the "
+               "omnibus and weighted contrasts), thresholded (network.nbs_threshold, 2.5 unless set); the "
+               "connected components of the supra-threshold edges are tested against the largest component "
+               "in each label permutation (network.nbs_permutations, 5000 unless set). Equivalence rows "
+               "summarize per-edge two one-sided tests",
+        tables=(
+            SpecTable("_hypotheses.csv", "elements",
+                      "one component (sub-network) of one declared hypothesis in one band and connectivity "
+                      "measure; component 0 is the row of a test that formed none, or an equivalence summary",
+                      "the declared hypotheses: the sub-networks the NBS finds", element=False, headline=True),
+            SpecTable("_subnetwork_edges.csv", "other",
+                      "one supra-threshold edge of one component",
+                      "the edges of every component, for drawing the sub-networks", element=False),
+        ),
+        extra_columns=(
+            *permutation_columns("component", "edges", "component_p",
+                                 "the share of label permutations whose largest component has at least as "
+                                 "many edges, within the test (FWE over the network)"),
+            ("component_id", {"Description": "the component's number within its test (0: none formed, or an "
+                                             "equivalence summary)", "Standard": "element",
+                              "ElementName": "component"}),
+            ("n_edges", {"Description": "the component's supra-threshold edges (equivalence rows: the edges "
+                                        "tested)"}),
+            ("n_edges_increase", {"Description": "t rows: the component's edges where group_a is higher"}),
+            ("n_edges_decrease", {"Description": "t rows: the component's edges where group_a is lower"}),
+            ("mean_stat", {"Description": "t rows: the mean signed t over the component's edges"}),
+            ("direction", {"Description": "t rows: which way the component's edges go",
+                           "Levels": {"increase": "every edge higher in the contrast's positive side",
+                                      "decrease": "every edge lower", "mixed": "both"}}),
+            ("node_i", {"Description": "the edge's first ROI, by its index in the connectivity matrix"}),
+            ("node_j", {"Description": "the edge's second ROI, by its index"}),
+            ("roi_i", {"Description": "the edge's first ROI"}),
+            ("roi_j", {"Description": "the edge's second ROI"}),
+            ("stat", {"Description": "the edge's statistic (signed t, or F)"}),
+        ),
+        correction={"p_kind": "fwe", "method": "nbs",
+                    "family": "the components of one test: one hypothesis, band and connectivity measure",
+                    "statement": "NBS: each component's p is the share of label permutations whose largest "
+                                 "component is at least as large (in edges), so p < 0.05 controls the "
+                                 "family-wise error over the network within each test; tests are not "
+                                 "corrected across hypotheses, bands or connectivity measures",
+                    "alpha": 0.05},
+        effect={"measure": None,
+                "reason": "a component is a set of edges chosen by thresholding the statistic, so it has no "
+                          "single estimate with an interval; its size (edges), mass and peak statistic "
+                          "describe it, and its edges' statistics are in the subnetwork edges table"},
+        caveats=(("NBS controls the error of declaring a component, not of any one edge in it: an edge "
+                  "inside a significant component is not itself significant."),
+                 ("The component threshold is arbitrary: a lower one finds larger, weaker components."),
+                 ("Five connectivity measures are each tested; they are correlated, and nothing is corrected "
+                  "across them.")),
+    )
 
     def process_subject(self, subject: SubjectInfo) -> None:
         self._process_matrices(subject)
