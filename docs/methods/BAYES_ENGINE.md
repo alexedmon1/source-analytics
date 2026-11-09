@@ -115,6 +115,17 @@ deep-midline parcel tables give the same data (436 rows) and estimates within 0.
 eight outcomes in one run). FORGE's L3 region values as a csv table: 20 of 20 decisions the same, estimates within
 0.022 SD (those fits predate engine 2026.11.09.1's no-ROI residual-SD prior).
 
+### 2.2 Reading a run (E4, 2026-11-09)
+
+A fit writes the results table (schema 1: `report.TABLE_COLUMNS`, checked against the R code by
+`tests/bayes/test_report.py`), its manifest, and `<table>_<dv>_report.md` (`bayes/report.py`; also
+`source-analytics bayes-report --table ...`). The report reads files only: the run (study, inputs and their sha256,
+model and priors by catalogue id and version, set-I entries, ROPE, sampler); the results with W and I side by side,
+each estimate also in the outcome's own unit (times the band's scale) and beside it the gate's false-effect rate for
+that band; the gate per set with its rules; convergence; and the prior predictive (from the gate) and posterior
+predictive (`R/bayes/ppc.R`, read only, on the saved fits: observed SD, MAD and mean per band and group against 1,000
+replicated data sets). The user guide is [docs/guides/BAYES_USER_GUIDE.md](../guides/BAYES_USER_GUIDE.md).
+
 ## 3. Model
 
 The outcome is standardised before fitting, per band: z = (y - band mean) / s_b. Here s_b is the within-group

@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Reading a Bayesian run (engine plan E4).** Results table schema 1 (`bayes/report.py` `TABLE_COLUMNS`, checked
+  against the R code); `<table>_<dv>_report.md` written after every fit (`--no-report` to skip) or by
+  `source-analytics bayes-report --table ...`: the run with catalogue ids, W and I side by side with each estimate in
+  the outcome's own unit and the gate's false-effect rate beside it, the gate per set, convergence, prior and
+  posterior predictive. `R/bayes/ppc.R`: the posterior predictive on saved fits (read only; not part of any gate id).
+- **User guide (engine plan E6):** `docs/guides/BAYES_USER_GUIDE.md` (install, the `bayes:` block, gate and fit, the
+  table's columns and the report, long runs under systemd, worked examples), linked from the README and the docs site.
 - **Declared outcome tables for the Bayesian engine** (`bayes.tables`, `bayes/declared.py`). Any per-subject table
   can feed the engine from config: an analysis's table across paradigms (`source`, optionally another `output_dir`)
   or any CSV (`csv`, e.g. source-localization's `field region-values`), with outcomes selected by column values

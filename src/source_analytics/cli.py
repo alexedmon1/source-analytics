@@ -906,9 +906,18 @@ def cmd_bayes(args):
             print(f"bayes: {analysis} / {dv} -> {job.table_out}")
             if run_job(job).returncode != 0:
                 failures.append(f"{analysis}/{dv}")
+            elif not getattr(args, "no_report", False):
+                from .bayes.report import write_report
+                print(f"bayes: report -> {write_report(job.table_out, dv)}")
     if failures:
         print(f"ERROR: bayes failed for: {', '.join(failures)}")
         sys.exit(1)
+
+
+def cmd_bayes_report(args):
+    """Write report.md for a finished Bayesian run (engine plan E4)."""
+    from .bayes.report import write_report
+    print(write_report(args.table, args.dv, ppc=not args.no_ppc))
 
 
 def main():
@@ -1061,6 +1070,8 @@ def main():
     p_bayes.add_argument("--profile", metavar="NAME", help="Profile block narrowing bands/ROIs/hypotheses")
     p_bayes.add_argument("--hypothesis", help="Comma-separated declared hypothesis(es); default all")
     p_bayes.add_argument("--prior-sets", help="Fit only these of the study's bayes.prior_sets (comma-separated)")
+    p_bayes.add_argument("--no-report", action="store_true",
+                         help="Do not write <table>_<dv>_report.md after a fit")
     p_bayes.add_argument("--gate", action="store_true",
                          help="Run the gate (prior predictive, SBC, null, recovery) at this design instead of a real "
                               "fit; writes gate.json, which later real fits record as gate_passed")
@@ -1069,6 +1080,13 @@ def main():
                          help="Write the table and fits here instead of the study's results/analytics trees "
                               "(use when the study's results are frozen)")
     p_bayes.set_defaults(func=cmd_bayes)
+
+    p_brep = subparsers.add_parser("bayes-report", help="Write the readable report of a finished Bayesian run")
+    p_brep.add_argument("--table", required=True, type=Path, help="<analysis>_hypotheses_bayes.csv of the run")
+    p_brep.add_argument("--dv", help="Outcome to report (default: the table's only one)")
+    p_brep.add_argument("--no-ppc", action="store_true", help="Skip the posterior predictive (needs R and the fits)")
+    p_brep.set_defaults(func=cmd_bayes_report)
+
 
     p_bench = subparsers.add_parser(
         "benchmark",

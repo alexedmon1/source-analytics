@@ -888,6 +888,7 @@ report.
 | [`docs/methods/DESIGN_SPEC.md`](docs/methods/DESIGN_SPEC.md) | design rationale for `design:`/`hypotheses:` + FDR scope |
 | [`docs/methods/CONNECTIVITY_METHODS.md`](docs/methods/CONNECTIVITY_METHODS.md) | equation-checked provenance for every connectivity / coupling / directed metric |
 | [`docs/methods/BAYES_ENGINE.md`](docs/methods/BAYES_ENGINE.md) | the Bayesian group engine: model, hypothesis kinds, the two prior sets, the gate, and declared outcome tables (`bayes.tables`: any per-subject table, including field runs and region values) |
+| [`docs/guides/BAYES_USER_GUIDE.md`](docs/guides/BAYES_USER_GUIDE.md) | **user guide** to the Bayesian engine: install, declare, gate, fit, read the report, long runs, worked examples (FORGE exponent; a field readout) |
 | [`docs/methods/BAYES_CATALOGUE.md`](docs/methods/BAYES_CATALOGUE.md) | **catalogue** of the engine's models, priors and decision rules, each with an id, a version and its values (generated, test-checked against the R code) |
 | [`docs/methods/BENCHMARK.md`](docs/methods/BENCHMARK.md) | scoring claims and location probabilities against known truth (`benchmark score`, `benchmark location`) |
 | [`CHANGELOG.md`](CHANGELOG.md) | version history |

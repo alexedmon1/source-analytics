@@ -42,6 +42,8 @@ nav:
       - Bayesian engine: methods/BAYES_ENGINE.md
       - Bayesian engine catalogue: methods/BAYES_CATALOGUE.md
       - Benchmark scoring: methods/BENCHMARK.md
+  - Guides:
+      - Bayesian engine user guide: guides/BAYES_USER_GUIDE.md
   - Pending changes:
       - Vertex split + source naming: plans/SOURCE_NAMING_AND_VERTEX_PLAN.md
   - Archive (historical plans):
