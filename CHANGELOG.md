@@ -7,7 +7,7 @@
 - **Each element column names what one element is** (results spec 0.4.2 `ElementName`): `ROI`, `region`,
   `electrode`, and for coupling `region pair` and `ROI pair`. The study gallery's new significance summary
   (neurobox-dev `274467a`, Esprit's results plan 5b.2) uses it to say "14 ROIs" or "2 regions" per contrast
-  and test. The `results` extra now pins neurobox-dev `274467a` (spec 0.4.2). Folders written earlier gain the
+  and test. The `results` extra now pins neurobox-dev `5a83bca` (spec 0.4.2; the summary shows each contrast's 5 strongest tests). Folders written earlier gain the
   names when their results description is written again; their tables are unchanged.
 
 - **`source-analytics gallery build --study study.yaml`: the study's gallery through the shared shell**

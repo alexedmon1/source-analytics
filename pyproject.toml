@@ -42,7 +42,7 @@ atlas = ["nibabel>=5.0"]
 mvpa = ["scikit-learn>=1.3"]
 network = ["networkx>=3.0"]
 render = ["markdown>=3.4"]
-results = ["neurobox-dev @ git+https://github.com/alexedmon1/neurobox-dev@274467a51cd86d2bc4fa0d21f4197663b1ef9526"]
+results = ["neurobox-dev @ git+https://github.com/alexedmon1/neurobox-dev@5a83bca2413cd5f05dfc9ac3b7d28bf16499c336"]
 dev = ["pytest>=7.0", "black", "ruff"]
 all = ["source-analytics[mne,atlas,mvpa,network,render,results,dev]"]
 
