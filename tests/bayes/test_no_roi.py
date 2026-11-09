@@ -106,3 +106,20 @@ cat('OUT=', r$rhat < 1.01, '\\n', sep = '')
     assert out[0].split() == ["1", "all"]
     assert float(out[1]) < 0.05                # OLS shrunk as the conjugate normal model shrinks it
     assert out[2].strip() == "TRUE"
+
+
+def test_residual_sd_prior_is_centred_at_1_only_without_roi_and_subject_terms():
+    out = _r("""
+sig <- function(p) { pr <- as.data.frame(bayes_priors(p)); pr$prior[pr$dpar == 'sigma'] }
+cat('OUT=', sig(bayes_prepare(one, spec, 'value', NULL, NULL)), '\\n', sep = '')
+cat('OUT=', sig(bayes_prepare(roi, spec, 'value', 'roi', NULL)), '\\n', sep = '')
+two <- rbind(one, transform(one, value = value + rnorm(24, 0, 0.3)))
+cat('OUT=', sig(bayes_prepare(two, spec, 'value', NULL, NULL)), '\\n', sep = '')
+# the gate draws sigma from the same prior
+p <- bayes_prepare(one, spec, 'value', NULL, NULL)
+set.seed(1); s <- replicate(4000, gate_fns$draw_params(p)$sigma[[1]])
+cat('OUT=', abs(median(log(s))) < 0.05, '\\n', sep = '')
+""")
+    assert out[0] == "normal(0, 0.5)"
+    assert out[1] == out[2] == "normal(-0.693147, 0.5)"
+    assert out[3] == "TRUE"

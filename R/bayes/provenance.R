@@ -16,7 +16,8 @@ suppressMessages(library(digest))
 #' The engine's behaviour version: bump it when the model, priors, readout or gate change what they compute. It is
 #' part of every gate id, so a gate from an older engine stops counting. (The package version and git commit are
 #' recorded in the manifest, not in the id: a commit that changes only docs must not invalidate gates.)
-BAYES_ENGINE_VERSION <- "2026.10.28.2"   # .2: the gate scores equivalence hypotheses by their own rule (E5)
+BAYES_ENGINE_VERSION <- "2026.11.09.1"   # residual-SD prior centred at log 1 with no ROI and no subject term
+# (2026.10.28.2: the gate scores equivalence hypotheses by their own rule, E5)
 
 #' Gate thresholds, locked engine defaults (decision B3); part of the gate id.
 BAYES_GATE_RULES <- list(prior_pred_lo = 0.05, prior_pred_hi = 0.95, sbc_alpha = 0.01, sbc_min_coverage = 0.85,

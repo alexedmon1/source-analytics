@@ -157,7 +157,10 @@ of the same coding.
   source power ROI means spread 0.9-3.0 between-subject SD per band (largest in gamma and epsilon), and the real spread
   fell at the 97th-100th prior predictive percentile. Group effects were not involved (group-mean SD 0.35-0.40);
 - subject SDs half-N(0, 0.5);
-- log sigma N(log 0.5, 0.5).
+- log sigma N(log 0.5, 0.5); with no ROI and no subject term, N(log 1, 0.5) (`BAYES_LOG_SIGMA_NOROI`, engine
+  2026.11.09.1). z is standardised by the pooled within-group SD, so in that design the residual SD is about 1 by
+  construction; log 0.5 put 1 at the prior's 92nd percentile, and at bayes-sl a97d's design (45 vs 10 per group) the
+  real spread fell at the 92nd-98th prior predictive percentile (the Conductor, 2026-11-09).
 
 These are proposals. Each must pass the prior predictive check at the study design. The tectum model needed three
 rounds.

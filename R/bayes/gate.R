@@ -69,7 +69,7 @@ draw_params <- function(prep, null = FALSE) {
   list(b = b, tau = tau,
        r = sapply(cols, function(cl) setNames(rnorm(length(rois), 0, tau[[cl]]), rois)),
        sd_rb = hn(BAYES_SD_ROI_BAND), sd_sub = setNames(hn(0.5, length(prep$bands)), prep$bands),
-       sigma = setNames(exp(rnorm(length(prep$bands), log(0.5), 0.5)), prep$bands))
+       sigma = setNames(exp(rnorm(length(prep$bands), bayes_log_sigma_mean(prep), 0.5)), prep$bands))
 }
 
 #' Equivalence at its margin (mode equivalence): the null draw, then each band's group levels moved so that every

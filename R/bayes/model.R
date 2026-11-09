@@ -31,6 +31,9 @@ BAYES_W_EFFECT_SD <- 1  # W: every pairwise group contrast a priori N(0, 1), Tra
 BAYES_W_LEVEL_SD <- BAYES_W_EFFECT_SD / sqrt(2)   # ... from independent group levels N(0, 1/sqrt(2)) (2026-10-19)
 BAYES_CODING <- "group-levels-2026-10-19"   # fixed-effect parametrisation; a gate verdict attaches only to fits of the same
 BAYES_SD_ROI_BAND <- 3  # ROI level per band, half-N(0, 3): FORGE source power ROI means spread 0.9-3.0 SD (the Conductor, 2026-10-15; was 0.5)
+BAYES_LOG_SIGMA <- log(0.5)  # residual SD prior median (z units) when ROI or subject terms take part of the spread
+BAYES_LOG_SIGMA_NOROI <- log(1)  # ... with no ROI and no subject term: z's within-group SD is 1 by construction, so the
+                                 # residual is all of it (bayes-sl a97d, 2026-11-09: log 0.5 put 1 at the prior's 92nd pct)
 BAYES_RHAT_MAX <- 1.05  # convergence rule, on what is decided: estimands and scales (the Conductor, 2026-10-21; .estimand_conv)
 
 .safe <- function(x) gsub("[^A-Za-z0-9]", "", x)
@@ -95,6 +98,10 @@ bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "b
        dv = dv_col, spatial = spatial_col, no_roi = no_roi, subject_re = subject_re)
 }
 
+#' Prior mean of log sigma for prep's design (BAYES_LOG_SIGMA_NOROI when there is no ROI and no subject term).
+bayes_log_sigma_mean <- function(prep)
+  if (isTRUE(prep$no_roi) && isFALSE(prep$subject_re)) BAYES_LOG_SIGMA_NOROI else BAYES_LOG_SIGMA
+
 bayes_formula <- function(prep) {
   fx <- paste(prep$fixed$col, collapse = " + ")
   x <- paste(prep$terms$col, collapse = " + ")
@@ -116,5 +123,5 @@ bayes_priors <- function(prep) {
     if (!isTRUE(prep$no_roi)) c(set_prior("normal(0, 0.25)", class = "sd", group = "roi"),
                                 set_prior(sprintf("normal(0, %g)", BAYES_SD_ROI_BAND), class = "sd", group = "roi:band")),
     if (!isFALSE(prep$subject_re)) set_prior("normal(0, 0.5)", class = "sd", group = "subject"),
-    set_prior(sprintf("normal(%g, 0.5)", log(0.5)), class = "b", dpar = "sigma"))
+    set_prior(sprintf("normal(%g, 0.5)", bayes_log_sigma_mean(prep)), class = "b", dpar = "sigma"))
 }
