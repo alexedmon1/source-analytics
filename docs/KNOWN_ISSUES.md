@@ -13,7 +13,7 @@ later.
    uncorrected standardized difference (Cohen's d against the model's residual
    SD). Either apply the correction or rename the type.
 
-2. **`uv.lock` is out of step with `pyproject.toml`.** The lock records
+2. **Fixed 2026-11-03** (re-locked with the `results` extra). **`uv.lock` is out of step with `pyproject.toml`.** The lock records
    source-analytics 0.8.0 and `pyproject.toml` says 0.8.2, so any `uv run` or
    `uv sync` rewrites `uv.lock`, leaving every checkout dirty. Re-lock and commit.
 

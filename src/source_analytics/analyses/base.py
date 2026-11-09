@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import subprocess
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..config import StudyConfig
@@ -68,6 +69,10 @@ class BaseAnalysis(ABC):
     # per-output selection). Declaring a dim is a promise that ``setup`` (or
     # earlier) routes the corresponding configured list through ``self._select``.
     SELECTABLE: dict[str, str] = {}
+
+    # How this module's hypothesis tables are described by the results
+    # specification (neurobox-dev; see results_spec.py). None = not described yet.
+    RESULTS_SPEC = None
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         self.config = config
@@ -139,6 +144,9 @@ class BaseAnalysis(ABC):
                     n += 1
                 except OSError as e:  # noqa: PERF203
                     logger.warning("Could not remove stale figure %s: %s", p.name, e)
+        from ..figure_record import clear_records
+
+        clear_records(self.fig_dir)  # what the old images showed goes with them
         if n:
             logger.info("Cleared %d stale figure(s) from %s", n, self.fig_dir.name)
 
@@ -621,7 +629,20 @@ class BaseAnalysis(ABC):
         labels = [vertex_rois[i] for i in idx if i < len(vertex_rois)]
         return format_region_coverage(labels)
 
-    def _write_provenance(self, subjects, manifests, steps) -> None:
+    def _record_run(self, subjects, manifests, steps) -> dict | None:
+        """Write this run's provenance record, unless it computed no tables.
+
+        The record describes the tables, so a run that wrote none (``--steps figures``)
+        keeps the record of the run that did: replacing it would say the tables came from
+        this run's code, and would drop what the results specification added to it.
+        """
+        existing = Path(self.tbl_dir) / "provenance.json"
+        if not set(steps) & {"statistics", "summary"} and existing.exists():
+            logger.info("No tables computed: keeping %s from the run that wrote them", existing.name)
+            return None
+        return self._write_provenance(subjects, manifests, steps)
+
+    def _write_provenance(self, subjects, manifests, steps) -> dict | None:
         """Record what produced this analysis's tables, beside the tables.
 
         A stats CSV cannot say which source-analytics computed it or how the
@@ -643,10 +664,11 @@ class BaseAnalysis(ABC):
             )
         except Exception as exc:  # noqa: BLE001 - never fail a finished run
             logger.warning("Could not assemble provenance for %s: %s", self.name, exc)
-            return
+            return None
         path = write_provenance(self.tbl_dir, record)
         if path is not None:
             logger.info("Provenance: %s", path)
+        return record
 
     _COHORT_FIELDS = (
         ("readout_mode", "readout (source or field)"),
@@ -767,6 +789,7 @@ class BaseAnalysis(ABC):
             every configured sub-output.
         """
         logger.info("=== %s Analysis ===", self.name)
+        started = datetime.now(timezone.utc).isoformat(timespec="seconds")
         manifests = self._check_cohort_homogeneous(subjects)
         if select:
             self._selection = select
@@ -827,7 +850,14 @@ class BaseAnalysis(ABC):
         # Written last, so `steps` records what actually ran. A record about a
         # run must not be able to fail the run, so write_provenance swallows I/O
         # errors; nothing downstream requires the file to exist.
-        self._write_provenance(subjects, manifests, steps)
+        record = self._record_run(subjects, manifests, steps)
+
+        # The results specification (optional extra): analysis.json and column
+        # dictionaries beside freshly computed tables. Never fails the run.
+        if self.RESULTS_SPEC is not None and steps & {"statistics", "summary"}:
+            from ..results_spec import write as write_results_spec
+
+            write_results_spec(self, record, started)
 
         logger.info("=== %s complete ===", self.name)
 

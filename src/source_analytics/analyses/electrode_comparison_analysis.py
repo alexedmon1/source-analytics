@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import StudyConfig
+from ..figure_record import record_figure
 from ..io.discovery import SubjectInfo
 from ..viz.constants import BAND_ORDER as _BAND_ORDER_TITLE, CC_ROIS, order_bands
 
@@ -22,6 +23,7 @@ from ..viz.constants import BAND_ORDER as _BAND_ORDER_TITLE, CC_ROIS, order_band
 # Epsilon is already part of _BAND_ORDER_TITLE, so no manual append (a duplicate
 # category would break the pd.Categorical below).
 BAND_ORDER = [b.lower().replace(" ", "_") for b in _BAND_ORDER_TITLE]
+from ..results_spec import ResultsSpec, SpecTable
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,80 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
     """
 
     name = "electrode_comparison"
+
+    _G_NOTE = ("Hedges' g with the small-sample correction, from the subjects' means; its interval is the "
+               "normal approximation")
+    RESULTS_SPEC = ResultsSpec(
+        domain="spectral",
+        measures={"relative": "relative_power", "absolute": "band_power",
+                  "exponent": "aperiodic_exponent", "offset": "aperiodic_offset"},
+        units={"relative": "a fraction of total power", "absolute": "dB/Hz",
+               "exponent": "unitless", "offset": "log10 power"},
+        input_file="electrode_psd's electrode_band_power.csv and roi_psd's band_power.csv (and the aperiodic "
+                   "modules' parameters)",
+        element="electrode",
+        role="diagnostic",
+        measure_col="power_type",
+        method="per subject, the mean over every electrode and over every ROI of each band's power (and of "
+               "the aperiodic parameters); per band and measure, the Pearson correlation of the two across "
+               "subjects, and for each declared two-group contrast Hedges' g at the sensor and at the source "
+               "level, overall and per region (the electrode region against the source region)",
+        tables=(
+            SpecTable("comparison_stats.csv", "other",
+                      "one band, power measure and contrast: the sensor-source correlation and the contrast's "
+                      "Hedges' g at both levels",
+                      "agreement of sensor and source band power", element=False, headline=True,
+                      file="comparison_stats.csv"),
+            SpecTable("regional_effect_sizes.csv", "other",
+                      "one band, power measure, contrast and region: the contrast's g on the whole scalp and "
+                      "in the region's sources",
+                      "where the source effect exceeds the scalp effect", element=False,
+                      file="regional_effect_sizes.csv"),
+            SpecTable("aperiodic_comparison_stats.csv", "other",
+                      "one aperiodic parameter and contrast: the sensor-source correlation and the contrast's "
+                      "g at both levels",
+                      "agreement of sensor and source aperiodic parameters", element=False,
+                      file="aperiodic_comparison_stats.csv", measure_col="dv"),
+        ),
+        extra_columns=(
+            ("contrast", {"Description": "the declared two-group contrast", "Standard": "contrast"}),
+            ("power_type", {"Description": "the power measure, in the module's words (measure gives the "
+                                           "specification's)"}),
+            ("correlation_r", {"Description": "Pearson r across subjects between the sensor and source values "
+                                              "(the same for every contrast of a band and measure)"}),
+            ("correlation_p", {"Description": "the correlation's p, uncorrected"}),
+            ("n_subjects", {"Description": "subjects with both a sensor and a source value"}),
+            ("electrode_hedges_g", {"Description": "the contrast's g on the subjects' mean over every "
+                                                   "electrode; " + _G_NOTE}),
+            ("electrode_ci_lo", {"Description": "lower bound of electrode_hedges_g's 95% interval"}),
+            ("electrode_ci_hi", {"Description": "upper bound of electrode_hedges_g's 95% interval"}),
+            ("source_hedges_g", {"Description": "the contrast's g on the subjects' mean over every ROI; "
+                                                + _G_NOTE}),
+            ("source_ci_lo", {"Description": "lower bound of source_hedges_g's 95% interval"}),
+            ("source_ci_hi", {"Description": "upper bound of source_hedges_g's 95% interval"}),
+            ("region", {"Description": "the source region (the study's roi_categories)", "Standard": "element",
+                        "ElementName": "region"}),
+            ("region_hedges_g", {"Description": "the contrast's g on the subjects' mean over the region's ROIs; "
+                                                + _G_NOTE}),
+            ("region_ci_lo", {"Description": "lower bound of region_hedges_g's 95% interval"}),
+            ("region_ci_hi", {"Description": "upper bound of region_hedges_g's 95% interval"}),
+            ("exceeds_electrode", {"Description": "the region's |g| is larger than the whole scalp's"}),
+        ),
+        correction={"p_kind": "uncorrected", "method": "none",
+                    "family": "none: one correlation per band and measure, not corrected",
+                    "statement": "diagnostic: Pearson correlations of sensor and source values, p uncorrected; "
+                                 "the group effects are estimates with intervals, not tests"},
+        effect={"measure": None,
+                "reason": "diagnostic: the tables compare the sensor and source estimates of the same group "
+                          "effects (Hedges' g at each level) and their agreement (r), rather than testing a "
+                          "contrast"},
+        caveats=(("These g values come from the subjects' means with the small-sample correction, not from "
+                  "the hypothesis layer's models (whose 'hedges_g' has no correction, docs/KNOWN_ISSUES.md 1), "
+                  "so they are not the same numbers as roi_psd's or electrode_psd's for a contrast."),
+                 ("exceeds_electrode compares two estimates; it is not a test of their difference, so read it "
+                  "with both intervals."),
+                 ("Both levels average over every electrode or ROI, so a focal effect is diluted at both.")),
+    )
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -490,6 +566,8 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
             fig.tight_layout()
             fig.savefig(fig_dir / f"fig1_correlation_{power_type}.png", dpi=300, bbox_inches="tight")
             plt.close(fig)
+            record_figure(fig_dir, f"fig1_correlation_{power_type}.png", measure=power_type, kind="other",
+                          shows="comparison_stats.csv")
             logger.info("Saved fig1_correlation_%s.png", power_type)
 
     def _plot_effect_size_comparison(self, stats_df: pd.DataFrame, fig_dir: Path) -> None:
@@ -571,6 +649,8 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                 fig.savefig(fig_dir / f"fig2_effect_sizes_{power_type}_{safe_contrast}.png",
                             dpi=300, bbox_inches="tight")
                 plt.close(fig)
+                record_figure(fig_dir, f"fig2_effect_sizes_{power_type}_{safe_contrast}.png", measure=power_type,
+                              contrast=contrast, kind="summary", shows="comparison_stats.csv")
                 logger.info("Saved fig2_effect_sizes_%s_%s.png", power_type, safe_contrast)
 
     def _plot_spatial_advantage(self, regional_df: pd.DataFrame, fig_dir: Path) -> None:
@@ -630,6 +710,9 @@ class ElectrodeComparisonAnalysis(BaseAnalysis):
                 fig.savefig(fig_dir / f"fig4_spatial_advantage_{power_type}_{safe_contrast}.png",
                             dpi=300, bbox_inches="tight")
                 plt.close(fig)
+                record_figure(fig_dir, f"fig4_spatial_advantage_{power_type}_{safe_contrast}.png",
+                              measure=power_type, contrast=contrast, kind="summary",
+                              shows="regional_effect_sizes.csv")
                 logger.info("Saved fig4_spatial_advantage_%s_%s.png", power_type, safe_contrast)
 
     def summary(self) -> None:

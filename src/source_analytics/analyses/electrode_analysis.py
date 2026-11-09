@@ -24,6 +24,7 @@ from ..spectral.band_power import (
     extract_band_power,
     relative_power_kwargs,
 )
+from ..results_spec import POWER_CAVEATS, POWER_MEASURES, POWER_UNITS, ResultsSpec, SpecTable
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,27 @@ class ElectrodeAnalysis(BaseAnalysis):
 
     name = "electrode_psd"
     SELECTABLE = {"band": "frequency band", "hypothesis": "declared hypothesis"}
+
+    RESULTS_SPEC = ResultsSpec(
+        domain="spectral",
+        measures=POWER_MEASURES,
+        units=POWER_UNITS,
+        input_file="electrode_band_power.csv",
+        element="electrode",
+        method="a linear mixed model per band and power measure (lme4/lmerTest: power ~ group * "
+               "electrode + (1 | subject), Satterthwaite df) with emmeans contrasts of the declared "
+               "hypotheses per electrode; equivalence by two one-sided tests",
+        tables=(
+            SpecTable("_hypotheses.csv", "elements",
+                      "one declared hypothesis on one power measure in one band at one electrode",
+                      "the declared hypotheses per electrode and band", element=True, headline=True),
+        ),
+        caveats=(*POWER_CAVEATS,
+                 ("Scalp electrodes record overlapping sources (volume conduction), so neighbouring "
+                  "electrodes' tests are correlated, not separate findings."),
+                 ("The region-nested model (electrode_omnibus_region_nested.csv, "
+                  "electrode_posthoc_region_nested.csv) is a legacy table, not part of this analysis.")),
+    )
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)

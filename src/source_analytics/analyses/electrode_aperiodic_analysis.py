@@ -20,6 +20,7 @@ from ..io.electrode_loader import load_eeglab_set
 from ..spectral.epoch_sampler import sample_epochs
 from ..spectral.psd import compute_psd
 from ..spectral.aperiodic import fit_aperiodic, resolve_freq_range
+from ..results_spec import ResultsSpec, SpecTable
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,26 @@ class ElectrodeAperiodicAnalysis(BaseAnalysis):
 
     name = "electrode_aperiodic"
     SELECTABLE = {"hypothesis": "declared hypothesis"}
+    RESULTS_SPEC = ResultsSpec(
+        domain="aperiodic",
+        measures={"exponent": "aperiodic_exponent", "offset": "aperiodic_offset"},
+        units={"exponent": "unitless (the 1/f exponent)", "offset": "log10 power (the 1 Hz-referenced offset)"},
+        input_file="electrode_aperiodic_params.csv",
+        element="electrode",
+        method="a linear mixed model per parameter (lme4/lmerTest: parameter ~ group * electrode "
+               "+ (1 | subject), Satterthwaite df) with emmeans contrasts of the declared hypotheses per "
+               "electrode; equivalence by two one-sided tests",
+        tables=(
+            SpecTable("_hypotheses.csv", "elements",
+                      "one declared hypothesis on one aperiodic parameter at one electrode",
+                      "the declared hypotheses per electrode", element=True, headline=True),
+        ),
+        caveats=(("The offset is referenced to 1 Hz, so it is coupled to the exponent."),
+                 ("Scalp electrodes record overlapping sources (volume conduction), so neighbouring "
+                  "electrodes' tests are correlated, not separate findings."),
+                 ("The region-nested model (electrode_aperiodic_omnibus_region_nested.csv) and the "
+                  "omnibus and per-channel post-hoc tables are legacy tables, not part of this analysis.")),
+    )
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)

@@ -32,6 +32,7 @@ from ..io.loader import SubjectLoader
 from ..spectral.pac import compute_pac_multiroi, get_valid_pac_pairs
 from ..spectral.cross_freq import compute_aac, compute_ppc
 from ..viz.constants import CC_ROIS
+from ..results_spec import ResultsSpec, SpecTable
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,84 @@ class ROICrossFreqAnalysis(BaseAnalysis):
 
     # Coupling measures this module can produce.
     _CROSS_FREQ_METRICS = ["pac", "aac", "ppc"]
+
+    RESULTS_SPEC = ResultsSpec(
+        domain="cross_frequency",
+        measures={"z_score": "pac_mi", "aac": "aac", "ppc": "ppc", "ppc_z": "ppc_z"},
+        units={"z_score": "z (the Tort modulation index z-scored against circular time-shift surrogates)",
+               "aac": "Pearson r of the two bands' power envelopes",
+               "ppc": "the n:m phase-locking factor (0 to 1)",
+               "ppc_z": "z (the n:m phase-locking factor z-scored against surrogates)"},
+        input_file="pac_values.csv",
+        facet="freq_pair",
+        facet_description="the band pair, 'slow band-fast band' (phase-amplitude for PAC)",
+        method="PAC: a linear mixed model per band pair (lme4/lmerTest: z ~ group * ROI + (1 | subject), "
+               "Satterthwaite df) with emmeans contrasts of the declared hypotheses, on the group means "
+               "marginalized over every ROI and per region (the ROIs of a region category averaged). "
+               "AAC and n:m PPC: per band pair, a one-way linear model of each directed ROI pair's value "
+               "on group (contrasts from the cell means and the pooled residual SD), the same on each "
+               "subject's mean over every pair, and a linear mixed model over directed region pairs "
+               "(value ~ group * region pair + (1 | subject)). Equivalence by two one-sided tests",
+        tables=(
+            SpecTable("_global_hypotheses.csv", "tests",
+                      "one declared hypothesis on PAC in one band pair, on the group means "
+                      "marginalized over every ROI",
+                      "PAC: the declared hypotheses over the whole cortex, per band pair",
+                      element=False, headline=True, file="roi_pac_global_hypotheses.csv"),
+            SpecTable("_region_hypotheses.csv", "elements",
+                      "one declared hypothesis on PAC in one band pair and one region (the ROIs of a "
+                      "region category averaged)",
+                      "PAC: the declared hypotheses per region and band pair", element=True,
+                      file="roi_pac_region_hypotheses.csv",
+                      spatial="the region tested (empty on omnibus rows)", element_name="region"),
+            SpecTable("_aac_global_hypotheses.csv", "tests",
+                      "one declared hypothesis on AAC in one band pair, on each subject's mean "
+                      "over every directed ROI pair",
+                      "AAC: the declared hypotheses over the whole cortex, per band pair",
+                      element=False,
+                      spatial="'(global) -> (global)': the mean over every directed ROI pair"),
+            SpecTable("_aac_region_hypotheses.csv", "elements",
+                      "one declared hypothesis on AAC in one band pair and one directed region "
+                      "pair (its ROI pairs averaged)",
+                      "AAC: the declared hypotheses per directed region pair and band pair",
+                      element=True,
+                      spatial="the directed region pair tested, 'slow-band region -> fast-band "
+                              "region' (empty on omnibus rows)", element_name="region pair"),
+            SpecTable("_aac_directed_edges_hypotheses.csv", "elements",
+                      "one declared hypothesis on AAC in one band pair and one directed ROI pair",
+                      "AAC: the declared hypotheses per directed ROI pair and band pair",
+                      element=True,
+                      spatial="the directed ROI pair tested, 'source -> target', the source carrying "
+                              "the slow band and the target the fast band", element_name="ROI pair"),
+            SpecTable("_ppc_global_hypotheses.csv", "tests",
+                      "one declared hypothesis on n:m PPC in one band pair, on each subject's mean "
+                      "over every directed ROI pair",
+                      "n:m PPC: the declared hypotheses over the whole cortex, per band pair",
+                      element=False,
+                      spatial="'(global) -> (global)': the mean over every directed ROI pair"),
+            SpecTable("_ppc_region_hypotheses.csv", "elements",
+                      "one declared hypothesis on n:m PPC in one band pair and one directed region "
+                      "pair (its ROI pairs averaged)",
+                      "n:m PPC: the declared hypotheses per directed region pair and band pair",
+                      element=True,
+                      spatial="the directed region pair tested, 'slow-band region -> fast-band "
+                              "region' (empty on omnibus rows)", element_name="region pair"),
+            SpecTable("_ppc_directed_edges_hypotheses.csv", "elements",
+                      "one declared hypothesis on n:m PPC in one band pair and one directed ROI pair",
+                      "n:m PPC: the declared hypotheses per directed ROI pair and band pair",
+                      element=True,
+                      spatial="the directed ROI pair tested, 'source -> target', the source carrying "
+                              "the slow band and the target the fast band", element_name="ROI pair"),
+        ),
+        caveats=(("A band pair is only tested where the fast band sits above the slow band (centre "
+                  "frequency ratio above 2.5), so the pairs are not a full grid."),
+                 ("AAC and PPC are directed: A -> B couples A's slow band with B's fast band, so A -> B "
+                  "and B -> A are different tests."),
+                 ("The directed ROI pair tables are mass-univariate (one model per pair), corrected "
+                  "within each family; many pairs share ROIs, so their tests are correlated."),
+                 ("pac_values.csv is the input for PAC; AAC and PPC are fitted to aac_edges.csv and "
+                  "ppc_edges.csv in the same data folder.")),
+    )
 
     def __init__(self, config: StudyConfig, output_dir: Path):
         super().__init__(config, output_dir)
@@ -373,4 +452,6 @@ class ROICrossFreqAnalysis(BaseAnalysis):
             p_col="p_value", q_col="q_value", correction_label="FDR",
             facet_cols=["hypothesis", "band"],
             colorbar_label="Hedges' g", atlas=self._atlas_dir,
+            tag_cols={"hypothesis": "contrast", "band": "facet:freq_pair"},
+            tags={"measure": "z_score", "shows": "roi_pac_region_hypotheses.csv"},
         )

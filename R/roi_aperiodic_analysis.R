@@ -532,6 +532,8 @@ plot_aperiodic_boxplot <- function(ap_df, dv_name, group_colors, group_labels,
   fname <- paste0("roi_aperiodic_", dv_name, "_boxplot.png")
   ggsave(file.path(output_dir, fname), p, width = 5, height = 5, dpi = 300)
   message("  Saved: ", fname)
+  record_figure(output_dir, fname, measure = dv_name, kind = "distribution",
+                shows = "roi_aperiodic_global_hypotheses.csv")
 }
 
 
@@ -641,6 +643,8 @@ plot_aperiodic_by_region <- function(ap_df, roi_categories, group_colors,
   ggsave(file.path(output_dir, "roi_aperiodic_by_region.png"), p,
          width = 14, height = 10, dpi = 300)
   message("  Saved: roi_aperiodic_by_region.png")
+  record_figure(output_dir, "roi_aperiodic_by_region.png", measure = "exponent", kind = "distribution",
+                shows = "roi_aperiodic_region_hypotheses.csv")
 }
 
 
@@ -698,6 +702,7 @@ plot_aperiodic_significance_heatmap <- function(posthoc_df, output_dir) {
            width = 6, height = max(6, n_rois * 0.22 + 2),
            dpi = 300, limitsize = FALSE)
     message("  Saved: ", fname)
+    record_figure(output_dir, fname, contrast = cname, kind = "summary", shows = "roi_aperiodic_hypotheses.csv")
   }
 }
 

@@ -23,6 +23,7 @@ import yaml
 
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
+from ..results_spec import ResultsSpec, SpecTable, permutation_columns
 from ..stats.graph_metrics import compute_graph_metrics
 from ..viz.constants import CC_ROIS, METRIC_LABELS
 from ._network_base import NetworkAnalysisBase
@@ -221,6 +222,9 @@ class _ROINetworkBase(NetworkAnalysisBase):
                             })
 
         if not all_stats:
+            # --steps statistics computes no graphs: the legacy table needs them in memory, the
+            # declared hypotheses can still come from the saved nodal metrics.
+            self._write_graph_hypotheses()
             return
         stats_df = pd.DataFrame(all_stats)
         nan_mask = np.isnan(stats_df["p"].values)
@@ -258,7 +262,9 @@ class _ROINetworkBase(NetworkAnalysisBase):
 
         Per-ROI between-subjects contrast for every declared hypothesis, faceted by
         connectivity × graph metric, with declarative FDR. Written alongside the
-        legacy ``_stats.csv``; consumes the same in-memory per-subject nodal metrics.
+        legacy ``_stats.csv``; consumes the same in-memory per-subject nodal metrics,
+        or, when this run computed none (``--steps statistics``), the per-subject
+        nodal metrics an earlier run saved in ``data/<name>_nodal_metrics.csv``.
         """
         spec = self.config.design_spec
         if spec is None or not spec.hypotheses:
@@ -266,6 +272,8 @@ class _ROINetworkBase(NetworkAnalysisBase):
         from ..hypothesis import write_module_hypotheses_tabular
 
         long_rows: list[dict] = []
+        if not self._subject_data:
+            long_rows = self._saved_nodal_rows(spec.factor)
         for uid, group in self._subject_groups.items():
             sd = self._subject_data.get(uid, {})
             for band_name in self._selected_bands():
@@ -292,6 +300,22 @@ class _ROINetworkBase(NetworkAnalysisBase):
             hypothesis=",".join(sorted(wanted)) if wanted else None,
         )
 
+    def _saved_nodal_rows(self, factor: str) -> list[dict]:
+        """The long nodal rows from ``data/<name>_nodal_metrics.csv`` (written by the
+        aggregate step), limited to this run's bands and connectivity metrics."""
+        path = self.output_dir / "data" / f"{self.name}_nodal_metrics.csv"
+        if not path.exists():
+            logger.warning("No per-subject nodal metrics in memory or at %s: no graph hypotheses", path)
+            return []
+        df = pd.read_csv(path)
+        bands, metrics = set(self._selected_bands()), set(self._connectivity_metrics)
+        df = df[df["band"].isin(bands) & df["metric"].isin(metrics)]
+        logger.info("Graph hypotheses from the saved nodal metrics: %s (%d rows)", path.name, len(df))
+        return [{"subject": r.subject, factor: r.group, "band": r.band, "conn_metric": r.metric,
+                 "graph_metric": gname, "roi": r.roi, "value": float(getattr(r, gname))}
+                for r in df.itertuples(index=False)
+                for gname in ("degree", "clustering", "betweenness")]
+
     # ------------------------------------------------------ graph figures -- #
     def _graph_figures(self) -> None:
         global_csv = self.output_dir / "data" / f"{self.name}_global_metrics.csv"
@@ -303,6 +327,8 @@ class _ROINetworkBase(NetworkAnalysisBase):
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         from scipy import stats as sp_stats
+
+        from ..figure_record import record_figure
 
         df = pd.read_csv(csv_path)
         global_metrics = ["global_efficiency", "modularity", "small_worldness"]
@@ -387,8 +413,13 @@ class _ROINetworkBase(NetworkAnalysisBase):
                 ax.set_title(f"{gm_name.replace('_', ' ').title()} — {metric_label}")
                 ax.legend()
                 fig.tight_layout()
-                fig.savefig(fig_dir / (f"{self.name}_{metric}_{gm_name}".lower() + ".png"), dpi=150)
+                out = fig_dir / (f"{self.name}_{metric}_{gm_name}".lower() + ".png")
+                fig.savefig(out, dpi=150)
                 plt.close(fig)
+                # the stars are Welch t-tests BH-corrected over every bar (_global_pairwise.csv), not the
+                # declared hypotheses, which test the nodal metrics
+                record_figure(fig_dir, out, measure=gm_name, facets={"connectivity": metric},
+                              kind="distribution")
 
     # --------------------------------------------------------- summaries --- #
     def _write_summary(self, graph: bool = True, nbs: bool = True) -> None:
@@ -432,6 +463,37 @@ class ROIGraphAnalysis(_ROINetworkBase):
     """ROI graph-theoretic metrics (nodal + global), no NBS."""
 
     name = "roi_graph"
+    RESULTS_SPEC = ResultsSpec(
+        domain="connectivity",
+        measures={"degree": "degree", "clustering": "clustering", "betweenness": "betweenness"},
+        units={"degree": "edges (the ROI's degree in the binarized graph)",
+               "clustering": "the ROI's clustering coefficient (0 to 1)",
+               "betweenness": "the ROI's normalized betweenness centrality (0 to 1)"},
+        input_file="roi_graph_nodal_metrics.csv",
+        measure_col="graph_metric",
+        extra_facets=(("conn_metric", "connectivity",
+                       ("the connectivity measure the graph was built from (coherence, imaginary "
+                        "coherence, PLI, dwPLI, AEC)")),),
+        method="per subject, band and connectivity measure, the ROI connectivity matrix is binarized by a "
+               "proportional threshold (network.threshold_value of the strongest edges, 0.15 unless set) "
+               "and each ROI's degree, clustering and betweenness computed (networkx); per ROI, band, "
+               "connectivity measure and graph metric, a one-way linear model on group with contrasts of "
+               "the declared hypotheses; equivalence by two one-sided tests",
+        tables=(
+            SpecTable("_hypotheses.csv", "elements",
+                      "one declared hypothesis on one graph metric of one ROI, in one band and one "
+                      "connectivity measure's graph",
+                      "the declared hypotheses per ROI, band, connectivity measure and graph metric",
+                      element=True, headline=True),
+        ),
+        caveats=(("Graph metrics depend on the threshold: each graph keeps the same proportion of the "
+                  "strongest edges, so a group difference in overall connectivity strength does not "
+                  "change the edge count, but it can change which edges survive."),
+                 ("Five connectivity measures are each turned into graphs and tested separately; they are "
+                  "correlated, and each is corrected only within its own family."),
+                 ("The global metrics (global efficiency, modularity, small-worldness) are compared only "
+                  "in the legacy roi_graph_global_pairwise.csv (Welch t-tests), not part of this analysis.")),
+    )
 
     def process_subject(self, subject: SubjectInfo) -> None:
         self._process_matrices(subject)
@@ -454,6 +516,68 @@ class ROINBSAnalysis(_ROINetworkBase):
     """ROI Network-Based Statistic, no graph metrics."""
 
     name = "roi_nbs"
+    RESULTS_SPEC = ResultsSpec(
+        domain="connectivity",
+        measures={"coherence": "coherence", "imag_coherence": "imcoh", "pli": "pli", "wpli": "wpli",
+                  "dwpli": "dwpli", "dpli": "dpli", "aec": "aec"},
+        units={"coherence": "magnitude-squared coherence (0 to 1)", "imag_coherence": "|imaginary coherence| (0 to 1)",
+               "pli": "phase lag index (0 to 1)", "wpli": "weighted PLI (0 to 1)",
+               "dwpli": "debiased weighted PLI (squared, can be slightly negative)",
+               "dpli": "directed PLI (0.5 = no lead)", "aec": "amplitude envelope correlation (Pearson r)"},
+        input_file="roi_connectivity_edges.csv (roi_connectivity's)",
+        method="the network-based statistic (Zalesky et al. 2010) per band and connectivity measure: a "
+               "statistic per ROI-pair edge for each declared hypothesis (t for two-group contrasts, F for the "
+               "omnibus and weighted contrasts), thresholded (network.nbs_threshold, 2.5 unless set); the "
+               "connected components of the supra-threshold edges are tested against the largest component "
+               "in each label permutation (network.nbs_permutations, 5000 unless set). Equivalence rows "
+               "summarize per-edge two one-sided tests",
+        tables=(
+            SpecTable("_hypotheses.csv", "elements",
+                      "one component (sub-network) of one declared hypothesis in one band and connectivity "
+                      "measure; component 0 is the row of a test that formed none, or an equivalence summary",
+                      "the declared hypotheses: the sub-networks the NBS finds", element=False, headline=True),
+            SpecTable("_subnetwork_edges.csv", "other",
+                      "one supra-threshold edge of one component",
+                      "the edges of every component, for drawing the sub-networks", element=False),
+        ),
+        extra_columns=(
+            *permutation_columns("component", "edges", "component_p",
+                                 "the share of label permutations whose largest component has at least as "
+                                 "many edges, within the test (FWE over the network)"),
+            ("component_id", {"Description": "the component's number within its test (0: none formed, or an "
+                                             "equivalence summary)", "Standard": "element",
+                              "ElementName": "component"}),
+            ("n_edges", {"Description": "the component's supra-threshold edges (equivalence rows: the edges "
+                                        "tested)"}),
+            ("n_edges_increase", {"Description": "t rows: the component's edges where group_a is higher"}),
+            ("n_edges_decrease", {"Description": "t rows: the component's edges where group_a is lower"}),
+            ("mean_stat", {"Description": "t rows: the mean signed t over the component's edges"}),
+            ("direction", {"Description": "t rows: which way the component's edges go",
+                           "Levels": {"increase": "every edge higher in the contrast's positive side",
+                                      "decrease": "every edge lower", "mixed": "both"}}),
+            ("node_i", {"Description": "the edge's first ROI, by its index in the connectivity matrix"}),
+            ("node_j", {"Description": "the edge's second ROI, by its index"}),
+            ("roi_i", {"Description": "the edge's first ROI"}),
+            ("roi_j", {"Description": "the edge's second ROI"}),
+            ("stat", {"Description": "the edge's statistic (signed t, or F)"}),
+        ),
+        correction={"p_kind": "fwe", "method": "nbs",
+                    "family": "the components of one test: one hypothesis, band and connectivity measure",
+                    "statement": "NBS: each component's p is the share of label permutations whose largest "
+                                 "component is at least as large (in edges), so p < 0.05 controls the "
+                                 "family-wise error over the network within each test; tests are not "
+                                 "corrected across hypotheses, bands or connectivity measures",
+                    "alpha": 0.05},
+        effect={"measure": None,
+                "reason": "a component is a set of edges chosen by thresholding the statistic, so it has no "
+                          "single estimate with an interval; its size (edges), mass and peak statistic "
+                          "describe it, and its edges' statistics are in the subnetwork edges table"},
+        caveats=(("NBS controls the error of declaring a component, not of any one edge in it: an edge "
+                  "inside a significant component is not itself significant."),
+                 ("The component threshold is arbitrary: a lower one finds larger, weaker components."),
+                 ("Five connectivity measures are each tested; they are correlated, and nothing is corrected "
+                  "across them.")),
+    )
 
     def process_subject(self, subject: SubjectInfo) -> None:
         self._process_matrices(subject)

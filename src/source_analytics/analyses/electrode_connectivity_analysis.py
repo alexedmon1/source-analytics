@@ -45,6 +45,7 @@ from ..spectral.vertex_connectivity import (
 )
 from ..stats.cluster_permutation import hedges_g
 from ..viz.brain_roi import fdr_bh
+from ..results_spec import ResultsSpec, SpecTable, permutation_columns
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,56 @@ class ElectrodeConnectivityAnalysis(BaseAnalysis):
     """
 
     name = "electrode_connectivity"
+    RESULTS_SPEC = ResultsSpec(
+        domain="connectivity",
+        measures={m: "fcd" for m in ("coherence", "imag_coherence", "pli", "wpli", "dwpli", "dpli", "aec")},
+        units={"fcd": "the share of the electrode's connections above the FCD threshold (0 to 1)"},
+        input_file="electrode_fcd.csv",
+        element="electrode",
+        extra_facets=(("dv", "connectivity",
+                       ("the connectivity measure the functional connectivity density was computed from "
+                        "(coherence, imaginary coherence, PLI, dwPLI, dPLI, AEC)")),),
+        method="per band and connectivity measure, each electrode's functional connectivity density (the "
+               "share of its connections above electrode_connectivity.fcd_threshold); for each declared "
+               "hypothesis a statistic per electrode (t for two-group contrasts, F otherwise), thresholded "
+               "(cluster_threshold, 2.0 unless set), with clusters of neighbouring electrodes (montage "
+               "adjacency) tested by their mass against the largest cluster mass in each label permutation "
+               "(n_permutations, 1000 unless set). Equivalence rows summarize per-electrode two one-sided "
+               "tests",
+        tables=(
+            SpecTable("_hypotheses.csv", "elements",
+                      "one cluster of neighbouring electrodes for one declared hypothesis, band and connectivity "
+                      "measure; cluster 0 is the row of a test that formed none, or an equivalence summary",
+                      "the declared hypotheses: clusters of electrodes", element=False, headline=True),
+        ),
+        extra_columns=(
+            *permutation_columns("cluster", "electrodes", "cluster_p",
+                                 "the share of label permutations whose largest cluster mass is at least "
+                                 "as large, within the test (FWE over the montage)"),
+            ("cluster_id", {"Description": "the cluster's number within its test (0: none formed, or an "
+                                           "equivalence summary)", "Standard": "element", "ElementName": "cluster"}),
+            ("n_vertices", {"Description": "the cluster's electrodes (equivalence rows: the electrodes tested)"}),
+            ("peak_vertex", {"Description": "the montage index of the cluster's peak electrode (-1: none)"}),
+            ("region", {"Description": "the electrode regions the cluster covers (electrode_categories)"}),
+        ),
+        correction={"p_kind": "fwe", "method": "cluster",
+                    "family": "the clusters of one test: one hypothesis, band and connectivity measure",
+                    "statement": "cluster-mass permutation (Maris & Oostenveld 2007): each cluster's p is the "
+                                 "share of label permutations whose largest cluster mass is at least as large, "
+                                 "so p < 0.05 controls the family-wise error over the montage within each "
+                                 "test; tests are not corrected across hypotheses, bands or measures",
+                    "alpha": 0.05},
+        effect={"measure": None,
+                "reason": "a cluster is a set of electrodes chosen by thresholding the statistic, so it has no "
+                          "single estimate with an interval; its size, mass and peak statistic describe it, "
+                          "and per-electrode Hedges' g is in the legacy electrode_connectivity_stats.csv"},
+        caveats=(("A cluster's p is about the cluster as a whole: it does not say that each of its electrodes "
+                  "differs (Sassenhagen & Draschkow 2019)."),
+                 ("Scalp electrodes record overlapping sources (volume conduction), so connectivity between "
+                  "nearby electrodes is inflated, and so is their density."),
+                 ("electrode_connectivity_stats.csv (Welch t per electrode, BH-FDR) is a legacy table, not part "
+                  "of this analysis.")),
+    )
     SELECTABLE = {"metric": "connectivity metric", "band": "frequency band",
                   "hypothesis": "declared hypothesis"}
 

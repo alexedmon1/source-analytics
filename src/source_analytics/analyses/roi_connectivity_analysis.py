@@ -13,11 +13,16 @@ import yaml
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 from ..io.loader import SubjectLoader
+from ..results_spec import ResultsSpec, SpecTable
 from ..spectral.connectivity import DPLI_DIRECTION_NOTE, compute_connectivity_matrix
 from ..viz.constants import CC_ROIS, METRIC_LABELS
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
+
+#: The kernel's metric names -> the results specification's measure vocabulary.
+CONNECTIVITY_MEASURES = {"coherence": "coherence", "imag_coherence": "imcoh", "pli": "pli", "dwpli": "dwpli",
+                         "wpli": "wpli", "dpli": "dpli", "aec": "aec", "partial_corr": "partial_correlation"}
 
 
 def _find_r_script_dir() -> Path:
@@ -48,6 +53,48 @@ class ConnectivityAnalysis(BaseAnalysis):
 
     name = "roi_connectivity"
     SELECTABLE = {"metric": "connectivity metric", "band": "frequency band"}
+
+    _DESCRIPTIVE_COLUMNS = (
+        ("group", {"Description": "the subjects' group (the design factor)"}),
+        ("n", {"Description": "subjects in the group with a value"}),
+        ("mean", {"Description": "the group's mean, in the measure's units (the per-subject values are the "
+                                 "subject's value for the ROI pair, or its mean over every ROI pair)"}),
+        ("sd", {"Description": "the SD across the group's subjects"}),
+        ("roi1", {"Description": "the pair's first ROI"}),
+        ("roi2", {"Description": "the pair's second ROI"}),
+        ("spatial", {"Description": "the ROI pair, 'A -- B'", "Standard": "element", "ElementName": "ROI pair"}),
+    )
+    RESULTS_SPEC = ResultsSpec(
+        domain="connectivity",
+        measures=CONNECTIVITY_MEASURES,
+        units={"coherence": "magnitude-squared coherence (0 to 1)", "imag_coherence": "|imaginary coherence|",
+               "pli": "phase lag index (0 to 1)", "dwpli": "debiased weighted PLI", "wpli": "weighted PLI (0 to 1)",
+               "dpli": "directed PLI (0.5 = no lead)", "aec": "amplitude envelope correlation (r)",
+               "partial_corr": "partial correlation (r)"},
+        input_file="roi_connectivity_edges.csv",
+        role="descriptive",
+        method="per subject, band and connectivity measure, the connectivity of every ROI pair from the signed "
+               "ROI time series; the groups' means and SDs, per ROI pair and over every pair. No tests: the "
+               "group comparisons of these networks are roi_nbs (sub-networks) and roi_graph (graph metrics)",
+        tables=(
+            SpecTable("_group_summary.csv", "descriptives",
+                      "one group's mean and SD of one connectivity measure in one band, over every ROI pair",
+                      "group means of each connectivity measure, over the whole network", element=False,
+                      headline=True),
+            SpecTable("_group_edges.csv", "descriptives",
+                      "one group's mean and SD of one connectivity measure in one band and one ROI pair",
+                      "group means per ROI pair (the matrices the figures draw)", element=False),
+        ),
+        extra_columns=_DESCRIPTIVE_COLUMNS,
+        correction={"p_kind": "none", "method": "none", "family": "none: descriptive, no tests",
+                    "statement": "descriptive: group means and SDs, no tests (see roi_nbs and roi_graph)"},
+        effect={"measure": None,
+                "reason": "descriptive: group means of connectivity, no contrast; the tests and their effects "
+                          "are in roi_nbs and roi_graph"},
+        caveats=(DPLI_DIRECTION_NOTE,
+                 ("Zero-lag measures (coherence, AEC) are inflated by volume conduction and field spread "
+                  "between nearby ROIs; the lagged ones (imaginary coherence, PLI, wPLI, dwPLI) are less so."),),
+    )
 
     # Metrics the ROI kernel emits. Only the selected ones are computed
     # (compute_connectivity_matrix(metrics=...)); values equal a full pass.
@@ -170,8 +217,36 @@ class ConnectivityAnalysis(BaseAnalysis):
         logger.info("Exported roi_connectivity_edges.csv (%d rows)", len(edge_df))
 
     def statistics(self) -> None:
-        """Delegated to R."""
-        pass
+        """The groups' descriptive tables (the R report reads the edges itself): per group, band and
+        connectivity measure, the mean and SD across subjects of each ROI pair and of each subject's
+        mean over every pair, from ``data/roi_connectivity_edges.csv``."""
+        path = self.output_dir / "data" / "roi_connectivity_edges.csv"
+        if not path.exists():
+            logger.warning("No connectivity edge CSV: no group tables")
+            return
+        edges = pd.read_csv(path)
+        metrics = [m for m in self._metrics if m in edges.columns]
+        if not metrics:
+            return
+        long = edges.melt(id_vars=["subject", "group", "band", "roi1", "roi2"], value_vars=metrics,
+                          var_name="dv", value_name="value").dropna(subset=["value"])
+        long["measure"] = long["dv"].map(CONNECTIVITY_MEASURES)
+
+        def describe(df: pd.DataFrame, by: list[str]) -> pd.DataFrame:
+            out = df.groupby(by, sort=False)["value"].agg(n="count", mean="mean", sd="std").reset_index()
+            return out
+
+        per_subject = long.groupby(["subject", "group", "band", "dv", "measure"], sort=False)["value"].mean() \
+            .reset_index()
+        summary = describe(per_subject, ["group", "band", "dv", "measure"])
+        edges_tbl = describe(long, ["group", "band", "dv", "measure", "roi1", "roi2"])
+        edges_tbl.insert(edges_tbl.columns.get_loc("roi1"), "spatial",
+                         edges_tbl["roi1"] + " -- " + edges_tbl["roi2"])
+        self.tbl_dir.mkdir(parents=True, exist_ok=True)
+        summary.to_csv(self.tbl_dir / f"{self.name}_group_summary.csv", index=False)
+        edges_tbl.to_csv(self.tbl_dir / f"{self.name}_group_edges.csv", index=False)
+        logger.info("Exported %s_group_summary.csv (%d rows) and _group_edges.csv (%d rows)",
+                    self.name, len(summary), len(edges_tbl))
 
     def figures(self) -> None:
         """Generate circos and heatmap figures for ROI-level connectivity.
@@ -179,6 +254,7 @@ class ConnectivityAnalysis(BaseAnalysis):
         Produces one multi-row figure per metric × band × plot_type, with
         all contrasts combined as rows (Group A | Group B | Difference per row).
         """
+        from ..figure_record import record_figure
         from ..viz.connectivity_plots import (
             build_roi_matrix,
             build_significance_matrix,
@@ -260,6 +336,8 @@ class ConnectivityAnalysis(BaseAnalysis):
                         title=f"{band} — {metric_label}",
                         show_roi_labels=(plot_type != "circos"),
                     )
+                    record_figure(fig_dir, out, measure=metric, facets={"band": band}, kind="matrix",
+                                  shows=f"{self.name}_group_edges.csv")
                     n_figs += 1
 
                 # Significance circos per contrast (these stay per-contrast
@@ -288,6 +366,8 @@ class ConnectivityAnalysis(BaseAnalysis):
                                 group_labels=(label_a, label_b),
                                 title=f"{band} — {metric_label} (uncorrected p < 0.05)",
                             )
+                            record_figure(fig_dir, out, measure=metric, contrast=contrast.name,
+                                          facets={"band": band}, kind="matrix")
                             n_figs += 1
 
         logger.info("Generated %d connectivity figures", n_figs)

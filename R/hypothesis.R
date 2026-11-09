@@ -312,6 +312,37 @@ weight_vector <- function(hyp, levels) {
 MDE_POWER <- 0.80
 MDE_ALPHA <- 0.05
 
+# ---- Sample sizes and the effect's interval ---------------------------------
+# Every tabular row also says how many subjects the model was fitted on (`n`),
+# how many were in each side of a clean two-group contrast (`n_a`, `n_b`; NA
+# otherwise), and a 95% interval for its effect size (`effect_size_lcl`,
+# `effect_size_ucl`), so a reader never sees an effect without its uncertainty
+# (the results specification's reporting contract, neurobox-dev). For a
+# standardized difference the interval is the estimate's interval divided by the
+# residual SD -- it treats that SD as known, so it is slightly too narrow; for an
+# omnibus row it is the two-sided interval of partial omega^2 from the
+# noncentral F (effectsize::F_to_omega2). The Python side writes the same
+# columns (hypothesis/tabular.py).
+
+#' Partial omega^2 and its two-sided interval from an F test.
+.omega2_with_ci <- function(fF, df1, df2, level = 0.95) {
+  o <- tryCatch(effectsize::F_to_omega2(fF, df1, df2, ci = level, alternative = "two.sided"),
+                error = function(e) NULL)
+  if (is.null(o)) return(c(NA_real_, NA_real_, NA_real_))
+  c(as.numeric(o[[1]][1]), as.numeric(o$CI_low[1]), as.numeric(o$CI_high[1]))
+}
+
+#' Subjects with a value, overall and in each named group.
+.n_subjects <- function(d, groups = NULL) {
+  ok <- !is.na(d$.dv)
+  n <- length(unique(d$subject[ok]))
+  if (is.null(groups)) return(n)
+  vapply(groups, function(g) {
+    if (is.na(g)) return(NA_integer_)
+    length(unique(d$subject[ok & as.character(d$.grp) == g]))
+  }, integer(1), USE.NAMES = FALSE)
+}
+
 #' Minimum detectable effect from a standard error and degrees of freedom.
 #' Vectorized; NA where se is not a positive finite number or df <= 0.
 mde_from_se <- function(se, df = Inf, alpha = MDE_ALPHA, power = MDE_POWER) {
@@ -381,12 +412,13 @@ mde_from_se <- function(se, df = Inf, alpha = MDE_ALPHA, power = MDE_POWER) {
   if (!".grp" %in% rownames(aov)) stop("omnibus: no group term in model")
   fF <- aov[".grp", "F value"]; p <- aov[".grp", "Pr(>F)"]
   df1 <- aov[".grp", "NumDF"]; df2 <- aov[".grp", "DenDF"]
-  o2 <- tryCatch(as.numeric(effectsize::F_to_omega2(fF, df1, df2)[1]),
-                 error = function(e) NA_real_)
+  o2 <- .omega2_with_ci(fF, df1, df2)
   .add_mde(data.frame(spatial = NA_character_, estimate = NA_real_, SE = NA_real_,
                       df = df2, df_num = df1, stat = fF, stat_type = "F", p_value = p,
                       estimate_lcl = NA_real_, estimate_ucl = NA_real_,
-                      effect_size = o2, effect_size_type = "omega2_partial",
+                      effect_size = o2[1], effect_size_type = "omega2_partial",
+                      effect_size_lcl = o2[2], effect_size_ucl = o2[3],
+                      n = .n_subjects(fo$data), n_a = NA_integer_, n_b = NA_integer_,
                       stringsAsFactors = FALSE),
            note = "omnibus F test")
 }
@@ -432,14 +464,18 @@ mde_from_se <- function(se, df = Inf, alpha = MDE_ALPHA, power = MDE_POWER) {
   } else {
     sum(rw[as.character(ed$.grp)] * ed$emmean)
   }
+  ga <- if (length(pos) == 1) pos else NA_character_
+  gb <- if (length(neg) == 1) neg else NA_character_
+  nab <- .n_subjects(fo$data, c(ga, gb))
   .add_mde(data.frame(
     spatial = if (per_sp) as.character(cd$.sp) else NA_character_,
     estimate = cd$estimate, SE = cd$SE, df = .emm_df(cd), df_num = 1,
     stat = .emm_stat(cd), stat_type = "t", p_value = cd$p.value,
     estimate_lcl = .emm_lcl(cd), estimate_ucl = .emm_ucl(cd),
     effect_size = cd$estimate / resid_sd, effect_size_type = "hedges_g",
-    group_a = if (length(pos) == 1) pos else NA_character_,
-    group_b = if (length(neg) == 1) neg else NA_character_,
+    effect_size_lcl = .emm_lcl(cd) / resid_sd, effect_size_ucl = .emm_ucl(cd) / resid_sd,
+    group_a = ga, group_b = gb,
+    n = .n_subjects(fo$data), n_a = nab[1], n_b = nab[2],
     stringsAsFactors = FALSE
   ), ref_mean = ref_mean, resid_sd = resid_sd)
 }
@@ -474,6 +510,8 @@ mde_from_se <- function(se, df = Inf, alpha = MDE_ALPHA, power = MDE_POWER) {
     p_value = 2 * pt(-abs(tstat), cd_df),
     estimate_lcl = .emm_lcl(cd), estimate_ucl = .emm_ucl(cd),
     effect_size = slope * sdx / sdy, effect_size_type = "std_beta",
+    effect_size_lcl = .emm_lcl(cd) * sdx / sdy, effect_size_ucl = .emm_ucl(cd) * sdx / sdy,
+    n = .n_subjects(d), n_a = NA_integer_, n_b = NA_integer_,
     stringsAsFactors = FALSE
   ))
 }
@@ -660,13 +698,14 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
     rn <- if (".grp" %in% rownames(aov)) ".grp" else rownames(aov)[1]
     fF <- aov[rn, "F value"]; p <- aov[rn, "Pr(>F)"]
     df1 <- aov[rn, "Df"]; df2 <- aov["Residuals", "Df"]
-    o2 <- tryCatch(as.numeric(effectsize::F_to_omega2(fF, df1, df2)[1]),
-                   error = function(e) NA_real_)
+    o2 <- .omega2_with_ci(fF, df1, df2)
     return(.add_mde(data.frame(estimate = NA_real_, SE = NA_real_, df = df2, df_num = df1,
                                stat = fF, stat_type = "F", p_value = p,
                                estimate_lcl = NA_real_, estimate_ucl = NA_real_,
-                               effect_size = o2, effect_size_type = "omega2_partial",
+                               effect_size = o2[1], effect_size_type = "omega2_partial",
+                               effect_size_lcl = o2[2], effect_size_ucl = o2[3],
                                group_a = NA_character_, group_b = NA_character_,
+                               n = sum(!is.na(d$.dv)), n_a = NA_integer_, n_b = NA_integer_,
                                stringsAsFactors = FALSE),
                     note = "omnibus F test"))
   }
@@ -685,8 +724,11 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
     stat = tval, stat_type = "t", p_value = pval,
     estimate_lcl = est - tcrit * se, estimate_ucl = est + tcrit * se,
     effect_size = est / resid_sd, effect_size_type = "hedges_g",
+    effect_size_lcl = (est - tcrit * se) / resid_sd, effect_size_ucl = (est + tcrit * se) / resid_sd,
     group_a = if (length(pos) == 1) pos else NA_character_,
     group_b = if (length(neg) == 1) neg else NA_character_,
+    n = sum(gn), n_a = if (length(pos) == 1) as.integer(gn[pos]) else NA_integer_,
+    n_b = if (length(neg) == 1) as.integer(gn[neg]) else NA_integer_,
     stringsAsFactors = FALSE)
   rw <- .mde_reference_weights(wv, reference)
   res <- .add_mde(res, ref_mean = if (is.null(rw)) NA_real_ else sum(rw * gm),

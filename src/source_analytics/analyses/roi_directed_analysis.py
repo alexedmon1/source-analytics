@@ -21,6 +21,7 @@ from ..io.loader import SubjectLoader
 from ..spectral.transfer_entropy import compute_transfer_entropy
 from ..spectral.directed import compute_dtf, DEFAULT_ORDER, DEFAULT_RIDGE, DTF_DIRECTION_NOTE
 from ..viz.constants import CC_ROIS
+from ..results_spec import ResultsSpec, SpecTable
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,45 @@ class ROIDirectedAnalysis(BaseAnalysis):
     name = "roi_directed"
     SELECTABLE = {"metric": "directed measure", "band": "frequency band",
                   "hypothesis": "declared hypothesis"}
+
+    RESULTS_SPEC = ResultsSpec(
+        domain="directed",
+        measures={"te": "transfer_entropy", "net_te": "net_transfer_entropy", "dtf": "dtf"},
+        units={"te": "bits (binned transfer entropy from the source's past to the target)",
+               "net_te": "bits (TE source -> target minus TE target -> source)",
+               "dtf": "the directed transfer function's normalized gain (0 to 1)"},
+        input_file="roi_transfer_entropy_edges.csv",
+        method="per band and directed measure: on each subject's mean over every directed ROI pair, a "
+               "one-way linear model on group with contrasts of the declared hypotheses (net TE, "
+               "antisymmetric, has no overall row); per directed ROI pair, the same model on each pair's "
+               "value (mass-univariate); per directed region pair (its ROI pairs averaged), a linear mixed "
+               "model (lme4/lmerTest: value ~ group * region pair + (1 | subject), Satterthwaite df) with "
+               "emmeans contrasts. Equivalence by two one-sided tests",
+        tables=(
+            SpecTable("_global_hypotheses.csv", "tests",
+                      "one declared hypothesis on TE or DTF in one band, on each subject's mean over every "
+                      "directed ROI pair",
+                      "the declared hypotheses over the whole cortex, per band", element=False, headline=True,
+                      spatial="'(global) -> (global)': the mean over every directed ROI pair"),
+            SpecTable("_region_hypotheses.csv", "elements",
+                      "one declared hypothesis on one directed measure in one band and one directed region "
+                      "pair (its ROI pairs averaged)",
+                      "the declared hypotheses per directed region pair and band", element=True,
+                      spatial="the directed region pair tested, 'source region -> target region' (empty on "
+                              "omnibus rows)", element_name="region pair"),
+            SpecTable("_directed_edges_hypotheses.csv", "elements",
+                      "one declared hypothesis on one directed measure in one band and one directed ROI pair",
+                      "the declared hypotheses per directed ROI pair and band", element=True,
+                      spatial="the directed ROI pair tested, 'source -> target'", element_name="ROI pair"),
+        ),
+        caveats=(DTF_DIRECTION_NOTE,
+                 ("The directed ROI pair table is mass-univariate (one model per pair), corrected within each "
+                  "family; many pairs share ROIs, so their tests are correlated."),
+                 ("Directed measures on source-localized EEG are affected by volume conduction and field "
+                  "spread, so a direction is a statistical asymmetry, not established causal influence."),
+                 ("Net TE is antisymmetric (A -> B is minus B -> A), so it is tested per pair and region pair "
+                  "but not on the overall mean, which is zero by construction.")),
+    )
 
     # Directed measures this module can produce (shared signed-ROI front-end).
     # `te` additionally emits the derived `net_te`.

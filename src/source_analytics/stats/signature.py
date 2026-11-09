@@ -90,7 +90,7 @@ class SignatureResult:
     sensitivity: float
     specificity: float
     auc: float
-    accuracy_ci: tuple[float, float]  # 95% CI from permutation null
+    accuracy_ci: tuple[float, float]  # the permutation null's 2.5th-97.5th percentiles: the chance band, not a CI of the accuracy
     feature_weights: np.ndarray  # (n_features,) — mean |coef| across folds (NaN if non-linear)
     null_distribution: np.ndarray  # (n_permutations,) — null accuracies
     predictions: np.ndarray  # (n_subjects,) — predicted labels
@@ -254,7 +254,8 @@ def run_signature(
     balanced_p_value = float(
         (1 + np.sum(null_balanced >= balanced_accuracy)) / (n_permutations + 1))
 
-    # 95% CI from null distribution
+    # The null distribution's 2.5th-97.5th percentiles: the band chance accuracy falls in, NOT a
+    # confidence interval of the observed accuracy (the result spec's interval is balanced_accuracy_interval).
     ci_lower = float(np.percentile(null_accuracies, 2.5))
     ci_upper = float(np.percentile(null_accuracies, 97.5))
     bal_ci = (float(np.percentile(null_balanced, 2.5)),
@@ -285,3 +286,46 @@ def run_signature(
         balanced_p_value=balanced_p_value,
         balanced_accuracy_ci=bal_ci,
     )
+
+
+# --------------------------------------------- the effect's interval and FDR (results spec) ---
+_Z95 = 1.959963984540054
+
+
+def wilson_interval(k: float, n: int, z: float = _Z95) -> tuple[float, float]:
+    """Wilson score interval of a proportion ``k / n`` (``k`` may be a rate times ``n``)."""
+    if n <= 0:
+        return float("nan"), float("nan")
+    p = k / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return float(max(0.0, centre - half)), float(min(1.0, centre + half))
+
+
+def balanced_accuracy_interval(sensitivity: float, specificity: float,
+                               n_pos: int, n_neg: int) -> tuple[float, float]:
+    """An approximate 95% interval for balanced accuracy: the mean of the two classes' Wilson
+    intervals (each class's hit rate over its own subjects), which is at least as wide as an
+    interval for their mean would be. Approximate: cross-validated predictions are not
+    independent of one another."""
+    lo_p, hi_p = wilson_interval(sensitivity * n_pos, n_pos)
+    lo_n, hi_n = wilson_interval(specificity * n_neg, n_neg)
+    return (lo_p + lo_n) / 2, (hi_p + hi_n) / 2
+
+
+def bh_qvalues(pvals) -> np.ndarray:
+    """Benjamini-Hochberg q-values (step-up, monotone), NaN kept as NaN."""
+    p = np.asarray(pvals, dtype=float)
+    q = np.full(p.shape, np.nan)
+    ok = ~np.isnan(p)
+    m = int(ok.sum())
+    if m == 0:
+        return q
+    order = np.argsort(p[ok])
+    ranked = p[ok][order] * m / np.arange(1, m + 1)
+    ranked = np.minimum.accumulate(ranked[::-1])[::-1]
+    out = np.empty(m)
+    out[order] = np.minimum(ranked, 1.0)
+    q[ok] = out
+    return q

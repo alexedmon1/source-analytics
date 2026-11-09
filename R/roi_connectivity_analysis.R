@@ -473,6 +473,8 @@ plot_connectivity_matrices <- function(edges, metric_col, group_colors,
     ggsave(file.path(output_dir, fname), p,
            width = 7 * n_groups, height = 7, dpi = 200, limitsize = FALSE)
     message("  Saved: ", fname)
+    record_figure(output_dir, fname, measure = metric_col, facets = list(band = bname), kind = "matrix",
+                  shows = "roi_connectivity_group_edges.csv")
   }
 }
 
@@ -563,6 +565,8 @@ plot_global_connectivity_bar <- function(global_df, group_colors, group_labels,
   ggsave(file.path(output_dir, "roi_connectivity_global_bar.png"), p,
          width = max(8, 2 * n_bands), height = 5, dpi = 300)
   message("  Saved: roi_connectivity_global_bar.png")
+  record_figure(output_dir, "roi_connectivity_global_bar.png", kind = "distribution",
+                shows = "roi_connectivity_group_summary.csv")
 }
 
 #' Forest plot for region-pair post-hoc results
@@ -610,6 +614,7 @@ plot_region_pair_forest <- function(posthoc_df, output_dir) {
              width = max(10, 4 * n_bands), height = max(6, n_pairs * 0.35 + 2),
              dpi = 300, limitsize = FALSE)
       message("  Saved: ", fname)
+      record_figure(output_dir, fname, measure = metric_name, contrast = cname, kind = "summary")
     }
   }
 }

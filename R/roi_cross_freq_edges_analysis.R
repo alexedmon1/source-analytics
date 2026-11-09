@@ -128,6 +128,8 @@ plot_global_bar <- function(global_df, dv, metric, group_colors, group_labels,
                   ".png")
   ggsave(file.path(output_dir, fname), p, width = max(8, 2 * n_pairs), height = 5, dpi = 300)
   message("  Saved: ", fname)
+  record_figure(output_dir, fname, measure = dv, kind = "distribution",
+                shows = paste0("roi_cross_freq_", metric, "_global_hypotheses.csv"))
 }
 
 # --- Argument parsing --------------------------------------------------------

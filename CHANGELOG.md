@@ -32,8 +32,115 @@
 - **Engine 2026.11.09.1:** with no ROI and no subject term, log sigma ~ N(log 1, 0.5) (was N(log 0.5, 0.5)); the gate
   draws from the same prior. Other designs unchanged.
 - The Bayesian engine and benchmark method pages are now linked from the README and the docs site.
+- **Figures say what they show** (Esprit's results plan, 5b.4): the code that draws a figure records its test
+  (measure, contrast, facets), kind and source table in `figures.jsonl` beside the images
+  (`figure_record.record_figure`; `record_figure()` in R/stats_utils.R), and `gallery build` lists them in
+  `analysis.json` with the measure under the specification's name, so the gallery groups and filters figures by
+  fields, not file names. Recorded: the brain mosaics of roi_psd, roi_aperiodic and roi_cross_freq (PAC); the R
+  figures of roi_psd, roi_aperiodic, roi_cross_freq (PAC, AAC, PPC), roi_connectivity, roi_directed and
+  electrode_psd; and the Python figures of roi_connectivity (circos and matrices), roi_graph (global metrics), the
+  signature modules (importance, null, confusion: contrast, band and classifier) and electrode_comparison. A figure
+  is recorded only once it is on disk, so a run without figures records none. Figures with no record are listed as
+  before. The results extra pins neurobox-dev `dd3b7a7` (a figure of one contrast across its bands matches its
+  tests).
+
+- **`electrode_comparison` describes its results by the shared specification as a diagnostic** (Esprit's
+  results plan, 5b.4): the sensor-source agreement tables (correlation across subjects, each contrast's Hedges' g
+  at the sensor and source level, overall, per region and for the aperiodic parameters), with uncorrected
+  correlation p stated and no effect claimed. A table may name its own measure column (`SpecTable.measure_col`).
+
+- **`roi_connectivity` writes descriptive tables and describes them by the shared specification** (Esprit's
+  results plan, 5b.4). Its statistics step, which did nothing, now writes `roi_connectivity_group_summary.csv`
+  (each group's mean and SD of every connectivity measure per band, over the whole network) and
+  `roi_connectivity_group_edges.csv` (the same per ROI pair: the matrices the figures draw), from the saved edges.
+  The description says `role: descriptive`: no tests, no effect; the group comparisons are `roi_nbs` and
+  `roi_graph`. The writer takes a module's role (`ResultsSpec.role`).
+
+- **`roi_signature` and `electrode_signature` describe their results by the shared specification** (Esprit's
+  results plan, 5b.4): one row per contrast, band and classifier, with balanced accuracy as the effect and an
+  approximate 95% interval (`balanced_accuracy_lcl`/`_ucl`: the mean of the two groups' Wilson intervals), the
+  groups and their sizes, and a **new BH-FDR q-value** over each contrast's bands x classifiers (`q_value`,
+  `significant` is now q < 0.05, `fdr_family`). Before, every row's p was uncorrected.
+- **`--steps statistics` works for the signature modules from the saved features** (`data/<name>_features.csv`),
+  without reprocessing the recordings.
 
 ### Fixed
+
+- **A figures-only run (`--steps figures`) no longer replaces the tables' provenance record.** It rewrote
+  `provenance.json` as if the tables came from the figures run's code, dropping what the results description had
+  added, so the folder stopped conforming to the specification.
+- **The signature tables' `ci_lower`/`ci_upper` and `balanced_ci_*` are the permutation null's 2.5th-97.5th
+  percentiles, the band chance falls in, not confidence intervals of the observed accuracy**; the code and the
+  results description now say so. The results' real interval is `balanced_accuracy_lcl`/`_ucl`. The results
+  extra pins neurobox-dev `bc128b0`.
+
+- **`roi_nbs` and `electrode_connectivity` describe their results by the shared specification** (Esprit's
+  results plan, 5b.4). Each row is an element: an NBS component (sub-network) or a cluster of neighbouring
+  electrodes, with its permutation p (family-wise over the network or montage within each test,
+  `inference.correction`), its peak statistic, size and mass, and no effect size, with the reason stated
+  (`effect.measure: null`). `roi_nbs` also lists the component edges table. `electrode_connectivity`'s measure is
+  the functional connectivity density, with the connectivity measure it was computed from as a facet. The writer
+  takes a module's own column descriptions (`extra_columns`), a correction where there are no FDR families, and
+  an effect statement.
+- **The equivalence summaries of permutation modules state their margin** (`margin_sd`, in each edge's or
+  electrode's pooled SDs): the checker requires the bound on every equivalence row.
+
+- **`roi_graph` describes its results by the shared specification** (Esprit's results plan, 5b.4): degree,
+  clustering and betweenness per ROI, band and connectivity measure (the graph metric is the measure, the
+  connectivity measure a second facet, `FacetName` `connectivity`). The writer takes a module's measure column
+  (`ResultsSpec.measure_col`, default `dv`) and further facets (`extra_facets`).
+- **`roi_graph --steps statistics` works without recomputing the graphs**: the declared hypotheses come from
+  the per-subject nodal metrics an earlier run saved (`data/roi_graph_nodal_metrics.csv`). Before, a
+  statistics-only run wrote nothing, because the graphs live only in memory during a full run. The legacy
+  `roi_graph_stats.csv` still needs a full run.
+
+- **`roi_directed` and `electrode_aperiodic` describe their results by the shared specification** (Esprit's
+  results plan, 5b.4). `roi_directed`: transfer entropy, net TE and DTF, per band, overall (each subject's mean
+  over every directed ROI pair; net TE has no overall row), per directed region pair and per directed ROI pair,
+  with the DTF direction caveat. `electrode_aperiodic`: exponent and offset per electrode. Both are written
+  after their next statistics run; tables computed before the hypothesis layer gave `n`, the effect's interval
+  and the MDE (FORGE's, for example) need that run. The `results` extra pins neurobox-dev `6b3813f`
+  (`net_transfer_entropy` in the vocabulary).
+
+- **Each element column names what one element is** (results spec 0.4.2 `ElementName`): `ROI`, `region`,
+  `electrode`, and for coupling `region pair` and `ROI pair`. The study gallery's new significance summary
+  (neurobox-dev `274467a`, Esprit's results plan 5b.2) uses it to say "14 ROIs" or "2 regions" per contrast
+  and test. The `results` extra now pins neurobox-dev `5a83bca` (spec 0.4.2; the summary shows each contrast's 5 strongest tests). Folders written earlier gain the
+  names when their results description is written again; their tables are unchanged.
+
+- **`source-analytics gallery build --study study.yaml`: the study's gallery through the shared shell**
+  (neurobox-dev's `neurobox.gallery`; Esprit's results plan, step 5). For each module with a `RESULTS_SPEC`
+  and an `analysis.json` (today `roi_aperiodic`), it runs the module's figures step from its tables (R figures
+  and brain mosaics), copies the figures into the analysis folder and lists them in `analysis.json` (kind
+  inferred from the name, `drawn_by`), checks the folder again, and builds one static gallery for the study,
+  with the localization summaries source-localization's `study qc` writes. Settings from `gallery.yaml` beside
+  the study config, else from the config (`gallery_title`, `groups`, `group_order`, `paths.gallery`). The
+  shell refuses to replace a folder it did not build, so today's source-lightbox gallery at `paths.gallery`
+  is safe: pass `--out`. On FORGE treatment `roi_based` (in scratch): the same 24 `roi_aperiodic` figures as
+  today's gallery, 7.8 MB in all against 3.2 GB. The `results` extra now pins neurobox-dev `4fb16ed`.
+
+- **`roi_aperiodic` describes its results by the shared results specification** (neurobox-dev, schema 0.4;
+  Esprit's results plan, step 4). With the new optional extra `results` installed
+  (`pip install 'source-analytics[results]'`, also in `all`), a run that computes statistics writes, beside the
+  published tables, an `analysis.json` (id `eeg/roi/aperiodic/<paradigm>`, `domain` aperiodic, `task` rest, the
+  atlas, the correction families read from `fdr_family`, caveats), a column dictionary for each of its three
+  hypothesis tables (global = `tests`, region and ROI = `elements`), and the specification's fields in
+  `provenance.json`, whose existing fields stay as they are for source-lightbox. The writer
+  (`results_spec.py`) is generic over the hypothesis layer; a module opts in with a `RESULTS_SPEC`. Writing it
+  turns R's `NA` into empty cells in those three tables and adds a `measure` column (the vocabulary's name for
+  `dv`). Without the extra nothing changes; a folder that does not conform is logged, never fails a run. On a
+  fresh FORGE treatment `roi_based` run (60 animals, 746 rows): conforms, no warnings.
+- **Every hypothesis-layer row gives its sample size and an interval for its effect:** `n` (subjects in the
+  fitted model), `n_a` / `n_b` (each side of a two-group contrast), and `effect_size_lcl` / `effect_size_ucl`,
+  95%. For a standardized difference the interval is the estimate's over the residual SD (treated as known, so
+  slightly narrow); for omnibus rows it is partial omega squared's two-sided interval, exactly as
+  `effectsize::F_to_omega2` computes it (the Python side, `hypothesis.tabular.omega2_ci`, reproduces it to
+  1e-4); for regressions, the standardized slope's. R and Python adapters alike.
+
+### Fixed
+
+- **`uv.lock` matches `pyproject.toml` again** (it recorded 0.8.0; KNOWN_ISSUES 2), so `uv run` no longer
+  rewrites it.
 
 - **Summaries and heatmap subtitles name the correction the q-values actually received.** The modules whose
   per-contrast tests come from the hypothesis layer (`roi_psd`, `electrode` at channel level, `roi_aperiodic`,
