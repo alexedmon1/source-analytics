@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.9.0 — 2026-11-09 (the Bayesian group engine; field runs; figures say what they show)
+
+The Bayesian engine (engine plan E0-E6: configuration, provenance and gate ids, the gate's equivalence rule, the
+report and the user guide), the engine and its catalogue on the no-ROI residual-SD prior (engine 2026.11.09.1),
+declared outcome tables, and field runs from source-localization 0.8.0's field mode; with the results-plan work on
+`main` (figures record what they show). No frequentist number changes.
+
 ### Added
 
 - **Reading a Bayesian run (engine plan E4).** Results table schema 1 (`bayes/report.py` `TABLE_COLUMNS`, checked
