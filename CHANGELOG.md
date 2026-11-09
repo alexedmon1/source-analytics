@@ -4,6 +4,15 @@
 
 ### Added
 
+- **`roi_graph` describes its results by the shared specification** (Esprit's results plan, 5b.4): degree,
+  clustering and betweenness per ROI, band and connectivity measure (the graph metric is the measure, the
+  connectivity measure a second facet, `FacetName` `connectivity`). The writer takes a module's measure column
+  (`ResultsSpec.measure_col`, default `dv`) and further facets (`extra_facets`).
+- **`roi_graph --steps statistics` works without recomputing the graphs**: the declared hypotheses come from
+  the per-subject nodal metrics an earlier run saved (`data/roi_graph_nodal_metrics.csv`). Before, a
+  statistics-only run wrote nothing, because the graphs live only in memory during a full run. The legacy
+  `roi_graph_stats.csv` still needs a full run.
+
 - **`roi_directed` and `electrode_aperiodic` describe their results by the shared specification** (Esprit's
   results plan, 5b.4). `roi_directed`: transfer entropy, net TE and DTF, per band, overall (each subject's mean
   over every directed ROI pair; net TE has no overall row), per directed region pair and per directed ROI pair,

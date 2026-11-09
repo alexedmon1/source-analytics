@@ -299,3 +299,98 @@ def test_a_paradigm_is_a_variant_only_beside_others_of_its_group(over):
     config = _study_config(**over)
     aid = "eeg/roi/aperiodic/cartesian_mc" + ("/strict" if over.get("profile") else "")
     assert rs.variant(config, aid, "cartesian_mc", config.profile_name) is None
+
+
+# ---------------------------------------------- roi_graph (Python hypothesis layer) ---
+def test_roi_graph_conforms_from_the_python_layer(tmp_path):
+    """roi_graph's table comes from the Python tabular adapter: the graph metric is the measure
+    (``measure_col``) and the connectivity measure a second facet (``extra_facets``)."""
+    pytest.importorskip("neurobox")
+    import numpy as np
+    import pandas as pd
+
+    from source_analytics.analyses.roi_network_analysis import ROIGraphAnalysis
+    from source_analytics.config import DesignSpec, Hypothesis
+    from source_analytics.hypothesis.tabular import write_module_hypotheses_tabular
+
+    rng = np.random.default_rng(3)
+    groups = ["WT", "KO"]
+    rows = [{"subject": f"{g}{i}", "group": g, "band": "Alpha", "conn_metric": cm, "graph_metric": gm,
+             "roi": roi, "value": 2.0 + (0.8 if (g == "KO" and roi == "V1") else 0.0) + rng.normal(0, 0.4)}
+            for g in groups for i in range(10) for cm in ("coherence", "pli")
+            for gm in ("degree", "clustering") for roi in ("V1", "M1")]
+    hyps = [Hypothesis(name="group_omnibus", kind="omnibus", role="phenotype"),
+            Hypothesis(name="disease_effect", kind="contrast", role="phenotype", label="Disease effect",
+                       weights={"KO": 1.0, "WT": -1.0})]
+    cfg = SimpleNamespace(design_spec=DesignSpec(factor="group", reference="WT", levels=groups, fdr={},
+                                                 hypotheses=hyps),
+                          paradigm_name="rest_roi", profile_name=None, raw={"pipeline": {"atlas": "allen26"}})
+    tbl = tmp_path / "results" / "tables" / "rest_roi" / "roi_graph"
+    tbl.mkdir(parents=True)
+    write_module_hypotheses_tabular(pd.DataFrame(rows), cfg, tbl, prefix="roi_graph", value_col="value",
+                                    spatial_col="roi", facet_cols=("conn_metric", "graph_metric"),
+                                    band_col="band")
+    module = SimpleNamespace(name="roi_graph", tbl_dir=tbl, output_dir=tmp_path / "analytics", config=cfg,
+                             RESULTS_SPEC=ROIGraphAnalysis.RESULTS_SPEC)
+    rep = rs.write(module, dict(RECORD), "2026-11-09T12:00:00+00:00")
+    assert rep is not None and rep.ok and not rep.warnings, (rep and rep.errors, rep and rep.warnings)
+    a = json.loads((tbl / "analysis.json").read_text())
+    assert a["id"] == "eeg/roi/graph/rest_roi" and set(a["measures"]) == {"degree", "clustering"}
+    cols = json.loads((tbl / "roi_graph_hypotheses.json").read_text())
+    assert cols["conn_metric"]["FacetName"] == "connectivity" and cols["band"]["FacetName"] == "band"
+    assert cols["graph_metric"].get("Standard") is None and cols["measure"]["Standard"] == "measure"
+    assert cols["spatial"]["ElementName"] == "ROI"
+    with open(tbl / "roi_graph_hypotheses.csv") as fh:
+        assert {r["measure"] for r in csv.DictReader(fh)} == {"degree", "clustering"}
+
+
+def test_roi_graph_statistics_read_the_saved_nodal_metrics(tmp_path):
+    """--steps statistics computes no graphs, so the hypotheses come from data/roi_graph_nodal_metrics.csv."""
+    import pandas as pd
+
+    from source_analytics.analyses.roi_network_analysis import ROIGraphAnalysis
+
+    data = tmp_path / "data"
+    data.mkdir()
+    pd.DataFrame([{"subject": "WT_s1", "group": "WT", "band": b, "metric": m, "roi": "V1",
+                   "degree": 3, "clustering": 0.5, "betweenness": 0.1}
+                  for b in ("Alpha", "Beta") for m in ("coherence", "pli")]).to_csv(
+        data / "roi_graph_nodal_metrics.csv", index=False)
+    module = ROIGraphAnalysis.__new__(ROIGraphAnalysis)
+    module.output_dir = tmp_path
+    module._selected_bands = lambda: ["Alpha"]
+    module._connectivity_metrics = ["pli"]
+    rows = module._saved_nodal_rows("group")
+    assert len(rows) == 3                                      # one ROI x Alpha x pli x three graph metrics
+    assert {r["graph_metric"]: r["value"] for r in rows} == {"degree": 3.0, "clustering": 0.5, "betweenness": 0.1}
+    assert rows[0]["group"] == "WT" and rows[0]["conn_metric"] == "pli" and rows[0]["subject"] == "WT_s1"
+
+
+def test_a_statistics_only_roi_graph_run_writes_its_hypotheses(tmp_path):
+    import numpy as np
+    import pandas as pd
+
+    from source_analytics.analyses.roi_network_analysis import ROIGraphAnalysis
+    from source_analytics.config import DesignSpec, Hypothesis
+
+    rng = np.random.default_rng(5)
+    (tmp_path / "data").mkdir()
+    pd.DataFrame([{"subject": f"{g}_s{i}", "group": g, "band": "Alpha", "metric": "pli", "roi": roi,
+                   "degree": int(rng.integers(1, 6)), "clustering": rng.random(), "betweenness": rng.random()}
+                  for g in ("WT", "KO") for i in range(8) for roi in ("V1", "M1")]).to_csv(
+        tmp_path / "data" / "roi_graph_nodal_metrics.csv", index=False)
+    module = ROIGraphAnalysis.__new__(ROIGraphAnalysis)
+    module.output_dir = tmp_path
+    module._subject_data, module._subject_groups, module._selection = {}, {}, {}
+    module._selected_bands = lambda: ["Alpha"]
+    module._connectivity_metrics = ["pli"]
+    module._pairwise_contrasts = list
+    module.config = SimpleNamespace(paradigm_name="rest_roi", results_dir=tmp_path / "results", design_spec=DesignSpec(
+        factor="group", reference="WT", levels=["WT", "KO"], fdr={},
+        hypotheses=[Hypothesis(name="disease_effect", kind="contrast", role="phenotype",
+                               weights={"KO": 1.0, "WT": -1.0})]))
+    module.tbl_dir.mkdir(parents=True)
+    module._graph_statistics()
+    out = pd.read_csv(module.tbl_dir / "roi_graph_hypotheses.csv")
+    assert set(out["graph_metric"]) == {"degree", "clustering", "betweenness"} and set(out["spatial"]) == {"V1", "M1"}
+    assert not (module.tbl_dir / "roi_graph_stats.csv").exists()     # the legacy table needs the graphs

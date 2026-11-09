@@ -87,6 +87,10 @@ class ResultsSpec:
     facet: str = "band"                # FacetName of the `band` column (spec §5.2): band, freq_pair
     facet_description: str = "frequency band"
     element: str = "ROI"               # what one spatial cell is, in words: ROI, electrode
+    #: the column naming each row's measure, in the module's words (``measures`` maps it)
+    measure_col: str = "dv"
+    #: further facet columns: (column, FacetName, description), e.g. a graph's connectivity metric
+    extra_facets: tuple[tuple[str, str, str], ...] = ()
 
 
 #: Band power, as roi_psd and electrode_psd name it (spectral/band_power.py).
@@ -129,23 +133,25 @@ def _read(path: Path) -> tuple[list[str], list[dict[str, str]]]:
         return list(reader.fieldnames or []), list(reader)
 
 
-def prepare_table(path: Path, measures: dict[str, str]) -> tuple[list[str], list[dict[str, str]]]:
+def prepare_table(path: Path, measures: dict[str, str],
+                  measure_col: str = "dv") -> tuple[list[str], list[dict[str, str]]]:
     """Make a hypothesis table read as the specification reads tables, in place.
 
     R writes a missing value as ``NA``; the specification's missing value is an
     empty cell (which R's readr and pandas also read as missing). And the
     specification names measures by its vocabulary (``aperiodic_exponent``), so a
-    ``measure`` column with the canonical name is added after ``dv``. Idempotent.
+    ``measure`` column with the canonical name is added after ``dv`` (or the module's
+    ``measure_col``). Idempotent.
     """
     cols, rows = _read(path)
     for r in rows:
         for c in cols:
             if r.get(c) == "NA":
                 r[c] = ""
-        if "dv" in r:
-            r["measure"] = measures.get(r["dv"], r["dv"])
-    if "dv" in cols and "measure" not in cols:
-        cols.insert(cols.index("dv") + 1, "measure")
+        if measure_col in r:
+            r["measure"] = measures.get(r[measure_col], r[measure_col])
+    if measure_col in cols and "measure" not in cols:
+        cols.insert(cols.index(measure_col) + 1, "measure")
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n")
         writer.writeheader()
@@ -251,7 +257,10 @@ def columns(cols: list[str], rows: list[dict[str, str]], table: SpecTable, spec:
         "group_a": {"Description": "the contrast's positively weighted group, higher when the "
                                   "estimate is positive (two-group contrasts)", "Standard": "group_a"},
         "group_b": {"Description": "the contrast's negatively weighted group", "Standard": "group_b"},
-        "dv": {"Description": "the module's name for the measure (measure gives the specification's)"},
+        spec.measure_col: {"Description": "the module's name for the measure (measure gives the "
+                                          "specification's)"},
+        **{col: {"Description": desc, "Standard": "facet", "FacetName": name}
+           for col, name, desc in spec.extra_facets},
         "measure": {"Description": "the measure, by its name in the specification's vocabulary",
                     "Standard": "measure"},
         "margin_used": {"Description": "the equivalence margin, in the estimate's units",
@@ -394,7 +403,7 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
         return None
     prepared = []
     for t, path in found:
-        cols, rows = prepare_table(path, spec.measures)
+        cols, rows = prepare_table(path, spec.measures, spec.measure_col)
         prepared.append((t, path, cols, rows))
         fams.update(families(rows))
         all_rows += rows
@@ -404,7 +413,7 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
                        "n_rows": len(rows), **({"headline": True} if t.headline else {})})
 
     subjects = record.get("subjects") or {}
-    measures = [m for dv, m in spec.measures.items() if any(r.get("dv") == dv for r in all_rows)]
+    measures = [m for dv, m in spec.measures.items() if any(r.get(spec.measure_col) == dv for r in all_rows)]
     run_id = _default_run_id()
     analysis_json: dict[str, Any] = {
         "id": _analysis_id("eeg", atype, name, *(p for p in (paradigm, profile) if p)),

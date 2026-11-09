@@ -23,6 +23,7 @@ import yaml
 
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
+from ..results_spec import ResultsSpec, SpecTable
 from ..stats.graph_metrics import compute_graph_metrics
 from ..viz.constants import CC_ROIS, METRIC_LABELS
 from ._network_base import NetworkAnalysisBase
@@ -221,6 +222,9 @@ class _ROINetworkBase(NetworkAnalysisBase):
                             })
 
         if not all_stats:
+            # --steps statistics computes no graphs: the legacy table needs them in memory, the
+            # declared hypotheses can still come from the saved nodal metrics.
+            self._write_graph_hypotheses()
             return
         stats_df = pd.DataFrame(all_stats)
         nan_mask = np.isnan(stats_df["p"].values)
@@ -258,7 +262,9 @@ class _ROINetworkBase(NetworkAnalysisBase):
 
         Per-ROI between-subjects contrast for every declared hypothesis, faceted by
         connectivity × graph metric, with declarative FDR. Written alongside the
-        legacy ``_stats.csv``; consumes the same in-memory per-subject nodal metrics.
+        legacy ``_stats.csv``; consumes the same in-memory per-subject nodal metrics,
+        or, when this run computed none (``--steps statistics``), the per-subject
+        nodal metrics an earlier run saved in ``data/<name>_nodal_metrics.csv``.
         """
         spec = self.config.design_spec
         if spec is None or not spec.hypotheses:
@@ -266,6 +272,8 @@ class _ROINetworkBase(NetworkAnalysisBase):
         from ..hypothesis import write_module_hypotheses_tabular
 
         long_rows: list[dict] = []
+        if not self._subject_data:
+            long_rows = self._saved_nodal_rows(spec.factor)
         for uid, group in self._subject_groups.items():
             sd = self._subject_data.get(uid, {})
             for band_name in self._selected_bands():
@@ -291,6 +299,22 @@ class _ROINetworkBase(NetworkAnalysisBase):
             facet_cols=("conn_metric", "graph_metric"), band_col="band",
             hypothesis=",".join(sorted(wanted)) if wanted else None,
         )
+
+    def _saved_nodal_rows(self, factor: str) -> list[dict]:
+        """The long nodal rows from ``data/<name>_nodal_metrics.csv`` (written by the
+        aggregate step), limited to this run's bands and connectivity metrics."""
+        path = self.output_dir / "data" / f"{self.name}_nodal_metrics.csv"
+        if not path.exists():
+            logger.warning("No per-subject nodal metrics in memory or at %s: no graph hypotheses", path)
+            return []
+        df = pd.read_csv(path)
+        bands, metrics = set(self._selected_bands()), set(self._connectivity_metrics)
+        df = df[df["band"].isin(bands) & df["metric"].isin(metrics)]
+        logger.info("Graph hypotheses from the saved nodal metrics: %s (%d rows)", path.name, len(df))
+        return [{"subject": r.subject, factor: r.group, "band": r.band, "conn_metric": r.metric,
+                 "graph_metric": gname, "roi": r.roi, "value": float(getattr(r, gname))}
+                for r in df.itertuples(index=False)
+                for gname in ("degree", "clustering", "betweenness")]
 
     # ------------------------------------------------------ graph figures -- #
     def _graph_figures(self) -> None:
@@ -432,6 +456,37 @@ class ROIGraphAnalysis(_ROINetworkBase):
     """ROI graph-theoretic metrics (nodal + global), no NBS."""
 
     name = "roi_graph"
+    RESULTS_SPEC = ResultsSpec(
+        domain="connectivity",
+        measures={"degree": "degree", "clustering": "clustering", "betweenness": "betweenness"},
+        units={"degree": "edges (the ROI's degree in the binarized graph)",
+               "clustering": "the ROI's clustering coefficient (0 to 1)",
+               "betweenness": "the ROI's normalized betweenness centrality (0 to 1)"},
+        input_file="roi_graph_nodal_metrics.csv",
+        measure_col="graph_metric",
+        extra_facets=(("conn_metric", "connectivity",
+                       ("the connectivity measure the graph was built from (coherence, imaginary "
+                        "coherence, PLI, dwPLI, AEC)")),),
+        method="per subject, band and connectivity measure, the ROI connectivity matrix is binarized by a "
+               "proportional threshold (network.threshold_value of the strongest edges, 0.15 unless set) "
+               "and each ROI's degree, clustering and betweenness computed (networkx); per ROI, band, "
+               "connectivity measure and graph metric, a one-way linear model on group with contrasts of "
+               "the declared hypotheses; equivalence by two one-sided tests",
+        tables=(
+            SpecTable("_hypotheses.csv", "elements",
+                      "one declared hypothesis on one graph metric of one ROI, in one band and one "
+                      "connectivity measure's graph",
+                      "the declared hypotheses per ROI, band, connectivity measure and graph metric",
+                      element=True, headline=True),
+        ),
+        caveats=(("Graph metrics depend on the threshold: each graph keeps the same proportion of the "
+                  "strongest edges, so a group difference in overall connectivity strength does not "
+                  "change the edge count, but it can change which edges survive."),
+                 ("Five connectivity measures are each turned into graphs and tested separately; they are "
+                  "correlated, and each is corrected only within its own family."),
+                 ("The global metrics (global efficiency, modularity, small-worldness) are compared only "
+                  "in the legacy roi_graph_global_pairwise.csv (Welch t-tests), not part of this analysis.")),
+    )
 
     def process_subject(self, subject: SubjectInfo) -> None:
         self._process_matrices(subject)
