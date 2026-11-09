@@ -4,6 +4,11 @@
 
 ### Added
 
+- **`electrode_comparison` describes its results by the shared specification as a diagnostic** (Esprit's
+  results plan, 5b.4): the sensor-source agreement tables (correlation across subjects, each contrast's Hedges' g
+  at the sensor and source level, overall, per region and for the aperiodic parameters), with uncorrected
+  correlation p stated and no effect claimed. A table may name its own measure column (`SpecTable.measure_col`).
+
 - **`roi_connectivity` writes descriptive tables and describes them by the shared specification** (Esprit's
   results plan, 5b.4). Its statistics step, which did nothing, now writes `roi_connectivity_group_summary.csv`
   (each group's mean and SD of every connectivity measure per band, over the whole network) and

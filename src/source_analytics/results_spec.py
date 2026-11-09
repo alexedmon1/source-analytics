@@ -65,6 +65,8 @@ class SpecTable:
     headline: bool = False
     file: str | None = None      # the table's whole file name, when it is not module name + suffix
     spatial: str | None = None   # what `spatial` holds, when the module's default wording does not fit
+    #: the column naming this table's measure, when not the module's ``measure_col``
+    measure_col: str | None = None
     #: what one element of this table is (spec 0.4.2 ElementName), when not the module's ``element``
     element_name: str | None = None
 
@@ -295,8 +297,8 @@ def columns(cols: list[str], rows: list[dict[str, str]], table: SpecTable, spec:
         "group_a": {"Description": "the contrast's positively weighted group, higher when the "
                                   "estimate is positive (two-group contrasts)", "Standard": "group_a"},
         "group_b": {"Description": "the contrast's negatively weighted group", "Standard": "group_b"},
-        spec.measure_col: {"Description": "the module's name for the measure (measure gives the "
-                                          "specification's)"},
+        (table.measure_col or spec.measure_col): {
+            "Description": "the module's name for the measure (measure gives the specification's)"},
         **{col: {"Description": desc, "Standard": "facet", "FacetName": name}
            for col, name, desc in spec.extra_facets},
         **dict(spec.extra_columns),
@@ -442,7 +444,7 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
         return None
     prepared = []
     for t, path in found:
-        cols, rows = prepare_table(path, spec.measures, spec.measure_col)
+        cols, rows = prepare_table(path, spec.measures, t.measure_col or spec.measure_col)
         prepared.append((t, path, cols, rows))
         fams.update(families(rows))
         all_rows += rows
@@ -452,8 +454,8 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
                        "n_rows": len(rows), **({"headline": True} if t.headline else {})})
 
     subjects = record.get("subjects") or {}
-    measures = list(dict.fromkeys(m for dv, m in spec.measures.items()
-                                  if any(r.get(spec.measure_col) == dv for r in all_rows)))
+    seen = {r.get(t.measure_col or spec.measure_col) for t, _p, _c, rows in prepared for r in rows}
+    measures = list(dict.fromkeys(m for dv, m in spec.measures.items() if dv in seen))
     run_id = _default_run_id()
     analysis_json: dict[str, Any] = {
         "id": _analysis_id("eeg", atype, name, *(p for p in (paradigm, profile) if p)),

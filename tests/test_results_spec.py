@@ -609,3 +609,37 @@ def test_roi_connectivity_writes_descriptive_tables_that_conform(tmp_path):
     assert a["role"] == "descriptive" and a["effect"]["measure"] is None
     assert a["inference"]["correction"]["p_kind"] == "none"
     assert {t["role"] for t in a["tables"]} == {"descriptives"}
+
+
+# ------------------------------------------------------- electrode_comparison (diagnostic) ---
+def test_electrode_comparison_is_described_as_a_diagnostic(tmp_path):
+    pytest.importorskip("neurobox")
+    import pandas as pd
+
+    from source_analytics.analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
+
+    tbl = tmp_path / "results" / "tables" / "cartesian_mc" / "electrode_comparison"
+    tbl.mkdir(parents=True)
+    g = {"electrode_hedges_g": 0.4, "electrode_ci_lo": -0.2, "electrode_ci_hi": 1.0}
+    pd.DataFrame([{"band": b, "power_type": pt, "contrast": "disease_effect", "correlation_r": 0.7,
+                   "correlation_p": 0.001, "n_subjects": 60, **g, "source_hedges_g": 0.6, "source_ci_lo": 0.0,
+                   "source_ci_hi": 1.2} for b in ("Alpha", "Beta") for pt in ("relative", "absolute")]
+                 ).to_csv(tbl / "comparison_stats.csv", index=False)
+    pd.DataFrame([{"band": "Alpha", "power_type": "relative", "contrast": "disease_effect", "region": r, **g,
+                   "region_hedges_g": 0.9, "region_ci_lo": 0.2, "region_ci_hi": 1.6, "exceeds_electrode": True}
+                  for r in ("Frontal", "Visual")]).to_csv(tbl / "regional_effect_sizes.csv", index=False)
+    pd.DataFrame([{"dv": dv, "contrast": "disease_effect", "correlation_r": 0.5, "correlation_p": 0.01,
+                   "n_subjects": 60, **g, "source_hedges_g": 0.3, "source_ci_lo": -0.3, "source_ci_hi": 0.9}
+                  for dv in ("exponent", "offset")]).to_csv(tbl / "aperiodic_comparison_stats.csv", index=False)
+    cfg = SimpleNamespace(paradigm_name="cartesian_mc", profile_name=None, raw={}, design_spec=None)
+    shim = SimpleNamespace(name="electrode_comparison", tbl_dir=tbl, output_dir=tmp_path / "analytics", config=cfg,
+                           RESULTS_SPEC=ElectrodeComparisonAnalysis.RESULTS_SPEC)
+    rep = rs.write(shim, dict(RECORD), "2026-11-09T12:00:00+00:00")
+    assert rep is not None and rep.ok and not rep.warnings, (rep and rep.errors, rep and rep.warnings)
+    a = json.loads((tbl / "analysis.json").read_text())
+    assert a["role"] == "diagnostic" and a["id"] == "eeg/sensor/comparison/cartesian_mc"
+    assert set(a["measures"]) == {"relative_power", "band_power", "aperiodic_exponent", "aperiodic_offset"}
+    assert [t["path"] for t in a["tables"]] == ["comparison_stats.csv", "regional_effect_sizes.csv",
+                                               "aperiodic_comparison_stats.csv"]
+    cols = json.loads((tbl / "aperiodic_comparison_stats.json").read_text())
+    assert cols["measure"]["Standard"] == "measure" and "power_type" not in cols
