@@ -4,6 +4,14 @@
 
 ### Added
 
+- **`roi_directed` and `electrode_aperiodic` describe their results by the shared specification** (Esprit's
+  results plan, 5b.4). `roi_directed`: transfer entropy, net TE and DTF, per band, overall (each subject's mean
+  over every directed ROI pair; net TE has no overall row), per directed region pair and per directed ROI pair,
+  with the DTF direction caveat. `electrode_aperiodic`: exponent and offset per electrode. Both are written
+  after their next statistics run; tables computed before the hypothesis layer gave `n`, the effect's interval
+  and the MDE (FORGE's, for example) need that run. The `results` extra pins neurobox-dev `6b3813f`
+  (`net_transfer_entropy` in the vocabulary).
+
 - **Each element column names what one element is** (results spec 0.4.2 `ElementName`): `ROI`, `region`,
   `electrode`, and for coupling `region pair` and `ROI pair`. The study gallery's new significance summary
   (neurobox-dev `274467a`, Esprit's results plan 5b.2) uses it to say "14 ROIs" or "2 regions" per contrast

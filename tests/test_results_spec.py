@@ -20,8 +20,10 @@ import pytest
 
 from source_analytics import results_spec as rs
 from source_analytics.analyses.electrode_analysis import ElectrodeAnalysis
+from source_analytics.analyses.electrode_aperiodic_analysis import ElectrodeAperiodicAnalysis
 from source_analytics.analyses.roi_aperiodic_analysis import ROIAperiodicAnalysis
 from source_analytics.analyses.roi_cross_freq_analysis import ROICrossFreqAnalysis
+from source_analytics.analyses.roi_directed_analysis import ROIDirectedAnalysis
 from source_analytics.analyses.roi_psd_analysis import ROIPsdAnalysis
 from source_analytics.core import ANALYSIS_REGISTRY
 
@@ -190,8 +192,11 @@ def test_modules_without_a_spec_are_left_alone(module):
 MODULES = {
     "roi_psd": (ROIPsdAnalysis, ("absolute", "relative", "delta_ref"), "Alpha", "eeg/roi/psd/rest_roi", "band"),
     "electrode_psd": (ElectrodeAnalysis, ("absolute", "relative"), "Alpha", "eeg/sensor/psd/rest_roi", "band"),
+    "electrode_aperiodic": (ElectrodeAperiodicAnalysis, ("exponent", "offset"), "NA", "eeg/sensor/aperiodic/rest_roi",
+                            None),
     "roi_cross_freq": (ROICrossFreqAnalysis, ("z_score",), "Theta-Low Gamma", "eeg/roi/cross_freq/rest_roi",
                        "freq_pair"),
+    "roi_directed": (ROIDirectedAnalysis, ("te", "net_te", "dtf"), "Alpha", "eeg/roi/directed/rest_roi", "band"),
 }
 #: dvs of the AAC / PPC tables (roi_cross_freq_edges_analysis.R: the metric and its _z)
 EDGE_DVS = {"aac": ("aac",), "ppc": ("ppc", "ppc_z")}
@@ -236,9 +241,9 @@ def test_each_declared_module_conforms(tmp_path, name):
     assert sum(bool(t.get("headline")) for t in a["tables"]) == 1
     written = set(dvs) | ({dv for d in EDGE_DVS.values() for dv in d} if name == "roi_cross_freq" else set())
     assert set(a["measures"]) == {spec.measures[d] for d in written}
-    assert ("atlas" in a) == (name != "electrode_psd")      # an electrode is not a parcel
+    assert ("atlas" in a) == (not name.startswith("electrode_"))      # an electrode is not a parcel
     first = json.loads((module.tbl_dir / spec.tables[0].filename(name).replace(".csv", ".json")).read_text())
-    assert first["band"]["FacetName"] == facet
+    assert first["band"].get("FacetName") == facet           # None: broadband, no band facet
     # spec 0.4.2: every element column says what one element is
     names = set()
     for t in spec.tables:
@@ -247,9 +252,10 @@ def test_each_declared_module_conforms(tmp_path, name):
             names.add(cols["spatial"]["ElementName"])
         else:
             assert "ElementName" not in cols["spatial"]
-    assert names == {"electrode_psd": {"electrode"}, "roi_aperiodic": {"region", "ROI"},
+    assert names == {"electrode_psd": {"electrode"}, "electrode_aperiodic": {"electrode"}, "roi_aperiodic": {"region", "ROI"},
                      "roi_psd": {"region", "ROI"},
-                     "roi_cross_freq": {"region", "region pair", "ROI pair"}}[name]
+                     "roi_cross_freq": {"region", "region pair", "ROI pair"},
+                     "roi_directed": {"region pair", "ROI pair"}}[name]
 
 
 def test_a_table_named_apart_from_its_module_is_found(tmp_path):
