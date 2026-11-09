@@ -39,6 +39,9 @@ nav:
       - Connectivity metrics: methods/CONNECTIVITY_METHODS.md
       - Hypothesis layer (usage): methods/HYPOTHESIS.md
       - Hypothesis layer (design): methods/DESIGN_SPEC.md
+      - Bayesian engine: methods/BAYES_ENGINE.md
+      - Bayesian engine catalogue: methods/BAYES_CATALOGUE.md
+      - Benchmark scoring: methods/BENCHMARK.md
   - Pending changes:
       - Vertex split + source naming: plans/SOURCE_NAMING_AND_VERTEX_PLAN.md
   - Archive (historical plans):

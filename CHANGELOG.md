@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- **Bayesian engine catalogue.** Every model, prior and decision rule of the engine is declared once, with a stable
+  id, a version and its values (`source_analytics/bayes/catalogue.py`): the group-level model and its no-ROI form,
+  each set-W prior (group levels, covariates, ROI-deviation SD, ROI x band SD, subject SD, log sigma with and without
+  ROI/subject terms), the set-I contrast entry, the contrast and equivalence decision rules, convergence, and the
+  gate's thresholds. `docs/methods/BAYES_CATALOGUE.md` is generated from it and linked from the README and the docs
+  site. `tests/bayes/test_catalogue.py` builds the engine's real prior tables in R and fails if a catalogued prior or
+  constant differs from the code, if any prior reaches Stan without an entry, or if the page is stale.
+- **Engine 2026.11.09.1:** with no ROI and no subject term, log sigma ~ N(log 1, 0.5) (was N(log 0.5, 0.5)); the gate
+  draws from the same prior. Other designs unchanged.
+- The Bayesian engine and benchmark method pages are now linked from the README and the docs site.
+
 ### Fixed
 
 - **Summaries and heatmap subtitles name the correction the q-values actually received.** The modules whose

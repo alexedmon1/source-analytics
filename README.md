@@ -877,6 +877,9 @@ report.
 | [`docs/methods/HYPOTHESIS.md`](docs/methods/HYPOTHESIS.md) | the hypothesis layer — kinds, adapters, usage |
 | [`docs/methods/DESIGN_SPEC.md`](docs/methods/DESIGN_SPEC.md) | design rationale for `design:`/`hypotheses:` + FDR scope |
 | [`docs/methods/CONNECTIVITY_METHODS.md`](docs/methods/CONNECTIVITY_METHODS.md) | equation-checked provenance for every connectivity / coupling / directed metric |
+| [`docs/methods/BAYES_ENGINE.md`](docs/methods/BAYES_ENGINE.md) | the Bayesian group engine: model, hypothesis kinds, the two prior sets, the gate |
+| [`docs/methods/BAYES_CATALOGUE.md`](docs/methods/BAYES_CATALOGUE.md) | **catalogue** of the engine's models, priors and decision rules, each with an id, a version and its values (generated, test-checked against the R code) |
+| [`docs/methods/BENCHMARK.md`](docs/methods/BENCHMARK.md) | scoring claims and location probabilities against known truth (`benchmark score`, `benchmark location`) |
 | [`CHANGELOG.md`](CHANGELOG.md) | version history |
 | [`docs/archive/`](docs/archive/README.md) | completed/superseded planning docs — **not current** |
 
