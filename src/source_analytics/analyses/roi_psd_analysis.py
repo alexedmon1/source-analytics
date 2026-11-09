@@ -72,7 +72,7 @@ class ROIPsdAnalysis(BaseAnalysis):
                       "one declared hypothesis on one power measure in one band and one region (the "
                       "ROIs of a region category averaged)",
                       "the declared hypotheses per region and band", element=True,
-                      spatial="the region tested (empty on omnibus rows)"),
+                      spatial="the region tested (empty on omnibus rows)", element_name="region"),
             SpecTable("_hypotheses.csv", "elements",
                       "one declared hypothesis on one power measure in one band and one ROI",
                       "the declared hypotheses per ROI and band", element=True),

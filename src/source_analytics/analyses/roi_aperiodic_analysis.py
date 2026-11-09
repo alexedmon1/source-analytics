@@ -59,7 +59,7 @@ class ROIAperiodicAnalysis(BaseAnalysis):
             SpecTable("_region_hypotheses.csv", "elements",
                       "one declared hypothesis on one parameter in one region (the ROIs of a region "
                       "category averaged)",
-                      "the declared hypotheses per region", element=True),
+                      "the declared hypotheses per region", element=True, element_name="region"),
             SpecTable("_hypotheses.csv", "elements",
                       "one declared hypothesis on one parameter in one ROI",
                       "the declared hypotheses per ROI", element=True),

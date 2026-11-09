@@ -239,6 +239,17 @@ def test_each_declared_module_conforms(tmp_path, name):
     assert ("atlas" in a) == (name != "electrode_psd")      # an electrode is not a parcel
     first = json.loads((module.tbl_dir / spec.tables[0].filename(name).replace(".csv", ".json")).read_text())
     assert first["band"]["FacetName"] == facet
+    # spec 0.4.2: every element column says what one element is
+    names = set()
+    for t in spec.tables:
+        cols = json.loads((module.tbl_dir / t.filename(name).replace(".csv", ".json")).read_text())
+        if t.element:
+            names.add(cols["spatial"]["ElementName"])
+        else:
+            assert "ElementName" not in cols["spatial"]
+    assert names == {"electrode_psd": {"electrode"}, "roi_aperiodic": {"region", "ROI"},
+                     "roi_psd": {"region", "ROI"},
+                     "roi_cross_freq": {"region", "region pair", "ROI pair"}}[name]
 
 
 def test_a_table_named_apart_from_its_module_is_found(tmp_path):

@@ -65,6 +65,8 @@ class SpecTable:
     headline: bool = False
     file: str | None = None      # the table's whole file name, when it is not module name + suffix
     spatial: str | None = None   # what `spatial` holds, when the module's default wording does not fit
+    #: what one element of this table is (spec 0.4.2 ElementName), when not the module's ``element``
+    element_name: str | None = None
 
     def filename(self, module: str) -> str:
         return self.file or f"{module}{self.suffix}"
@@ -200,7 +202,8 @@ def columns(cols: list[str], rows: list[dict[str, str]], table: SpecTable, spec:
                  if has_band else {"Description": f"{spec.facet_description}; empty, as the measure is "
                                                   "broadband"}),
         "spatial": ({"Description": table.spatial or f"the {spec.element} tested (empty on omnibus rows)",
-                     "Standard": "element"} if table.element else
+                     "Standard": "element", "ElementName": table.element_name or spec.element}
+                    if table.element else
                     {"Description": table.spatial or "empty: these tests are on group means marginalized "
                                                      f"over every {spec.element}"}),
         "region": {"Description": f"the region the row's {spec.element}s belong to"},

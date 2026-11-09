@@ -106,7 +106,7 @@ class ROICrossFreqAnalysis(BaseAnalysis):
                       "region category averaged)",
                       "PAC: the declared hypotheses per region and band pair", element=True,
                       file="roi_pac_region_hypotheses.csv",
-                      spatial="the region tested (empty on omnibus rows)"),
+                      spatial="the region tested (empty on omnibus rows)", element_name="region"),
             SpecTable("_aac_global_hypotheses.csv", "tests",
                       "one declared hypothesis on AAC in one band pair, on each subject's mean "
                       "over every directed ROI pair",
@@ -119,13 +119,13 @@ class ROICrossFreqAnalysis(BaseAnalysis):
                       "AAC: the declared hypotheses per directed region pair and band pair",
                       element=True,
                       spatial="the directed region pair tested, 'slow-band region -> fast-band "
-                              "region' (empty on omnibus rows)"),
+                              "region' (empty on omnibus rows)", element_name="region pair"),
             SpecTable("_aac_directed_edges_hypotheses.csv", "elements",
                       "one declared hypothesis on AAC in one band pair and one directed ROI pair",
                       "AAC: the declared hypotheses per directed ROI pair and band pair",
                       element=True,
                       spatial="the directed ROI pair tested, 'source -> target', the source carrying "
-                              "the slow band and the target the fast band"),
+                              "the slow band and the target the fast band", element_name="ROI pair"),
             SpecTable("_ppc_global_hypotheses.csv", "tests",
                       "one declared hypothesis on n:m PPC in one band pair, on each subject's mean "
                       "over every directed ROI pair",
@@ -138,13 +138,13 @@ class ROICrossFreqAnalysis(BaseAnalysis):
                       "n:m PPC: the declared hypotheses per directed region pair and band pair",
                       element=True,
                       spatial="the directed region pair tested, 'slow-band region -> fast-band "
-                              "region' (empty on omnibus rows)"),
+                              "region' (empty on omnibus rows)", element_name="region pair"),
             SpecTable("_ppc_directed_edges_hypotheses.csv", "elements",
                       "one declared hypothesis on n:m PPC in one band pair and one directed ROI pair",
                       "n:m PPC: the declared hypotheses per directed ROI pair and band pair",
                       element=True,
                       spatial="the directed ROI pair tested, 'source -> target', the source carrying "
-                              "the slow band and the target the fast band"),
+                              "the slow band and the target the fast band", element_name="ROI pair"),
         ),
         caveats=(("A band pair is only tested where the fast band sits above the slow band (centre "
                   "frequency ratio above 2.5), so the pairs are not a full grid."),
