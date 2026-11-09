@@ -74,6 +74,47 @@ JSON (`{x_<band>_<group>: [mean, sd]}`) is still read, unchecked.
   compiled template; the HDI covers the simulated effect), a gate smoke run with an equivalence hypothesis and both
   prior sets through the CLI, and the E3 end-to-end run.
 
+### 2.1 Declared outcome tables (`bayes.tables`, 2026-11-09)
+
+Built-in analyses write the engine's long table themselves (`roi_psd`, `roi_aperiodic`). Any other per-subject table is
+declared in the study's `bayes:` block and assembled by `bayes/declared.py`:
+
+```yaml
+bayes:
+  tables:
+    deficit_along_field:
+      source: roi_evoked                 # an analysis's per-subject table in each paradigm's output ...
+      # csv: values.csv                  # ... or any file (e.g. source-localization `field region-values`)
+      # output_dir: ../other/analytics   # source tables: another output tree
+      paradigms: [assr_40hz, chirp]
+      value: value
+      spatial: none                      # none: no ROI in the model; or a column kept as the engine's ROI
+      outcomes:                          # each label is an engine outcome ("band"): column -> value or [values]
+        40 Hz ASSR ITC:   {paradigm: assr_40hz, roi: assr40_D, measure_name: itc_40hz}
+        deep midline ITC: {paradigm: assr_40hz, roi: [Brainstem_Tectum, Cerebellum, Thalamus],
+                           measure_name: itc_40hz, combine: mean}
+      groups: {G2_D1pre: KO, G3_D1pre: KO, G4_D1pre: KO, G5_D1pre: KO, G6_D1pre: WT}
+      # subject_groups: groups.csv       # csv tables without a group column (subject, group)
+  outcomes:
+    deficit_along_field: [value]
+```
+
+- **`groups`** maps the table's group labels onto the design's levels; rows of unmapped groups are dropped. Pooling
+  groups (several KO groups into one level) happens here, so the design spec, which the frequentist adapters share,
+  is unchanged. A mapped label that is not a design level is refused.
+- **`combine: mean`** averages the selected rows per subject (for example a mean over parcels); without it a selection
+  that gives more than one row per subject is refused.
+- **Set I** may serve several tables from one file: every entry's band is checked against all declared outcomes (a
+  misspelt band still fails), and each job keeps its own entries.
+- **Run:** `source-analytics bayes --study S.yaml --analysis deficit_along_field [--out DIR] [--gate]`; no
+  `--paradigm` is needed. The job records the definition, every input with its sha256 and the assembled table's sha256.
+
+**Checks (bayes-sl `reports/2026-11-09_field_method_library_plan.md`, F6b).** a97d's field job built from config
+reproduces the hand-built job exactly (218 rows; identical estimates, intervals and decisions under W and I). Its
+deep-midline parcel tables give the same data (436 rows) and estimates within 0.02 SD (the hand-built job fitted all
+eight outcomes in one run). FORGE's L3 region values as a csv table: 20 of 20 decisions the same, estimates within
+0.022 SD (those fits predate engine 2026.11.09.1's no-ROI residual-SD prior).
+
 ## 3. Model
 
 The outcome is standardised before fitting, per band: z = (y - band mean) / s_b. Here s_b is the within-group

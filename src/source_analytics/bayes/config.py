@@ -9,9 +9,23 @@
       gate:
         reps: {sbc: 100, null: 100, recovery: 10, equivalence: 100}   # equivalence: only with equivalence hypotheses
         reduced_bands: [Theta, Low Gamma]     # SBC, null and equivalence; recovery runs at the full design
+      tables:                                 # declared outcome tables (field-method plan F6b; bayes/declared.py)
+        deficit_along_field:
+          source: roi_evoked                  # an analysis's per-subject table in each paradigm's output ...
+          # csv: path/values.csv              # ... or an external table (relative to the study YAML)
+          paradigms: [assr_40hz, chirp]       # source tables: which paradigms' outputs to read
+          # output_dir: ../other/analytics    # source tables: another output tree (default: the study's)
+          value: value                        # the outcome column
+          spatial: none                       # none (no ROI in the model) or a column used as the engine's ROI
+          outcomes:                           # engine outcome ("band") label -> rows (column: value or [values])
+            40 Hz ASSR ITC: {paradigm: assr_40hz, roi: assr40_D, measure_name: itc_40hz}
+            deep midline ITC: {paradigm: assr_40hz, roi: [Brainstem_Tectum, Cerebellum, Thalamus],
+                               measure_name: itc_40hz, combine: mean}
+          groups: {G2_D1pre: KO, G6_D1pre: WT}  # table group -> design level; rows of other groups are dropped
       outcomes:                               # what `source-analytics bayes` runs when --analysis/--dv are not given
         roi_psd: [absolute]
         roi_aperiodic: [exponent]
+        deficit_along_field: [value]          # a declared table: its value column
 
 Every key is optional; absent keys take the engine defaults below. Unknown keys and bad values raise
 ``BayesConfigError`` before R is started. CLI flags say only what to run and where (the engine plan, section 2).
@@ -52,6 +66,24 @@ class GateSettings:
 
 
 @dataclass(frozen=True)
+class TableSpec:
+    """A declared outcome table (``bayes.tables.<name>``): where its rows come from and how they become outcomes."""
+
+    name: str
+    value: str
+    outcomes: dict
+    source: str | None = None
+    csv: Path | None = None
+    paradigms: tuple[str, ...] | None = None
+    spatial: str | None = None                  # None: no ROI in the model
+    groups: dict | None = None
+    subject: str = "subject"
+    group: str = "group"
+    subject_groups: Path | None = None          # csv tables without a group column: subject,group file
+    output_dir: Path | None = None              # source tables: read this output tree instead of the study's
+
+
+@dataclass(frozen=True)
 class BayesConfig:
     rope_sd: float = 0.1
     prior_sets: tuple[str, ...] = PRIOR_SETS
@@ -59,6 +91,7 @@ class BayesConfig:
     fit: FitSettings = field(default_factory=FitSettings)
     gate: GateSettings = field(default_factory=GateSettings)
     outcomes: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    tables: dict[str, TableSpec] = field(default_factory=dict)
 
 
 def _check_keys(block: dict, allowed: set[str], where: str) -> None:
@@ -79,7 +112,7 @@ def _pos_int(v, where: str) -> int:
 def parse_bayes_config(block: dict | None, base_dir: Path) -> BayesConfig:
     """Validate a ``bayes:`` block; relative paths resolve against ``base_dir`` (the study YAML's directory)."""
     block = block or {}
-    _check_keys(block, {"rope", "prior_sets", "priors", "fit", "gate", "outcomes"}, "bayes")
+    _check_keys(block, {"rope", "prior_sets", "priors", "fit", "gate", "outcomes", "tables"}, "bayes")
 
     rope = block.get("rope") or {}
     _check_keys(rope, {"mode", "value"}, "bayes.rope")
@@ -128,11 +161,18 @@ def parse_bayes_config(block: dict | None, base_dir: Path) -> BayesConfig:
     g = GateSettings(**{k: _pos_int(v, f"bayes.gate.reps.{k}") for k, v in reps.items()},
                      reduced_bands=tuple(bands) if bands else None)
 
+    tables = _parse_tables(block.get("tables"), base_dir)
     outcomes = {}
     oc = block.get("outcomes") or {}
     if not isinstance(oc, dict):
         raise BayesConfigError("bayes.outcomes: expected a mapping analysis -> [dv, ...]")
     for analysis, dvs in oc.items():
+        if analysis in tables:
+            if dvs != [tables[analysis].value]:
+                raise BayesConfigError(f"bayes.outcomes.{analysis}: a declared table's outcome is its value column "
+                                       f"([{tables[analysis].value}]), got {dvs!r}")
+            outcomes[analysis] = tuple(dvs)
+            continue
         if analysis not in BAYES_TABLES:
             raise BayesConfigError(f"bayes.outcomes: analysis {analysis!r} not supported "
                                    f"(known: {', '.join(BAYES_TABLES)})")
@@ -145,4 +185,56 @@ def parse_bayes_config(block: dict | None, base_dir: Path) -> BayesConfig:
         outcomes[analysis] = tuple(dvs)
 
     return BayesConfig(rope_sd=float(rope_sd), prior_sets=tuple(sets), informative=informative, fit=f, gate=g,
-                       outcomes=outcomes)
+                       outcomes=outcomes, tables=tables)
+
+
+_TABLE_KEYS = {"source", "csv", "paradigms", "value", "spatial", "outcomes", "groups", "subject", "group",
+               "subject_groups", "output_dir"}
+
+
+def _parse_tables(block, base_dir: Path) -> dict[str, TableSpec]:
+    """``bayes.tables``: validated table declarations (module docstring)."""
+    if block is None:
+        return {}
+    if not isinstance(block, dict):
+        raise BayesConfigError("bayes.tables: expected a mapping name -> table")
+    out = {}
+    for name, t in block.items():
+        w = f"bayes.tables.{name}"
+        if name in BAYES_TABLES:
+            raise BayesConfigError(f"{w}: the name is a built-in analysis; choose another")
+        _check_keys(t, _TABLE_KEYS, w)
+        if bool(t.get("source")) == bool(t.get("csv")):
+            raise BayesConfigError(f"{w}: give exactly one of source (an analysis) or csv (a file)")
+        if not t.get("value"):
+            raise BayesConfigError(f"{w}.value: the outcome column is required")
+        oc = t.get("outcomes")
+        if not isinstance(oc, dict) or not oc:
+            raise BayesConfigError(f"{w}.outcomes: expected a mapping label -> row selection")
+        for label, sel in oc.items():
+            if not isinstance(sel, dict) or not sel:
+                raise BayesConfigError(f"{w}.outcomes.{label}: expected a mapping column -> value(s)")
+            if sel.get("combine", "none") not in ("none", "mean"):
+                raise BayesConfigError(f"{w}.outcomes.{label}.combine: none or mean")
+        paradigms = t.get("paradigms")
+        if paradigms is not None and (isinstance(paradigms, str) or not isinstance(paradigms, list)):
+            raise BayesConfigError(f"{w}.paradigms: expected a list")
+        spatial = t.get("spatial", "none")
+        groups = t.get("groups")
+        if groups is not None and not isinstance(groups, dict):
+            raise BayesConfigError(f"{w}.groups: expected a mapping table group -> design level")
+        csv = (base_dir / t["csv"]).resolve() if t.get("csv") else None
+        odir = (base_dir / t["output_dir"]).resolve() if t.get("output_dir") else None
+        if odir is not None and not odir.is_dir():
+            raise BayesConfigError(f"{w}.output_dir: not a directory: {odir}")
+        sg = (base_dir / t["subject_groups"]).resolve() if t.get("subject_groups") else None
+        for path, key in ((csv, "csv"), (sg, "subject_groups")):
+            if path is not None and not path.exists():
+                raise BayesConfigError(f"{w}.{key}: file not found: {path}")
+        out[name] = TableSpec(name=name, value=str(t["value"]), outcomes=dict(oc), source=t.get("source"), csv=csv,
+                              paradigms=tuple(paradigms) if paradigms else None,
+                              spatial=None if spatial in (None, "none") else str(spatial),
+                              groups={str(k): str(v) for k, v in groups.items()} if groups else None,
+                              subject=str(t.get("subject", "subject")), group=str(t.get("group", "group")),
+                              subject_groups=sg, output_dir=odir)
+    return out

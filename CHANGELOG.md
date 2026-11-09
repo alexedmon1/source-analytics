@@ -4,6 +4,12 @@
 
 ### Added
 
+- **Declared outcome tables for the Bayesian engine** (`bayes.tables`, `bayes/declared.py`). Any per-subject table
+  can feed the engine from config: an analysis's table across paradigms (`source`, optionally another `output_dir`)
+  or any CSV (`csv`, e.g. source-localization's `field region-values`), with outcomes selected by column values
+  (`combine: mean` over rows), `spatial: none` for models with no ROI, `groups` mapping (and pooling) table groups
+  onto design levels, and `subject_groups` for tables without a group column. One set-I file may serve several
+  tables. Checked on a97d (identical to the hand-built job) and FORGE L3 (same decisions).
 - **Field runs.** `read_run_manifest` recognises source-localization's field mode (`field_run.json`, which takes
   precedence over `config_resolved.yaml`): `RunManifest.readout_mode` (`source` / `field`), `template` (name, version,
   sha256) and `projection` (catalogue id, version). An analysis refuses a cohort mixing field and source runs,

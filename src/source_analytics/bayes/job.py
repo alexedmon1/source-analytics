@@ -18,7 +18,7 @@ class BayesJob:
 
     data_csv: str
     dv: str
-    spatial_col: str
+    spatial_col: str | None                                         # None: no ROI in the model
     band_col: str | None
     design: dict
     hypotheses: list[dict]
@@ -68,6 +68,9 @@ def build_job(config: StudyConfig, analysis: str, dv: str, bayes: BayesConfig | 
     ``study_path`` (the study YAML) is hashed into the job's provenance for the manifest."""
     if bayes is None:
         bayes = parse_bayes_config(config.raw.get("bayes"), Path.cwd())
+    if analysis in bayes.tables:
+        return _build_declared_job(config, bayes.tables[analysis], dv, bayes, hypotheses, prior_sets, gate, out_dir,
+                                   study_path)
     tab = BAYES_TABLES.get(analysis)
     if tab is None:
         raise ValueError(f"bayes: analysis '{analysis}' not supported (known: {', '.join(BAYES_TABLES)})")
@@ -102,6 +105,65 @@ def build_job(config: StudyConfig, analysis: str, dv: str, bayes: BayesConfig | 
     return BayesJob(data_csv=str(csv), dv=dv, spatial_col=tab.spatial_col, band_col=tab.band_col, design=design,
                     hypotheses=hyps, prior_sets=sets, informative=info, rope_sd=bayes.rope_sd,
                     table_out=str(tbl_dir / f"{analysis}_hypotheses_bayes.csv"), work_dir=str(work), gate=gate,
+                    chains=f.chains, iter=f.iter, warmup=f.warmup, seed=f.seed, gate_settings=gate_settings,
+                    provenance=provenance)
+
+
+def _select(bayes: BayesConfig, hyps: list[dict], hypotheses, prior_sets, info) -> tuple[list[dict], list[str]]:
+    if hypotheses:
+        unknown = set(hypotheses) - {h["name"] for h in hyps}
+        if unknown:
+            raise ValueError(f"bayes: unknown hypothesis(es): {', '.join(sorted(unknown))}")
+        hyps = [h for h in hyps if h["name"] in hypotheses]
+    sets = list(bayes.prior_sets)
+    if prior_sets is not None:
+        extra = set(prior_sets) - set(sets)
+        if extra:
+            raise ValueError(f"bayes: prior set(s) {', '.join(sorted(extra))} not in the study's bayes.prior_sets")
+        sets = [s for s in sets if s in prior_sets]
+    return hyps, [s for s in sets if s != "I" or info is not None]
+
+
+def _safe(x: str) -> str:
+    """The engine's name for a band or group (R/bayes/model.R .safe: alphanumerics only)."""
+    return "".join(ch for ch in str(x) if ch.isalnum())
+
+
+def _build_declared_job(config: StudyConfig, spec, dv: str, bayes: BayesConfig, hypotheses, prior_sets, gate: bool,
+                        out_dir, study_path) -> BayesJob:
+    """A job on a declared table (bayes.tables; bayes/declared.py): the table is assembled into the work dir."""
+    from .declared import assemble
+    if dv != spec.value:
+        raise ValueError(f"bayes: a declared table's outcome is its value column ({spec.value}), got {dv!r}")
+    tbl_dir = Path(out_dir) if out_dir is not None else config.results_dir / "tables" / "bayes" / spec.name
+    work = Path(out_dir) / "bayes" if out_dir is not None else config.output_dir / "bayes" / spec.name
+    design, hyps = design_payload(config)
+    data, table_prov = assemble(spec, config.output_dir, design["factor"], config.paradigm_name)
+    levels = design.get("levels")
+    if levels and not set(data[design["factor"]]) <= set(levels):
+        extra = sorted(set(data[design["factor"]]) - set(levels))
+        raise ValueError(f"bayes.tables.{spec.name}: groups {extra} are not design levels {levels}; map them in groups")
+    work.mkdir(parents=True, exist_ok=True)
+    csv = work / f"{spec.name}_data.csv"
+    data.to_csv(csv, index=False)
+    info = None
+    if bayes.informative is not None:
+        # one set-I file may serve several declared tables: check every entry's band against all of them (a misspelt
+        # band still fails), then keep this table's entries only
+        every = sorted({o for t in bayes.tables.values() for o in t.outcomes})
+        info = load_informative(bayes.informative, dv, design, hyps, bands=every) or {}
+        mine = tuple(f"x_{_safe(o)}_" for o in spec.outcomes)
+        info = {k: v for k, v in info.items() if k.startswith(mine)} or None
+    hyps, sets = _select(bayes, hyps, hypotheses, prior_sets, info)
+    f, g = bayes.fit, bayes.gate
+    gate_settings = {"sbc": g.sbc, "null": g.null, "recovery": g.recovery, "equivalence": g.equivalence,
+                     "reduced_bands": list(g.reduced_bands) if g.reduced_bands else None}
+    provenance = {"source_analytics": _package(), "study": _file_record(study_path),
+                  "informative": _file_record(bayes.informative) if "I" in sets else None,
+                  "table": {**table_prov, "data_csv_sha256": _file_record(csv)["sha256"]}}
+    return BayesJob(data_csv=str(csv), dv=dv, spatial_col="roi" if spec.spatial else None, band_col="outcome",
+                    design=design, hypotheses=hyps, prior_sets=sets, informative=info, rope_sd=bayes.rope_sd,
+                    table_out=str(tbl_dir / f"{spec.name}_hypotheses_bayes.csv"), work_dir=str(work), gate=gate,
                     chains=f.chains, iter=f.iter, warmup=f.warmup, seed=f.seed, gate_settings=gate_settings,
                     provenance=provenance)
 

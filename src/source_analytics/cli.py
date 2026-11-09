@@ -875,14 +875,16 @@ def cmd_bayes(args):
         if not runs:
             print("ERROR: no --analysis and no bayes.outcomes in the study YAML")
             sys.exit(1)
-    if config.has_paradigms and not args.paradigm:
-        print("ERROR: multi-paradigm config: --paradigm is required for bayes")
+    declared = {a for a, _ in runs if a in bayes.tables}       # declared tables name their own paradigms
+    if config.has_paradigms and not args.paradigm and len(declared) < len(runs):
+        print("ERROR: multi-paradigm config: --paradigm is required for bayes (except for bayes.tables)")
         sys.exit(1)
     sets = tuple(s.strip() for s in args.prior_sets.split(",")) if args.prior_sets else None
     hyps = [h.strip() for h in args.hypothesis.split(",")] if args.hypothesis else None
     failures = []
     for analysis, dvs in runs:
-        cfg = config.for_paradigm_analysis(args.paradigm, analysis) if config.has_paradigms else config
+        cfg = (config.for_paradigm_analysis(args.paradigm, analysis) if config.has_paradigms
+               and analysis not in bayes.tables else config)
         out = (Path(args.out) / analysis if len(runs) > 1 else Path(args.out)) if args.out else None
         for dv in dvs:
             try:
@@ -1053,8 +1055,8 @@ def main():
                          help="Study YAML; its bayes: block holds every setting that changes a number "
                               "(BAYES_ENGINE.md section 2)")
     p_bayes.add_argument("--paradigm", help="Paradigm name (multi-paradigm configs)")
-    p_bayes.add_argument("--analysis", help="Module whose table is read (roi_psd, roi_aperiodic); "
-                                            "default: every analysis in bayes.outcomes")
+    p_bayes.add_argument("--analysis", help="Module whose table is read (roi_psd, roi_aperiodic) or a table "
+                                            "declared in bayes.tables; default: every analysis in bayes.outcomes")
     p_bayes.add_argument("--dv", help="Outcome column(s), comma-separated; default: bayes.outcomes for the analysis")
     p_bayes.add_argument("--profile", metavar="NAME", help="Profile block narrowing bands/ROIs/hypotheses")
     p_bayes.add_argument("--hypothesis", help="Comma-separated declared hypothesis(es); default all")
