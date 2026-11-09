@@ -34,13 +34,98 @@ from ..spectral.psd import compute_psd
 from ..spectral.band_power import extract_band_power, relative_power_kwargs
 from ..stats.signature import (
     SignatureResult,
+    balanced_accuracy_interval,
+    bh_qvalues,
     classifier_label,
     normalize_classifier,
     run_signature,
 )
+from ..hypothesis.power import mde_not_computed
+from ..results_spec import ResultsSpec, SpecTable
 from .base import BaseAnalysis
 
 logger = logging.getLogger(__name__)
+
+
+def signature_spec(features: str, unit: str) -> ResultsSpec:
+    """The results specification of a signature module (electrode_signature, roi_signature):
+    one row per contrast x band x classifier, balanced accuracy as the effect."""
+    chance = ("the permutation null's {p} percentile of {what}: the band chance falls in, not an interval "
+              "for the observed value")
+    return ResultsSpec(
+        domain="decoding",
+        measures={"balanced_accuracy": "decoding_accuracy"},
+        units={"balanced_accuracy": "proportion correct, the mean of the two groups' hit rates (0.5 = chance)"},
+        input_file=None,
+        method=(f"per declared two-group contrast, band and classifier, a classifier is trained on {features} "
+                "with leave-one-subject-out cross-validation; its balanced accuracy is tested against "
+                "label permutations (the add-one permutation p, Phipson & Smyth 2010), and the p-values are "
+                "BH-FDR corrected over each contrast's bands x classifiers"),
+        tables=(
+            SpecTable("_results.csv", "tests",
+                      "one declared two-group contrast decoded in one band by one classifier",
+                      f"cross-validated classification of each contrast's two groups from {unit} band power",
+                      element=False, headline=True),
+        ),
+        extra_columns=(
+            ("contrast", {"Description": "the declared hypothesis whose two groups are classified",
+                          "Standard": "contrast"}),
+            ("classifier", {"Description": "the classifier", "Standard": "facet", "FacetName": "classifier"}),
+            ("model", {"Description": "the classifier in words"}),
+            ("balanced_accuracy", {"Description": "cross-validated balanced accuracy: the mean of the two "
+                                                  "groups' hit rates (0.5 = chance)",
+                                   "Standard": "effect_size", "EffectMeasure": "balanced_accuracy"}),
+            ("balanced_accuracy_lcl", {"Description": "an approximate lower 95% bound of the balanced accuracy: "
+                                                      "the mean of the two groups' Wilson bounds",
+                                       "Standard": "effect_ci_low", "CILevel": 0.95}),
+            ("balanced_accuracy_ucl", {"Description": "the approximate upper 95% bound, likewise",
+                                       "Standard": "effect_ci_high", "CILevel": 0.95}),
+            ("balanced_p_value", {"Description": "the permutation p of the balanced accuracy, before correction",
+                                  "Standard": "p_uncorrected"}),
+            ("accuracy", {"Description": "cross-validated accuracy (proportion of subjects classified right)"}),
+            ("p_value", {"Description": "the permutation p of the accuracy (not corrected; the balanced "
+                                        "accuracy's is the one tested)"}),
+            ("sensitivity", {"Description": "group_b's hit rate"}),
+            ("specificity", {"Description": "group_a's hit rate"}),
+            ("auc", {"Description": "area under the ROC curve of the cross-validated decision scores"}),
+            ("ci_lower", {"Description": chance.format(p="2.5th", what="accuracy")}),
+            ("ci_upper", {"Description": chance.format(p="97.5th", what="accuracy")}),
+            ("balanced_ci_lower", {"Description": chance.format(p="2.5th", what="balanced accuracy")}),
+            ("balanced_ci_upper", {"Description": chance.format(p="97.5th", what="balanced accuracy")}),
+            ("n_permutations", {"Description": "label permutations in the null distribution"}),
+        ),
+        effect={"measure": "balanced_accuracy", "ci_level": 0.95,
+                "definition": "cross-validated balanced accuracy (0.5 = chance); its interval is approximate: "
+                              "the mean of the two groups' Wilson 95% intervals"},
+        caveats=(("The interval of the balanced accuracy is approximate: cross-validated predictions are not "
+                  "independent, and with a few subjects per group it is wide."),
+                 ("ci_lower/ci_upper and balanced_ci_lower/balanced_ci_upper are the permutation null's "
+                  "2.5th-97.5th percentiles, the band chance falls in, not intervals for the observed values."),
+                 ("The FDR correction is within each contrast (its bands x classifiers), not across contrasts."),
+                 ("For a normalization contrast, failing to classify the two groups is not evidence that they "
+                  "are equivalent.")),
+    )
+
+
+def _add_fdr(rows: list[dict]) -> None:
+    """BH-FDR of the balanced-accuracy permutation p over each contrast's bands x classifiers:
+    ``q_value``, ``significant`` (q < 0.05) and ``fdr_family``, labelled as the hypothesis
+    layer labels its families, so the results specification reads them the same way."""
+    import hashlib
+
+    by_contrast: dict[str, list[dict]] = {}
+    for r in rows:
+        by_contrast.setdefault(r["contrast"], []).append(r)
+    for contrast, members in by_contrast.items():
+        q = bh_qvalues([m["balanced_p_value"] for m in members])
+        keys = sorted(f"{m['band']}|{m['classifier']}" for m in members)
+        digest = hashlib.md5("|".join(keys).encode()).hexdigest()[:8]
+        label = (f"scope=contrast method=BH key={contrast} "
+                 f"members=band_x_classifier[{len(members)}] hash={digest}")
+        for m, qv in zip(members, q):
+            m["q_value"] = float(qv)
+            m["significant"] = bool(qv < 0.05) if not np.isnan(qv) else False
+            m["fdr_family"] = label
 
 
 def render_signature_comparison(
@@ -120,6 +205,7 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
     """Sensor-level whole-montage neural-signature (classification) analysis."""
 
     name = "electrode_signature"
+    RESULTS_SPEC = signature_spec("each electrode's relative band power", "per-electrode")
     SELECTABLE = {"band": "frequency band"}
 
     # Source-signature modules this sensor signature pairs with, in preference
@@ -297,8 +383,33 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
             layout.insert(0, "channel", self._ch_names)
             layout.to_csv(data_dir / "electrode_layout.csv", index=False)
 
+    def _load_features_from_disk(self) -> bool:
+        """The per-subject features an earlier run's aggregate step saved
+        (``data/<name>_features.csv``: subject, group, channel or roi, band, relative), so
+        ``--steps statistics`` classifies without reprocessing the recordings."""
+        path = self.output_dir / "data" / f"{self.name}_features.csv"
+        if not path.exists():
+            return False
+        df = pd.read_csv(path)
+        unit = "channel" if "channel" in df.columns else "roi"
+        bands = set(self._selected_bands())
+        df = df[df["band"].isin(bands)]
+        for r in df.itertuples(index=False):
+            uid = r.subject
+            if uid not in self._subject_data:
+                self._subject_data[uid] = {"band_power": {}}
+                self._subject_groups[uid] = r.group
+                self._subject_order.append(uid)
+            self._subject_data[uid]["band_power"].setdefault(r.band, {})[getattr(r, unit)] = float(r.relative)
+        order = self.output_dir / "data" / "roi_order.csv"
+        if not self._ch_names:
+            self._ch_names = (pd.read_csv(order)["roi"].tolist() if unit == "roi" and order.exists()
+                              else list(dict.fromkeys(df[unit])))
+        logger.info("Signature features from %s: %d subjects", path.name, len(self._subject_data))
+        return bool(self._subject_data)
+
     def statistics(self) -> None:
-        if not self._subject_data:
+        if not self._subject_data and not self._load_features_from_disk():
             logger.error("No subject data for electrode signature analysis")
             return
 
@@ -345,8 +456,13 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
 
                     key = f"{contrast.name}_{band_name}_{clf}"
                     self._signature_results[key] = result
+                    # labels: group_a 0, group_b 1, so sensitivity is group_b's hit rate
+                    bal_lo, bal_hi = balanced_accuracy_interval(
+                        result.sensitivity, result.specificity, len(b_uids), len(a_uids))
                     all_results.append({
-                        "contrast": contrast.name, "band": band_name,
+                        "contrast": contrast.name, "kind": "contrast", "dv": "balanced_accuracy",
+                        "group_a": contrast.group_a, "group_b": contrast.group_b,
+                        "n_a": len(a_uids), "n_b": len(b_uids), "band": band_name,
                         "classifier": clf, "model": classifier_label(clf),
                         "accuracy": result.accuracy, "p_value": result.p_value,
                         "balanced_accuracy": result.balanced_accuracy,
@@ -357,10 +473,13 @@ class ElectrodeSignatureAnalysis(BaseAnalysis):
                         "ci_upper": result.accuracy_ci[1],
                         "balanced_ci_lower": result.balanced_accuracy_ci[0],
                         "balanced_ci_upper": result.balanced_accuracy_ci[1],
+                        "balanced_accuracy_lcl": bal_lo, "balanced_accuracy_ucl": bal_hi,
                         "n_permutations": result.n_permutations,
+                        **mde_not_computed("permutation test of a cross-validated classifier"),
                     })
 
         if all_results:
+            _add_fdr(all_results)
             pd.DataFrame(all_results).to_csv(
                 tbl_dir / f"{self.name}_results.csv", index=False)
             logger.info(f"Exported {self.name}_results.csv (%d rows)", len(all_results))

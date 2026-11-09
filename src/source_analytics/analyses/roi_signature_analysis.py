@@ -35,6 +35,7 @@ from ..spectral.psd import compute_psd
 from .electrode_signature_analysis import (
     ElectrodeSignatureAnalysis,
     render_signature_comparison,
+    signature_spec,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class ROISignatureAnalysis(ElectrodeSignatureAnalysis):
     """Per-parcel neural-signature (classification) analysis."""
 
     name = "roi_signature"
+    RESULTS_SPEC = signature_spec("each ROI's relative band power (source-localized)", "per-ROI")
 
     _SUMMARY_TITLE = "ROI Neural Signature Analysis Summary"
     _SUMMARY_ANALYSIS = "Source-level (ROI) neural signature (classification)"

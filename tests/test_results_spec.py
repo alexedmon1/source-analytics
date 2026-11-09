@@ -484,3 +484,91 @@ def test_electrode_connectivity_conforms_from_the_cluster_layer(tmp_path):
     with open(tbl / "electrode_connectivity_hypotheses.csv") as fh:
         rows = list(csv.DictReader(fh))
     assert {r["measure"] for r in rows} == {"fcd"} and {r["dv"] for r in rows} == {"coherence", "aec"}
+
+
+# ------------------------------------------------------- signature (decoding) modules ---
+def test_the_balanced_accuracy_interval_and_bh():
+    from source_analytics.stats.signature import (
+        balanced_accuracy_interval,
+        bh_qvalues,
+        wilson_interval,
+    )
+
+    lo, hi = wilson_interval(8, 10)
+    assert abs(lo - 0.4902) < 1e-3 and abs(hi - 0.9433) < 1e-3          # the textbook Wilson interval
+    blo, bhi = balanced_accuracy_interval(0.8, 0.8, 10, 10)
+    assert (round(blo, 4), round(bhi, 4)) == (round(lo, 4), round(hi, 4))
+    assert balanced_accuracy_interval(1.0, 1.0, 6, 6)[1] == 1.0          # never above 1
+    q = bh_qvalues([0.01, 0.04, 0.03, 0.5, float("nan")])
+    assert list(q[:4].round(4)) == [0.04, 0.0533, 0.0533, 0.5] and q[4] != q[4]
+
+
+@pytest.mark.parametrize("name", ["electrode_signature", "roi_signature"])
+def test_signature_modules_conform(tmp_path, name):
+    pytest.importorskip("neurobox")
+    pytest.importorskip("sklearn")
+    import numpy as np
+
+    from source_analytics.analyses.electrode_signature_analysis import ElectrodeSignatureAnalysis
+    from source_analytics.analyses.roi_signature_analysis import ROISignatureAnalysis
+
+    cls = {"electrode_signature": ElectrodeSignatureAnalysis, "roi_signature": ROISignatureAnalysis}[name]
+    rng = np.random.default_rng(4)
+    groups = {f"{g}{i}": g for g in ("WT", "KO") for i in range(8)}
+    chans = ["c1", "c2", "c3"]
+    module = cls.__new__(cls)
+    module._subject_order = list(groups)
+    module._subject_groups = groups
+    module._ch_names = chans
+    module._subject_data = {u: {"band_power": {b: {c: rng.normal(1.0 + (0.8 if g == "KO" and c == "c1" else 0), 0.3)
+                                                    for c in chans} for b in ("Alpha", "Beta")}}
+                            for u, g in groups.items()}
+    module._classifiers = ["svm_linear"]
+    module._cv_method = "loocv"
+    module.output_dir = tmp_path / "analytics" / name
+    (module.output_dir / "data").mkdir(parents=True)
+    module._n_permutations = 30
+    module._signature_results = {}
+    module._selected_bands = lambda: ["Alpha", "Beta"]
+    module._pairwise_contrasts = lambda: [SimpleNamespace(name="disease_effect", group_a="KO", group_b="WT")]
+    cfg = _perm_config()
+    cfg.results_dir = tmp_path / "results"
+    module.config = cfg
+    module.tbl_dir.mkdir(parents=True)
+    module.statistics()
+    with open(module.tbl_dir / f"{name}_results.csv") as fh:
+        rows = list(csv.DictReader(fh))
+    assert len(rows) == 2 and {r["n_a"] for r in rows} == {"8"}
+    for r in rows:
+        assert float(r["balanced_accuracy_lcl"]) <= float(r["balanced_accuracy"]) <= float(r["balanced_accuracy_ucl"])
+        assert r["fdr_family"].startswith("scope=contrast method=BH key=disease_effect members=band_x_classifier[2]")
+    shim = SimpleNamespace(name=name, tbl_dir=module.tbl_dir, output_dir=tmp_path / "analytics", config=cfg,
+                           RESULTS_SPEC=cls.RESULTS_SPEC)
+    rep = rs.write(shim, dict(RECORD), "2026-11-09T12:00:00+00:00")
+    assert rep is not None and rep.ok and not rep.warnings, (rep and rep.errors, rep and rep.warnings)
+    a = json.loads((module.tbl_dir / "analysis.json").read_text())
+    level = "sensor" if name.startswith("electrode") else "roi"
+    assert a["id"] == f"eeg/{level}/signature/rest_roi" and a["domain"] == "decoding"
+    assert a["measures"] == ["decoding_accuracy"] and a["effect"]["measure"] == "balanced_accuracy"
+    assert [f["method"] for f in a["inference"]["families"]] == ["BH"]
+
+
+def test_signature_statistics_read_the_saved_features(tmp_path):
+    """--steps statistics computes no features, so they come from data/<name>_features.csv."""
+    import pandas as pd
+
+    from source_analytics.analyses.roi_signature_analysis import ROISignatureAnalysis
+
+    module = ROISignatureAnalysis.__new__(ROISignatureAnalysis)
+    module.output_dir = tmp_path
+    (tmp_path / "data").mkdir()
+    pd.DataFrame([{"subject": f"{g}_s{i}", "group": g, "roi": roi, "band": band, "relative": 0.1}
+                  for g in ("WT", "KO") for i in range(2) for roi in ("V1", "M1") for band in ("Alpha", "Beta")]
+                 ).to_csv(tmp_path / "data" / "roi_signature_features.csv", index=False)
+    pd.DataFrame({"roi": ["M1", "V1"]}).to_csv(tmp_path / "data" / "roi_order.csv", index=False)
+    module._subject_data, module._subject_groups, module._subject_order, module._ch_names = {}, {}, [], None
+    module._selected_bands = lambda: ["Alpha"]
+    assert module._load_features_from_disk()
+    assert module._subject_order == ["WT_s0", "WT_s1", "KO_s0", "KO_s1"] and module._ch_names == ["M1", "V1"]
+    assert module._subject_data["KO_s1"]["band_power"] == {"Alpha": {"V1": 0.1, "M1": 0.1}}
+    assert module._subject_groups["KO_s0"] == "KO"

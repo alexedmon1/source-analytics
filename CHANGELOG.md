@@ -4,6 +4,21 @@
 
 ### Added
 
+- **`roi_signature` and `electrode_signature` describe their results by the shared specification** (Esprit's
+  results plan, 5b.4): one row per contrast, band and classifier, with balanced accuracy as the effect and an
+  approximate 95% interval (`balanced_accuracy_lcl`/`_ucl`: the mean of the two groups' Wilson intervals), the
+  groups and their sizes, and a **new BH-FDR q-value** over each contrast's bands x classifiers (`q_value`,
+  `significant` is now q < 0.05, `fdr_family`). Before, every row's p was uncorrected.
+- **`--steps statistics` works for the signature modules from the saved features** (`data/<name>_features.csv`),
+  without reprocessing the recordings.
+
+### Fixed
+
+- **The signature tables' `ci_lower`/`ci_upper` and `balanced_ci_*` are the permutation null's 2.5th-97.5th
+  percentiles, the band chance falls in, not confidence intervals of the observed accuracy**; the code and the
+  results description now say so. The results' real interval is `balanced_accuracy_lcl`/`_ucl`. The results
+  extra pins neurobox-dev `bc128b0`.
+
 - **`roi_nbs` and `electrode_connectivity` describe their results by the shared specification** (Esprit's
   results plan, 5b.4). Each row is an element: an NBS component (sub-network) or a cluster of neighbouring
   electrodes, with its permutation p (family-wise over the network or montage within each test,
