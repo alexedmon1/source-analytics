@@ -930,6 +930,22 @@ def _expand_regions_to_rois(
     return pd.DataFrame(rows).reset_index(drop=True)
 
 
+def _record_mosaic(output_dir: Path, out_path: Path, values: dict, tag_cols: dict[str, str],
+                   tags: dict) -> None:
+    """Record what one mosaic shows (figure_record.py), from its facet columns' values."""
+    from ..figure_record import record_figure
+
+    rec: dict = {"kind": "brain", **tags}
+    facets = dict(rec.pop("facets", None) or {})
+    for col, value in values.items():
+        role = tag_cols.get(col)
+        if role in ("contrast", "measure"):
+            rec[role] = value
+        elif role and role.startswith("facet:"):
+            facets[role[6:]] = value
+    record_figure(output_dir, out_path, facets=facets, **rec)
+
+
 def render_posthoc_mosaics(
     posthoc_csv: Path,
     roi_categories: dict[str, list[str]],
@@ -946,6 +962,8 @@ def render_posthoc_mosaics(
     alpha: float = 0.05,
     auto_slices: bool = True,
     atlas=None,
+    tag_cols: dict[str, str] | None = None,
+    tags: dict | None = None,
 ) -> list[Path]:
     """Render effect-size brain mosaics from a posthoc CSV.
 
@@ -990,6 +1008,13 @@ def render_posthoc_mosaics(
         The atlas the data were extracted with. None keeps the old default
         (``atlas_name="allen"``), which draws allen32's parcels whatever atlas
         the data used.
+    tag_cols : dict, optional
+        What each facet column is, so each mosaic records what it shows
+        (figure_record.py): ``"contrast"``, ``"measure"`` or ``"facet:<FacetName>"``,
+        e.g. ``{"hypothesis": "contrast", "dv": "measure", "band": "facet:band"}``.
+    tags : dict, optional
+        Tags every mosaic shares, e.g. ``{"shows": "roi_psd_hypotheses.csv"}``;
+        ``kind`` is ``brain``. Nothing is recorded when both are None.
 
     Returns
     -------
@@ -1068,6 +1093,9 @@ def render_posthoc_mosaics(
                 auto_slices=auto_slices,atlas=atlas
             )
             saved.append(out_path)
+            if tag_cols is not None or tags is not None:
+                _record_mosaic(output_dir, out_path, dict(zip(facet_cols, group_key)), tag_cols or {},
+                               tags or {})
         except Exception as exc:
             logger.warning("Failed to render mosaic for %s: %s", tag, exc)
 

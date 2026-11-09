@@ -309,5 +309,7 @@ class ROIPsdAnalysis(BaseAnalysis):
             correction_label="FDR",
             facet_cols=["hypothesis", "band", "dv"],
             colorbar_label="Hedges' g",
-            auto_slices=True, atlas=self._atlas_dir
+            auto_slices=True, atlas=self._atlas_dir,
+            tag_cols={"hypothesis": "contrast", "dv": "measure", "band": "facet:band"},
+            tags={"shows": "roi_psd_hypotheses.csv"},
         )

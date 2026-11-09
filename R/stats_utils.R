@@ -848,3 +848,24 @@ resolve_roi_categories <- function(config_categories, path = NULL) {
   }
   config_categories
 }
+
+#' Record what a saved figure shows (the R side of src/source_analytics/figure_record.py).
+#'
+#' Appends one JSON line to <output_dir>/figures.jsonl, which `source-analytics gallery build`
+#' reads to list the figure's test (measure in the module's name, e.g. the dv; contrast, the
+#' declared hypothesis; facets, a named list such as list(band = "Alpha")), its kind (brain,
+#' matrix, spectrum, distribution, trajectory, summary, diagnostic, other) and the table it
+#' shows. NULL tags are left out; without jsonlite nothing is recorded.
+record_figure <- function(output_dir, fname, measure = NULL, contrast = NULL, facets = NULL,
+                          kind = NULL, shows = NULL, caption = NULL) {
+  if (!requireNamespace("jsonlite", quietly = TRUE)) return(invisible(NULL))
+  entry <- list(file = basename(fname))
+  for (tag in c("measure", "contrast", "kind", "shows", "caption")) {
+    v <- get(tag)
+    if (!is.null(v) && length(v) == 1 && !is.na(v) && nzchar(as.character(v))) entry[[tag]] <- as.character(v)
+  }
+  if (length(facets)) entry$facets <- lapply(facets, as.character)
+  cat(as.character(jsonlite::toJSON(entry, auto_unbox = TRUE)), "\n",
+      file = file.path(output_dir, "figures.jsonl"), append = TRUE, sep = "")
+  invisible(NULL)
+}

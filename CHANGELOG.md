@@ -4,6 +4,15 @@
 
 ### Added
 
+- **Figures say what they show** (Esprit's results plan, 5b.4): the code that draws a figure records its test
+  (measure, contrast, facets), kind and source table in `figures.jsonl` beside the images
+  (`figure_record.record_figure`; `record_figure()` in R/stats_utils.R), and `gallery build` lists them in
+  `analysis.json` with the measure under the specification's name, so the gallery groups and filters figures by
+  fields, not file names. Recorded so far: the brain mosaics of roi_psd, roi_aperiodic and roi_cross_freq (PAC),
+  and roi_psd's R figures (spectra, band power, group heatmaps, significance heatmaps, band by region). Figures
+  with no record are listed as before. The results extra pins neurobox-dev `dd3b7a7` (a figure of one contrast
+  across its bands matches its tests).
+
 - **`electrode_comparison` describes its results by the shared specification as a diagnostic** (Esprit's
   results plan, 5b.4): the sensor-source agreement tables (correlation across subjects, each contrast's Hedges' g
   at the sensor and source level, overall, per region and for the aperiodic parameters), with uncorrected
@@ -26,6 +35,9 @@
 
 ### Fixed
 
+- **A figures-only run (`--steps figures`) no longer replaces the tables' provenance record.** It rewrote
+  `provenance.json` as if the tables came from the figures run's code, dropping what the results description had
+  added, so the folder stopped conforming to the specification.
 - **The signature tables' `ci_lower`/`ci_upper` and `balanced_ci_*` are the permutation null's 2.5th-97.5th
   percentiles, the band chance falls in, not confidence intervals of the observed accuracy**; the code and the
   results description now say so. The results' real interval is `balanced_accuracy_lcl`/`_ucl`. The results

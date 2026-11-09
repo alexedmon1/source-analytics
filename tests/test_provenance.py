@@ -217,3 +217,16 @@ class TestLifecycleIntegration:
                             lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")))
         a._write_provenance([], {}, {"setup"})      # no raise
         assert read_provenance(a.tbl_dir) is None
+
+
+def test_a_figures_only_run_keeps_the_tables_record(tmp_path):
+    """--steps figures computes no tables, so it must not replace the record of the run that did."""
+    a = TestLifecycleIntegration._analysis(tmp_path)
+    subs, man = _cohort(tmp_path / "loc")
+    a._record_run(subs, man, {"setup", "statistics"})
+    before = (a.tbl_dir / PROVENANCE_FILE).read_text()
+    assert a._record_run(subs, man, {"setup", "figures"}) is None
+    assert (a.tbl_dir / PROVENANCE_FILE).read_text() == before
+    assert read_provenance(a.tbl_dir)["steps"] == ["setup", "statistics"]
+    fresh = TestLifecycleIntegration._analysis(tmp_path / "other")   # no record yet: a figures run writes one
+    assert fresh._record_run(subs, man, {"figures"})["steps"] == ["figures"]

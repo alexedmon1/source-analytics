@@ -269,5 +269,7 @@ class ROIAperiodicAnalysis(BaseAnalysis):
             correction_label="FDR",
             facet_cols=["hypothesis", "dv"],
             colorbar_label="Hedges' g",
-            auto_slices=True, atlas=self._atlas_dir
+            auto_slices=True, atlas=self._atlas_dir,
+            tag_cols={"hypothesis": "contrast", "dv": "measure"},
+            tags={"shows": "roi_aperiodic_hypotheses.csv"},
         )

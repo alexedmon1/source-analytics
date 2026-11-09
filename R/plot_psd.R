@@ -179,6 +179,7 @@ plot_psd_by_region <- function(psd_df, roi_categories, group_colors,
   fname <- if (is_dref) "psd_by_region_delta_ref.png" else "psd_by_region_absolute.png"
   ggsave(file.path(output_dir, fname), p, width = 12, height = 8, dpi = 300)
   message("  Saved: ", fname)
+  record_figure(output_dir, fname, measure = if (is_dref) "delta_ref" else "absolute", kind = "spectrum")
 }
 
 
@@ -277,6 +278,7 @@ plot_band_power_box <- function(band_df, group_colors, group_labels,
   ggsave(file.path(output_dir, fname), p,
          width = 3.5 * n_cols, height = 9, dpi = 300)
   message("  Saved: ", fname)
+  record_figure(output_dir, fname, measure = power_type, kind = "distribution")
 }
 
 
@@ -326,6 +328,7 @@ plot_regional_heatmap <- function(band_df, roi_categories, group_colors,
     ggsave(file.path(output_dir, fname), p,
            width = 8, height = max(4, length(roi_categories) * 0.7 + 1), dpi = 300)
     message("  Saved: ", fname)
+    record_figure(output_dir, fname, measure = power_type, kind = "summary")
   }
 }
 
@@ -385,6 +388,7 @@ plot_significance_heatmap <- function(posthoc_df, output_dir) {
              width = 8, height = max(6, n_rois * 0.22 + 2),
              dpi = 300, limitsize = FALSE)
       message("  Saved: ", fname)
+      record_figure(output_dir, fname, measure = ptype, contrast = cname, kind = "summary", shows = "roi_psd_hypotheses.csv")
     }
   }
 }
@@ -439,6 +443,7 @@ plot_region_significance_heatmap <- function(posthoc_region_df, output_dir) {
       ggsave(file.path(output_dir, fname), p,
              width = 8, height = 5, dpi = 300)
       message("  Saved: ", fname)
+      record_figure(output_dir, fname, measure = ptype, contrast = cname, kind = "summary", shows = "roi_psd_region_hypotheses.csv")
     }
   }
 }
@@ -543,4 +548,5 @@ plot_band_by_region <- function(band_df, roi_categories, group_colors,
   ggsave(file.path(output_dir, fname), p,
          width = 12, height = 6, dpi = 300)
   message("  Saved: ", fname)
+  record_figure(output_dir, fname, measure = power_type, facets = list(band = target_band), kind = "summary")
 }

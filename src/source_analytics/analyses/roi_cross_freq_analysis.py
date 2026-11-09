@@ -452,4 +452,6 @@ class ROICrossFreqAnalysis(BaseAnalysis):
             p_col="p_value", q_col="q_value", correction_label="FDR",
             facet_cols=["hypothesis", "band"],
             colorbar_label="Hedges' g", atlas=self._atlas_dir,
+            tag_cols={"hypothesis": "contrast", "band": "facet:freq_pair"},
+            tags={"measure": "z_score", "shows": "roi_pac_region_hypotheses.csv"},
         )

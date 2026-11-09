@@ -144,6 +144,9 @@ class BaseAnalysis(ABC):
                     n += 1
                 except OSError as e:  # noqa: PERF203
                     logger.warning("Could not remove stale figure %s: %s", p.name, e)
+        from ..figure_record import clear_records
+
+        clear_records(self.fig_dir)  # what the old images showed goes with them
         if n:
             logger.info("Cleared %d stale figure(s) from %s", n, self.fig_dir.name)
 
@@ -626,6 +629,19 @@ class BaseAnalysis(ABC):
         labels = [vertex_rois[i] for i in idx if i < len(vertex_rois)]
         return format_region_coverage(labels)
 
+    def _record_run(self, subjects, manifests, steps) -> dict | None:
+        """Write this run's provenance record, unless it computed no tables.
+
+        The record describes the tables, so a run that wrote none (``--steps figures``)
+        keeps the record of the run that did: replacing it would say the tables came from
+        this run's code, and would drop what the results specification added to it.
+        """
+        existing = Path(self.tbl_dir) / "provenance.json"
+        if not set(steps) & {"statistics", "summary"} and existing.exists():
+            logger.info("No tables computed: keeping %s from the run that wrote them", existing.name)
+            return None
+        return self._write_provenance(subjects, manifests, steps)
+
     def _write_provenance(self, subjects, manifests, steps) -> dict | None:
         """Record what produced this analysis's tables, beside the tables.
 
@@ -831,7 +847,7 @@ class BaseAnalysis(ABC):
         # Written last, so `steps` records what actually ran. A record about a
         # run must not be able to fail the run, so write_provenance swallows I/O
         # errors; nothing downstream requires the file to exist.
-        record = self._write_provenance(subjects, manifests, steps)
+        record = self._record_run(subjects, manifests, steps)
 
         # The results specification (optional extra): analysis.json and column
         # dictionaries beside freshly computed tables. Never fails the run.
