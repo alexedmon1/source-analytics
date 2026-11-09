@@ -4,6 +4,11 @@
 
 ### Added
 
+- **Field runs.** `read_run_manifest` recognises source-localization's field mode (`field_run.json`, which takes
+  precedence over `config_resolved.yaml`): `RunManifest.readout_mode` (`source` / `field`), `template` (name, version,
+  sha256) and `projection` (catalogue id, version). An analysis refuses a cohort mixing field and source runs,
+  templates or projections; provenance records the three fields. Scoring the library's Sentinel field runs with
+  `roi_evoked` reproduces surface-evoked's tables to a relative 2.5e-13.
 - **Bayesian engine catalogue.** Every model, prior and decision rule of the engine is declared once, with a stable
   id, a version and its values (`source_analytics/bayes/catalogue.py`): the group-level model and its no-ROI form,
   each set-W prior (group levels, covariates, ROI-deviation SD, ROI x band SD, subject SD, log sigma with and without

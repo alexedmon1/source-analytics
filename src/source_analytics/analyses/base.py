@@ -649,6 +649,9 @@ class BaseAnalysis(ABC):
             logger.info("Provenance: %s", path)
 
     _COHORT_FIELDS = (
+        ("readout_mode", "readout (source or field)"),
+        ("template", "field template"),
+        ("projection", "field projection"),
         ("atlas", "atlas"),
         ("bem_type", "BEM"),
         ("source_type", "source space"),

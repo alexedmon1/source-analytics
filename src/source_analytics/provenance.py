@@ -39,8 +39,8 @@ SCHEMA_VERSION = 1
 #: Localization settings copied into the record. The ones that change the
 #: numbers, matching ``BaseAnalysis._COHORT_FIELDS``.
 _MANIFEST_FIELDS = (
-    "version", "preset", "atlas", "bem_type", "source_type", "surface_method",
-    "spacing_mm", "source_sampling", "inverse_method", "orientation",
+    "version", "readout_mode", "template", "projection", "preset", "atlas", "bem_type", "source_type",
+    "surface_method", "spacing_mm", "source_sampling", "inverse_method", "orientation",
 )
 
 

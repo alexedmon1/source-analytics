@@ -271,3 +271,56 @@ class TestListing:
         assert "source-analytics-vertex" in missing_analysis_hint("wholebrain")
         assert "source-analytics-vertex" in missing_analysis_hint("vertex_specparam")
         assert missing_analysis_hint("not_an_analysis") == ""
+
+
+def _write_field_run(root, name, sha="a" * 64, projection="field.project_inner", with_resolved=False):
+    """A source-localization field-mode run (field_run.json), optionally with the pipeline's config_resolved.yaml."""
+    data = root / name / "data"
+    data.mkdir(parents=True)
+    (data / "field_run.json").write_text(json.dumps({
+        "readout_mode": "field", "step": "project",
+        "template": {"name": "toy_fields", "version": 1, "sha256": sha, "maps": ["A"]},
+        "projection": {"id": projection, "version": 1}, "package": {"version": "0.7.0"}}))
+    if with_resolved:
+        (data / "config_resolved.yaml").write_text(yaml.safe_dump(
+            {"config": {"pipeline": {"mode": "field"}, "field": {"template": "toy.json"}}}))
+    with open(data / "step6_roi_timeseries_signed.pkl", "wb") as f:
+        pickle.dump({"A": np.zeros(100)}, f)
+    return data
+
+
+class TestFieldRuns:
+    """Field runs (source-localization's field mode) are recognised and never pooled with other readouts."""
+
+    def test_field_run_is_read_as_field_even_with_a_resolved_config(self, tmp_path):
+        m = read_run_manifest(_write_field_run(tmp_path, "sub-1", with_resolved=True))
+        assert m.readout_mode == "field" and m.template.startswith("toy_fields v1 ")
+        assert m.projection == "field.project_inner v1" and "field projection" in m.describe()
+        assert read_run_manifest(_write_run(tmp_path, "sub-2")).readout_mode == "source"
+
+    def _subjects(self, tmp_path, specs):
+        from source_analytics.io.discovery import SubjectInfo
+        out = []
+        for name, writer, kw in specs:
+            data = writer(tmp_path, name, **kw)
+            out.append(SubjectInfo(subject_id=name, group="G", data_dir=data, pipeline_dir=data.parent))
+        return out
+
+    def test_field_cohort_on_one_template_passes(self, tmp_path):
+        a = TestCohortHomogeneity._analysis(tmp_path)
+        a._check_cohort_homogeneous(self._subjects(tmp_path, [("s1", _write_field_run, {}),
+                                                              ("s2", _write_field_run, {})]))
+
+    def test_field_and_source_runs_are_not_pooled(self, tmp_path):
+        a = TestCohortHomogeneity._analysis(tmp_path)
+        subs = self._subjects(tmp_path, [("s1", _write_field_run, {}), ("s2", _write_run, {})])
+        with pytest.raises(ValueError, match="readout"):
+            a._check_cohort_homogeneous(subs)
+
+    @pytest.mark.parametrize("kw,what", [({"sha": "b" * 64}, "field template"),
+                                         ({"projection": "field.project_joint"}, "field projection")])
+    def test_other_template_or_projection_is_refused(self, tmp_path, kw, what):
+        a = TestCohortHomogeneity._analysis(tmp_path)
+        subs = self._subjects(tmp_path, [("s1", _write_field_run, {}), ("s2", _write_field_run, kw)])
+        with pytest.raises(ValueError, match=what):
+            a._check_cohort_homogeneous(subs)

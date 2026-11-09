@@ -239,12 +239,22 @@ fly from `step5_stc_*.pkl` + `step3_source_coords_mm.npy` using the atlas.
 |------|--------|----------|
 | `config_resolved.yaml` | YAML | The fully resolved source-localization config, written from 0.4.2 on: atlas, head model, source space, inverse method, orientation, sampling mode. Read via `io.run_manifest.read_run_manifest`; absent for older runs, which read as *unknown*, never as fixed |
 | `monte_carlo_report.json` | JSON | Monte Carlo runs only. Per parcel: SNR `gain` over a single draw, `coverage`, and `collinear_with` |
+| `field_run.json` | JSON | Field runs only (source-localization's field mode): the field template's name, version and sha256, the projection's catalogue id and version. Takes precedence over `config_resolved.yaml`; the run reads as `readout_mode: field` |
 
 **An analysis refuses a cohort that was not localized the same way.** Pooling a
 fixed-grid subject with a Monte Carlo one, or two atlases, is a group statistic
 over two different measurements, and is otherwise silent — the arrays have the
 same shape and the parcel names line up. Subjects with no manifest are skipped
 rather than guessed at.
+
+### Field runs
+
+source-localization's field mode projects each recording onto a frozen field template: one virtual channel per
+field, written to the same `step6_roi_timeseries_signed.pkl` layout, so `roi_evoked` and the other ROI analyses
+score fields as if they were parcels. A field run is a different readout of the same recording, so a cohort mixing
+field and source runs, two templates (by sha256) or two projections is refused, like a mixed atlas. Provenance
+records `readout_mode`, `template` and `projection`. Checked 2026-11-09: scoring the library's field runs of the
+Sentinel held-out roster with `roi_evoked` reproduces surface-evoked's tables (every measure, relative 2.5e-13).
 
 ### Monte Carlo runs
 

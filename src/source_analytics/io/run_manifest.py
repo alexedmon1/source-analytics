@@ -31,6 +31,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 MANIFEST_FILE = "config_resolved.yaml"
+FIELD_RUN_FILE = "field_run.json"            # source-localization's field mode (project step), 2026-11
 MC_REPORT_FILE = "monte_carlo_report.json"
 
 #: ``|cos|`` at or above which source-localization calls two parcels
@@ -56,6 +57,12 @@ class RunManifest:
     orientation: str | None = None
     output_variants: tuple[str, ...] = ()
     monte_carlo: dict[str, Any] = field(default_factory=dict)
+    #: "source" (localized parcel series) or "field" (projection onto a frozen field template: one virtual channel
+    #: per field, no head model in the measurement). A field run is a different readout of the same recording and is
+    #: never pooled with a source run, nor with a run on another template or projection.
+    readout_mode: str = "source"
+    template: str | None = None              # field runs: "<name> v<version> <sha256>"
+    projection: str | None = None            # field runs: "<catalogue id> v<version>"
 
     @property
     def is_monte_carlo(self) -> bool:
@@ -75,6 +82,8 @@ class RunManifest:
         depend on.
         """
         mc = self.monte_carlo
+        if self.readout_mode == "field":
+            return ("field", self.template, self.projection)
         return (
             self.atlas, self.bem_type, self.source_type, self.surface_method,
             self.spacing_mm, self.source_sampling, self.inverse_method,
@@ -84,6 +93,8 @@ class RunManifest:
 
     def describe(self) -> str:
         """One line, for logs and reports."""
+        if self.readout_mode == "field":
+            return f"field projection onto {self.template} ({self.projection})"
         bits = [b for b in (self.preset, self.atlas) if b]
         geom = "/".join(b for b in (self.bem_type, self.source_type,
                                     self.surface_method) if b)
@@ -101,12 +112,33 @@ class RunManifest:
         return ", ".join(bits) or "unknown run"
 
 
-def read_run_manifest(data_dir: str | Path) -> RunManifest | None:
-    """Read ``<data_dir>/config_resolved.yaml``.
+def read_field_run(data_dir: str | Path) -> RunManifest | None:
+    """Read ``<data_dir>/field_run.json`` (source-localization's field mode), or None if absent or unreadable."""
+    path = Path(data_dir) / FIELD_RUN_FILE
+    if not path.exists():
+        return None
+    try:
+        rec = json.loads(path.read_text())
+    except Exception as exc:
+        logger.warning("Could not read %s: %s", path, exc)
+        return None
+    t, pr = rec.get("template") or {}, rec.get("projection") or {}
+    pkg = rec.get("package") or {}
+    return RunManifest(path=path, version=pkg.get("version"), readout_mode="field",
+                       template=f"{t.get('name')} v{t.get('version')} {t.get('sha256')}",
+                       projection=f"{pr.get('id')} v{pr.get('version')}")
 
-    Returns None when the file is absent (a run from before 0.4.2) or cannot be
+
+def read_run_manifest(data_dir: str | Path) -> RunManifest | None:
+    """Read what built a run: ``<data_dir>/field_run.json`` for a field run (it takes precedence), else
+    ``<data_dir>/config_resolved.yaml``.
+
+    Returns None when neither is present (a run from before 0.4.2) or cannot be
     parsed. Callers treat None as "unknown", never as "fixed".
     """
+    fr = read_field_run(data_dir)
+    if fr is not None:
+        return fr
     path = Path(data_dir) / MANIFEST_FILE
     if not path.exists():
         return None
