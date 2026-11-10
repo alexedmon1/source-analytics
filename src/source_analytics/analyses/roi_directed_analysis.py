@@ -261,7 +261,9 @@ class ROIDirectedAnalysis(BaseAnalysis):
                          "(* significant)", fontsize=10)
             fig.colorbar(im, ax=ax, label="Hedges g (group A - group B)")
             out = hh.save(fig, self.fig_dir / f"{self.name}_global_hypotheses__{dv}.png")
-            record_figure(self.fig_dir, out, measure=dv, kind="summary", shows=table)
+            record_figure(self.fig_dir, out, measure=dv, kind="summary", shows=table,
+                          caption=f"Whole-brain {measure.replace('_', ' ')}: Hedges g per declared "
+                                  "contrast and band; * significant.")
 
     def summary(self) -> None:
         """Call Rscript for statistics and summary report.

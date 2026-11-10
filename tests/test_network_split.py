@@ -124,13 +124,16 @@ paradigms:
                      "circos__coherence__Theta__disease_effect.png", "roi_nbs_components__coherence.png"]
     records = [json.loads(line) for line in (n.fig_dir / "figures.jsonl").read_text().splitlines()]
     by_file = {r["file"]: r for r in records}
-    assert by_file["circos__coherence__Theta__disease_effect.png"] == {
+    circos = by_file["circos__coherence__Theta__disease_effect.png"]
+    assert {k: v for k, v in circos.items() if k != "caption"} == {
         "file": "circos__coherence__Theta__disease_effect.png", "measure": "coherence",
         "contrast": "disease_effect", "facets": {"band": "Theta"}, "kind": "matrix",
         "shows": "roi_nbs_subnetwork_edges.csv"}
+    # the caption is the card's title in the gallery: it starts with what the figure shows
+    assert circos["caption"].startswith("Disease effect, Theta (Coherence): the network's 3 edges")
     assert by_file["roi_nbs_components__coherence.png"]["kind"] == "summary"
     omnibus = by_file["circos__coherence__Alpha__group_omnibus.png"]
-    assert omnibus["contrast"] == "group_omnibus" and "descriptive, not a test" in omnibus["caption"]
+    assert omnibus["contrast"] == "group_omnibus" and "descriptive, not a further test" in omnibus["caption"]
 
 
 def test_graph_and_directed_heatmaps_come_from_the_declared_tests(tmp_path):

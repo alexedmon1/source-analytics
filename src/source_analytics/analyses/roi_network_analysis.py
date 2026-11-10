@@ -369,7 +369,10 @@ class _ROINetworkBase(NetworkAnalysisBase):
                 out = hh.save(fig, fig_dir / f"{self.name}_hypotheses__{gm}__{hyp}.png")
                 record_figure(fig_dir, out, measure=gm, contrast=hyp, kind="summary",
                               shows=f"{self.name}_hypotheses.csv",
-                              caption="A blank cell had no test: the measure did not vary there.")
+                              caption=f"{gm.replace('_', ' ').capitalize()}, {labels.get(hyp, hyp)}: t per "
+                                      "region and band, one panel per connectivity measure; * significant "
+                                      "(BH within the declared family). A blank cell had no test: the "
+                                      "measure did not vary there.")
                 n_figs += 1
         logger.info("%s: %d hypothesis heatmaps", self.name, n_figs)
 
@@ -463,14 +466,21 @@ class _ROINetworkBase(NetworkAnalysisBase):
                 ax.set_ylabel(gm_name.replace("_", " ").title())
                 ax.set_title(f"{gm_name.replace('_', ' ').title()} — {metric_label}")
                 ax.legend()
-                fig.tight_layout()
+                # the stars are Welch t-tests BH-corrected over every bar (_global_pairwise.csv), not the
+                # declared hypotheses, which test the nodal metrics: say so on the figure itself
+                fig.text(0.01, 0.005, "Bars: group mean \u00b1 SE. Stars: Welch t-tests between pairs of "
+                         "groups, BH over every bar here; not the analysis's declared tests.",
+                         fontsize=8, color="0.35", ha="left", va="bottom")
+                fig.tight_layout(rect=(0, 0.04, 1, 1))
                 out = fig_dir / (f"{self.name}_{metric}_{gm_name}".lower() + ".png")
                 fig.savefig(out, dpi=150)
                 plt.close(fig)
-                # the stars are Welch t-tests BH-corrected over every bar (_global_pairwise.csv), not the
-                # declared hypotheses, which test the nodal metrics
+                title = gm_name.replace("_", " ").capitalize()
                 record_figure(fig_dir, out, measure=gm_name, facets={"connectivity": metric},
-                              kind="distribution")
+                              kind="distribution",
+                              caption=f"{title}, {metric_label} (whole network): each group's mean \u00b1 SE "
+                                      "per band. Stars: Welch t-tests between pairs of groups, BH over every "
+                                      "bar; not the analysis's declared tests.")
 
     # -------------------------------------------------------- NBS figures -- #
     def _nbs_figures(self) -> None:
@@ -542,8 +552,9 @@ class _ROINetworkBase(NetworkAnalysisBase):
             plt.close(fig)
             record_figure(fig_dir, out, measure=metric, kind="summary",
                           shows=f"{self.name}_hypotheses.csv",
-                          caption="Equivalence hypotheses are summarized per edge, not by components, "
-                                  "and are not shown.")
+                          caption=f"NBS, {metric_label}: the largest component per declared hypothesis "
+                                  "and band, in edges; * significant (FWE). Equivalence hypotheses form "
+                                  "no components and are not shown.")
 
     def _plot_nbs_circos(self, hyps: pd.DataFrame, edges: pd.DataFrame, fig_dir: Path) -> None:
         from ..figure_record import record_figure
@@ -603,7 +614,10 @@ class _ROINetworkBase(NetworkAnalysisBase):
             )
             record_figure(fig_dir, out, measure=metric, contrast=hyp.name,
                           facets={"band": band}, kind="matrix",
-                          shows=f"{self.name}_subnetwork_edges.csv")
+                          shows=f"{self.name}_subnetwork_edges.csv",
+                          caption=f"{label}, {band} ({METRIC_LABELS.get(metric, metric)}): the network's "
+                                  f"{int(row['n_edges'])} edges coloured by their t, the cut marked; "
+                                  f"p = {p_value:.3g} for the network as a whole (FWE).")
             n_figs += 1
         logger.info("%s: %d NBS circos", self.name, n_figs)
 
@@ -659,8 +673,9 @@ class _ROINetworkBase(NetworkAnalysisBase):
             )
             record_figure(fig_dir, out, measure=metric, contrast=str(row["hypothesis"]),
                           facets={"band": band}, kind="matrix", shows=f"{self.name}_subnetwork_edges.csv",
-                          caption="Left: the network's edges by F (no direction). Right: each group's mean of "
-                                  "the measure over those edges, per animal, \u00b1 SE; descriptive, not a test.")
+                          caption=f"{label}, {band} ({measure_label}): the network's edges by F (no "
+                                  "direction), and each group's mean of the measure over those edges, per "
+                                  "animal, \u00b1 SE (descriptive, not a further test).")
             n_figs += 1
         return n_figs
 

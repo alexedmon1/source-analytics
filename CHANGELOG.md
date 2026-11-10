@@ -30,6 +30,11 @@
 
 ### Fixed
 
+- **Figures say what they show:** each figure the network and directed modules draw has a caption that starts with
+  what it shows (the gallery's card title), and roi_graph's whole-network bars say on the figure and in the
+  caption that their stars are Welch t-tests between pairs of groups, BH over every bar, not the declared tests.
+  roi_graph's description names the declared tests (a one-way model's t, the omnibus F, TOST; BH per family).
+  Lumière pinned at 50ab668.
 - **Only the caveats that apply:** the shared caveats (Hedges g, its interval, the MDE, legacy tables) are written
   into `analysis.json` only where the tables have what they warn about (`results_spec.common_caveats`), so the
   NBS is no longer told about effect sizes it does not have.
