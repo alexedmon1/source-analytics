@@ -3,7 +3,7 @@
 So that any reader -- a study gallery, a manuscript script, Esprit -- can read a
 module's results without this package, a module that declares a
 :class:`ResultsSpec` describes its hypothesis tables in the shared format of
-neurobox-dev (``docs/RESULTS_SPEC.md`` there, schema 0.4): one ``analysis.json``,
+Lumière (``docs/RESULTS_SPEC.md`` there, schema 0.4): one ``analysis.json``,
 a column dictionary per table (``<table>.json``), and the specification's fields
 added to this package's own ``provenance.json``, whose other fields stay as they
 are for source-lightbox.
@@ -11,7 +11,7 @@ are for source-lightbox.
 The folder is the module's published tables folder (``BaseAnalysis.tbl_dir``),
 adopted in place, as the specification allows for existing output trees.
 
-Optional: neurobox-dev is the ``results`` extra. Without it nothing is written
+Optional: Lumière is the ``results`` extra. Without it nothing is written
 and the run goes on; with it, a folder that does not conform is reported in the
 log but never fails a run that already produced its numbers.
 """
@@ -30,11 +30,11 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 try:                                               # the optional `results` extra
-    import neurobox
-    from neurobox.spec import analysis_id as _analysis_id
-    from neurobox.spec import default_run_id as _default_run_id
+    import lumiere
+    from lumiere.spec import analysis_id as _analysis_id
+    from lumiere.spec import default_run_id as _default_run_id
 except ImportError:                                # pragma: no cover - depends on install
-    neurobox = None
+    lumiere = None
 
 INSTALL_HINT = "install the optional extra: pip install 'source-analytics[results]'"
 
@@ -163,7 +163,7 @@ COMMON_CAVEATS = (
 
 
 def available() -> bool:
-    return neurobox is not None
+    return lumiere is not None
 
 
 # --------------------------------------------------------------------- tables ---
@@ -415,7 +415,7 @@ def write(analysis, record: dict | None, started: str) -> Any:
     spec: ResultsSpec | None = getattr(analysis, "RESULTS_SPEC", None)
     if spec is None:
         return None
-    if neurobox is None:
+    if lumiere is None:
         logger.info("Results specification not written for %s: %s", analysis.name, INSTALL_HINT)
         return None
     try:
@@ -449,7 +449,7 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
         fams.update(families(rows))
         all_rows += rows
     for t, path, cols, rows in prepared:
-        neurobox.write_columns(path, columns(cols, rows, t, spec, fams))
+        lumiere.write_columns(path, columns(cols, rows, t, spec, fams))
         tables.append({"path": path.name, "role": t.role, "rows": t.rows, "description": t.description,
                        "n_rows": len(rows), **({"headline": True} if t.headline else {})})
 
@@ -506,12 +506,12 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
     if spec.input_file:
         inputs.append({"path": str(Path(analysis.output_dir) / "data" / spec.input_file),
                        "role": "per-subject values the statistics were fitted to"})
-    spec_prov = neurobox.provenance(
+    spec_prov = lumiere.provenance(
         generated_by, status="completed", start=started,
         end=datetime.now(timezone.utc).isoformat(timespec="seconds"), run_id=run_id, inputs=inputs,
         settings={"paradigm": paradigm, "profile": profile, "analysis": analysis.name})
     merged = {**record, **spec_prov}                # this package's fields stay for source-lightbox
-    report = neurobox.write_analysis(folder, analysis_json, merged, strict=False)
+    report = lumiere.write_analysis(folder, analysis_json, merged, strict=False)
     if report.ok:
         logger.info("Results specification: %s conforms (%s; %d warning(s))", folder, analysis_json["id"],
                     len(report.warnings))

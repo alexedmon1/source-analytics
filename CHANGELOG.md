@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Lumière:** the results extra is `lumiere` (github.com/alexedmon1/lumiere, c977884; formerly neurobox-dev), imported
+  as `lumiere`. Galleries built by `gallery build` are Lumière's: the suite's top bar and sections, its mark, its
+  significance summary, `.lumiere-gallery` as their marker. An environment that had `neurobox-dev` should drop it
+  (`uv pip uninstall neurobox-dev`) before installing `lumiere`: both provide a `neurobox` folder.
 - **The network and directed modules draw the figures source-lightbox drew** (results plan 5b.4), from
   their own hypotheses tables, each recorded in `figures.jsonl`:
   - `roi_nbs` (and `roi_network`): `roi_nbs_components__<measure>.png`, the largest component per declared

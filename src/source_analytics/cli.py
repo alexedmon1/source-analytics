@@ -679,7 +679,7 @@ _INIT_DEFAULT_ANALYSES = ["roi_psd", "roi_aperiodic", "roi_connectivity"]
 
 
 def cmd_gallery(args):
-    """Build the study's gallery through the shared shell (neurobox-dev)."""
+    """Build the study's gallery through the shared shell (Lumière)."""
     from .gallery import build
 
     try:

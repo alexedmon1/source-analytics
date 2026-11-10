@@ -73,7 +73,7 @@ class BaseAnalysis(ABC):
     SELECTABLE: dict[str, str] = {}
 
     # How this module's hypothesis tables are described by the results
-    # specification (neurobox-dev; see results_spec.py). None = not described yet.
+    # specification (Lumière; see results_spec.py). None = not described yet.
     RESULTS_SPEC = None
 
     def __init__(self, config: StudyConfig, output_dir: Path):

@@ -38,8 +38,8 @@ def test_a_mosaic_records_its_test_from_its_facet_columns(tmp_path):
 
 
 def test_the_gallery_lists_what_each_figure_shows(module, tmp_path):  # noqa: F811
-    pytest.importorskip("neurobox")
-    from neurobox import check_analysis
+    pytest.importorskip("lumiere")
+    from lumiere import check_analysis
 
     assert rs.write(module, dict(RECORD), "2026-11-09T12:00:00+00:00").ok
     figs = tmp_path / "figs"

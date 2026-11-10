@@ -317,7 +317,7 @@ MDE_ALPHA <- 0.05
 # how many were in each side of a clean two-group contrast (`n_a`, `n_b`; NA
 # otherwise), and a 95% interval for its effect size (`effect_size_lcl`,
 # `effect_size_ucl`), so a reader never sees an effect without its uncertainty
-# (the results specification's reporting contract, neurobox-dev). For a
+# (the results specification's reporting contract, Lumière). For a
 # standardized difference the interval is the estimate's interval divided by the
 # residual SD -- it treats that SD as known, so it is slightly too narrow; for an
 # omnibus row it is the two-sided interval of partial omega^2 from the
