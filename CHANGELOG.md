@@ -22,6 +22,10 @@
 
 ### Fixed
 
+- **No two numbers on a colour bar overlap**, in any figure the Python side saves: `viz_ticks.install()`
+  (run by `analyses/base.py` and `viz/__init__.py`) hides colour-bar tick labels that would collide, keeping
+  the ends and the figure's own marks (`viz_ticks.keep_ticks`, e.g. the NBS cut) first. R's figures space
+  their legends themselves. The NBS circos colour bar also sits clear of the ROI names below the circle.
 - **Equivalence rows always state a margin above 0.** A cell whose equivalence margin is not above 0 now gets no
   row, in the Python tabular adapter and in R (`.adapt_equivalence`, the per-edge `.adapt_cell`). Such a cell
   either does not vary (residual SD 0, as for a graph metric that is 0 in every subject: 550 of FORGE roi_graph's

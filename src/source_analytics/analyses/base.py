@@ -8,10 +8,12 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .. import viz_ticks
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 
 logger = logging.getLogger(__name__)
+viz_ticks.install()  # no colour bar's numbers overlap, in any module's figures
 
 
 class RStepFailed(RuntimeError):

@@ -266,8 +266,9 @@ def plot_significance_circos(
         )
         sm = ScalarMappable(cmap="RdBu_r", norm=Normalize(vmin=-vmax, vmax=vmax))
         sm.set_array([])
+        # pad clears the ROI names that hang below the circle
         cbar = fig.colorbar(sm, ax=ax, orientation="horizontal",
-                            fraction=0.04, pad=0.04, shrink=0.6)
+                            fraction=0.04, pad=0.16, shrink=0.6)
         if cut:
             cbar.ax.axvspan(-cut, cut, color="0.85", zorder=3)
             for x in (-cut, cut):
@@ -278,6 +279,8 @@ def plot_significance_circos(
                                          if cut * 1.15 < abs(t) <= vmax]})
             cbar.set_ticks(ticks)
             cbar.ax.set_xlim(-vmax, vmax)
+            from ..viz_ticks import keep_ticks
+            keep_ticks(cbar, [-cut, cut])  # the cut's numbers win when labels would collide
             cbar.set_label(f"{stat_label} per edge; every edge drawn has |{stat_label}| \u2265 "
                            f"{cut:g} (the cut, marked)", fontsize=10)
         else:
