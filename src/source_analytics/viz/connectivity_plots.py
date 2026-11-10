@@ -213,8 +213,16 @@ def plot_significance_circos(
     title: str = "",
     dpi: int = 200,
     sig_label: str = "region pairs p < 0.05 uncorrected",
+    edge_stat: np.ndarray | None = None,
+    stat_label: str = "t",
+    stat_threshold: float | None = None,
 ) -> None:
     """Single-panel circos highlighting significant connections.
+
+    With *edge_stat* (each marked pair's test statistic, e.g. an NBS component's edge t), the
+    marked pairs are coloured by that statistic instead of the raw difference, the others are left
+    out, and the colour bar marks ``±stat_threshold`` (the cut every marked edge passed), so the
+    picture says how far past the cut each edge is rather than a difference in raw units.
 
     Significant ROI pairs (from *sig_mask*) are drawn opaque; all others
     are ghosted so the significant ones stand out.
@@ -239,37 +247,67 @@ def plot_significance_circos(
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
 
-    diff = mat_a - mat_b
-    diff_vmax = np.nanmax(np.abs(diff))
-    if diff_vmax == 0:
-        diff_vmax = 1.0
-
     n_sig = int(sig_mask[np.triu_indices_from(sig_mask, k=1)].sum())
-
     fig, ax = plt.subplots(1, 1, figsize=(7.5, 7.5))
-    plot_circos(
-        diff, roi_labels, region_names, region_sizes, ax,
-        cmap="RdBu_r",
-        threshold=0.0,
-        vmin=-diff_vmax, vmax=diff_vmax,
-        sig_mask=sig_mask,
-    )
 
-    ax.set_title(
-        f"Difference ({group_labels[0]} \u2013 {group_labels[1]})"
-        f"\n{n_sig} {sig_label}",
-        fontsize=11, fontweight="bold", pad=12,
-    )
-
-    sm = ScalarMappable(
-        cmap="RdBu_r", norm=Normalize(vmin=-diff_vmax, vmax=diff_vmax),
-    )
-    sm.set_array([])
-    cbar = fig.colorbar(
-        sm, ax=ax, orientation="horizontal",
-        fraction=0.04, pad=0.04, shrink=0.5,
-    )
-    cbar.set_label("Difference", fontsize=12)
+    if edge_stat is not None:
+        shown = np.where(sig_mask | sig_mask.T, np.nan_to_num(edge_stat), 0.0)
+        cut = float(stat_threshold or 0.0)
+        vmax = max(float(np.nanmax(np.abs(shown))), cut * 1.25, 1e-9)
+        plot_circos(
+            shown, roi_labels, region_names, region_sizes, ax,
+            cmap="RdBu_r", threshold=1e-9, vmin=-vmax, vmax=vmax,
+            linewidth_range=(1.2, 4.0), sig_mask=sig_mask | sig_mask.T,
+        )
+        ax.set_title(
+            f"{stat_label} ({group_labels[0]} \u2013 {group_labels[1]}) per edge"
+            f"\n{n_sig} {sig_label}",
+            fontsize=11, fontweight="bold", pad=12,
+        )
+        sm = ScalarMappable(cmap="RdBu_r", norm=Normalize(vmin=-vmax, vmax=vmax))
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, orientation="horizontal",
+                            fraction=0.04, pad=0.04, shrink=0.6)
+        if cut:
+            cbar.ax.axvspan(-cut, cut, color="0.85", zorder=3)
+            for x in (-cut, cut):
+                cbar.ax.axvline(x, color="black", linewidth=1.2, zorder=4)
+            cbar.ax.text(0, 0.5, "below the cut", ha="center", va="center",
+                         fontsize=8, color="0.3", zorder=5)
+            ticks = sorted({-cut, cut, *[t for t in cbar.get_ticks()
+                                         if cut * 1.15 < abs(t) <= vmax]})
+            cbar.set_ticks(ticks)
+            cbar.ax.set_xlim(-vmax, vmax)
+            cbar.set_label(f"{stat_label} per edge; every edge drawn has |{stat_label}| \u2265 "
+                           f"{cut:g} (the cut, marked)", fontsize=10)
+        else:
+            cbar.set_label(f"{stat_label} per edge", fontsize=11)
+    else:
+        diff = mat_a - mat_b
+        diff_vmax = np.nanmax(np.abs(diff))
+        if diff_vmax == 0:
+            diff_vmax = 1.0
+        plot_circos(
+            diff, roi_labels, region_names, region_sizes, ax,
+            cmap="RdBu_r",
+            threshold=0.0,
+            vmin=-diff_vmax, vmax=diff_vmax,
+            sig_mask=sig_mask,
+        )
+        ax.set_title(
+            f"Difference ({group_labels[0]} \u2013 {group_labels[1]})"
+            f"\n{n_sig} {sig_label}",
+            fontsize=11, fontweight="bold", pad=12,
+        )
+        sm = ScalarMappable(
+            cmap="RdBu_r", norm=Normalize(vmin=-diff_vmax, vmax=diff_vmax),
+        )
+        sm.set_array([])
+        cbar = fig.colorbar(
+            sm, ax=ax, orientation="horizontal",
+            fraction=0.04, pad=0.04, shrink=0.5,
+        )
+        cbar.set_label("Difference", fontsize=12)
 
     if title:
         fig.suptitle(title, fontsize=13, fontweight="bold", y=1.0)

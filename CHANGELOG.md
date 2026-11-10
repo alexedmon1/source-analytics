@@ -16,6 +16,9 @@
   - `roi_directed`: `roi_directed_global_hypotheses__<dv>.png`, the whole-brain test's Hedges g per declared
     contrast and band (lightbox showed the disease effect only).
   - `viz/hypothesis_heatmaps.py`: the grid and panel helpers they share.
+  - NBS circos are coloured by each edge's t (`plot_significance_circos(edge_stat=, stat_threshold=)`), with
+    the cut (`threshold`, |t| ≥ 2.5 unless set) marked on the colour bar and the component's FWE p in the
+    title: NBS tests the network, not any one edge, and a raw difference in connectivity units said neither.
 
 ### Fixed
 

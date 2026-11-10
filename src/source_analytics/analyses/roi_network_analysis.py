@@ -574,9 +574,12 @@ class _ROINetworkBase(NetworkAnalysisBase):
             mat_b, *_ = build_roi_matrix(band_df, roi_cats, metric, group=gb)
             index = {r: i for i, r in enumerate(rl)}
             mask = np.zeros((len(rl), len(rl)), dtype=bool)
-            for a, b in zip(members["roi_i"], members["roi_j"]):
+            tvals = np.zeros((len(rl), len(rl)))
+            stats = pd.to_numeric(members["stat"], errors="coerce").fillna(0.0)
+            for a, b, t in zip(members["roi_i"], members["roi_j"], stats):
                 if a in index and b in index:
                     mask[index[a], index[b]] = mask[index[b], index[a]] = True
+                    tvals[index[a], index[b]] = tvals[index[b], index[a]] = t
             if not mask.any():
                 continue
             same_test = sig[(sig["hypothesis"] == row["hypothesis"]) & (sig["band"] == band)
@@ -585,12 +588,17 @@ class _ROINetworkBase(NetworkAnalysisBase):
             out = fig_dir / (f"circos__{metric}__{band.replace(' ', '_')}__{row['hypothesis']}"
                              + (f"__c{cid}" if several else "") + ".png")
             label = hyp.label or hyp.name
+            cut = pd.to_numeric(pd.Series([row.get("threshold")]), errors="coerce").iloc[0]
+            cut = float(cut) if np.isfinite(cut) else float(self._nbs_threshold)
+            p_value = float(row["component_p"])
             plot_significance_circos(
                 mat_a, mat_b, rl, rn, rs, mask, out,
                 group_labels=(self.config.get_group_label(ga), self.config.get_group_label(gb)),
-                title=f"{label}: {band} ({METRIC_LABELS.get(metric, metric)}), NBS component "
-                      f"of {int(row['n_edges'])} edges, p = {float(row['component_p']):.3g}",
-                sig_label="edges of an NBS component significant at p < 0.05 (FWE)",
+                title=f"{label}: {band} ({METRIC_LABELS.get(metric, metric)})",
+                sig_label=f"edges past the cut (|t| \u2265 {cut:g}) form one network, significant "
+                          f"as a whole: p = {p_value:.3g} (FWE)\nNBS tests the network, not "
+                          "any single edge",
+                edge_stat=tvals, stat_label="t", stat_threshold=cut,
             )
             record_figure(fig_dir, out, measure=metric, contrast=hyp.name,
                           facets={"band": band}, kind="matrix",
