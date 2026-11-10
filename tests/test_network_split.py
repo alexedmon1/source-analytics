@@ -104,17 +104,24 @@ paradigms:
          "component_id": 1, "n_edges": 1, "component_p": 0.6, "significant": False},
         {**base, "hypothesis": "normal", "kind": "equivalence", "band": "Theta",
          "component_id": 0, "n_edges": 6, "component_p": None, "significant": None},
+        {**base, "hypothesis": "group_omnibus", "kind": "omnibus", "band": "Alpha",
+         "component_id": 1, "n_edges": 2, "component_p": 0.02, "significant": True},
     ]).to_csv(n.tbl_dir / "roi_nbs_hypotheses.csv", index=False)
     pd.DataFrame([
         {"hypothesis": "disease_effect", "band": "Theta", "dv": "coherence", "component_id": 1,
          "component_p": 0.01, "significant": True, "roi_i": a, "roi_j": b, "stat": 3.1}
         for a, b in (("r1", "r2"), ("r2", "r3"), ("r3", "r4"))
+    ] + [
+        {"hypothesis": "group_omnibus", "band": "Alpha", "dv": "coherence", "component_id": 1,
+         "component_p": 0.02, "significant": True, "roi_i": a, "roi_j": b, "stat": 9.0}
+        for a, b in (("r1", "r3"), ("r3", "r4"))
     ]).to_csv(n.tbl_dir / "roi_nbs_subnetwork_edges.csv", index=False)
 
     n._nbs_figures()
 
     drawn = sorted(f.name for f in n.fig_dir.glob("*.png"))
-    assert drawn == ["circos__coherence__Theta__disease_effect.png", "roi_nbs_components__coherence.png"]
+    assert drawn == ["circos__coherence__Alpha__group_omnibus.png",
+                     "circos__coherence__Theta__disease_effect.png", "roi_nbs_components__coherence.png"]
     records = [json.loads(line) for line in (n.fig_dir / "figures.jsonl").read_text().splitlines()]
     by_file = {r["file"]: r for r in records}
     assert by_file["circos__coherence__Theta__disease_effect.png"] == {
@@ -122,6 +129,8 @@ paradigms:
         "contrast": "disease_effect", "facets": {"band": "Theta"}, "kind": "matrix",
         "shows": "roi_nbs_subnetwork_edges.csv"}
     assert by_file["roi_nbs_components__coherence.png"]["kind"] == "summary"
+    omnibus = by_file["circos__coherence__Alpha__group_omnibus.png"]
+    assert omnibus["contrast"] == "group_omnibus" and "descriptive, not a test" in omnibus["caption"]
 
 
 def test_graph_and_directed_heatmaps_come_from_the_declared_tests(tmp_path):

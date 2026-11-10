@@ -322,6 +322,82 @@ def plot_significance_circos(
     logger.info("Saved significance circos: %s", output_path)
 
 
+def plot_omnibus_network(
+    f_matrix: np.ndarray,
+    roi_labels: list[str],
+    region_names: list[str],
+    region_sizes: list[int],
+    groups: list[tuple[str, float, float, int]],
+    output_path: str | Path,
+    *,
+    f_cut: float,
+    n_groups: int,
+    title: str,
+    network_label: str,
+    measure_label: str,
+    dpi: int = 200,
+) -> None:
+    """A network found by an omnibus (all-groups) NBS test, and where each group sits on it.
+
+    The F test says the groups differ across the network but not which way, so the figure has two
+    parts, each labelled for what it is: on the left the network's edges, coloured by their F
+    (one colour, no direction), with the cut every edge passed marked; on the right each group's
+    mean, per animal, of the measure over exactly those edges, with its standard error. The right
+    panel describes where the groups sit; it is not a further test.
+
+    ``groups`` is (label, mean, standard error, animals) per group, in the design's order.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    shown = np.nan_to_num(f_matrix)
+    n_edges = int((np.triu(shown, k=1) > 0).sum())
+    vmax = max(float(shown.max()), f_cut * 1.25)
+    fig, (ax, side) = plt.subplots(1, 2, figsize=(13.5, 7.8), gridspec_kw={"width_ratios": [2.1, 1]})
+    mask = shown > 0
+    plot_circos(shown, roi_labels, region_names, region_sizes, ax, cmap="Purples",
+                threshold=1e-9, vmin=f_cut * 0.6, vmax=vmax, linewidth_range=(1.2, 4.0), sig_mask=mask)
+    ax.set_title(f"The network: its {n_edges} edges, coloured by F\n"
+                 f"(one-way ANOVA across the {n_groups} groups, per edge; F has no direction)",
+                 fontsize=11, fontweight="bold", pad=12)
+    sm = ScalarMappable(cmap="Purples", norm=Normalize(vmin=f_cut * 0.6, vmax=vmax))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, orientation="horizontal", fraction=0.04, pad=0.16, shrink=0.6)
+    cbar.ax.set_xlim(f_cut, vmax)
+    cbar.ax.axvline(f_cut, color="black", linewidth=1.2)
+    ticks = sorted({round(f_cut, 1), *[t for t in cbar.get_ticks() if f_cut * 1.15 < t <= vmax]})
+    cbar.set_ticks(ticks)
+    from ..viz_ticks import keep_ticks
+    keep_ticks(cbar, [round(f_cut, 1)])
+    cbar.set_label(f"F per edge; every edge drawn has F \u2265 {f_cut:.2f} (p < 0.01, the cut)", fontsize=10)
+
+    names = [g[0] for g in groups]
+    means = np.array([g[1] for g in groups])
+    errors = np.array([g[2] for g in groups])
+    y = np.arange(len(groups))[::-1]
+    side.errorbar(means, y, xerr=errors, fmt="o", color="#5b3f99", ecolor="#5b3f99", capsize=4, markersize=7)
+    side.set_yticks(y)
+    side.set_yticklabels([f"{name}  (n={g[3]})" for name, g in zip(names, groups)], fontsize=10)
+    side.set_xlabel(f"{measure_label}, mean over the network's {n_edges} edges\n(per animal; group mean \u00b1 SE)",
+                    fontsize=10)
+    side.set_title("Where each group sits on this network\n(descriptive: no further test)",
+                   fontsize=11, fontweight="bold", pad=12)
+    side.grid(axis="x", alpha=0.3)
+    side.margins(y=0.15)
+    for spine in ("top", "right"):
+        side.spines[spine].set_visible(False)
+
+    fig.suptitle(f"{title}\n{network_label}", fontsize=13, fontweight="bold", y=1.02)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved omnibus network: %s", output_path)
+
+
 # ---------------------------------------------------------------------------
 # Circos / chord diagram
 # ---------------------------------------------------------------------------
