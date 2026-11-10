@@ -733,11 +733,12 @@ class ROINBSAnalysis(_ROINetworkBase):
                                              "equivalence summary)", "Standard": "element",
                               "ElementName": "component"}),
             ("n_edges", {"Description": "the component's supra-threshold edges (equivalence rows: the edges "
-                                        "tested)"}),
+                                        "tested)", "Standard": "n_edges"}),
             ("n_edges_increase", {"Description": "t rows: the component's edges where group_a is higher"}),
             ("n_edges_decrease", {"Description": "t rows: the component's edges where group_a is lower"}),
             ("mean_stat", {"Description": "t rows: the mean signed t over the component's edges"}),
             ("direction", {"Description": "t rows: which way the component's edges go",
+                           "Standard": "observed_direction",
                            "Levels": {"increase": "every edge higher in the contrast's positive side",
                                       "decrease": "every edge lower", "mixed": "both"}}),
             ("node_i", {"Description": "the edge's first ROI, by its index in the connectivity matrix"}),

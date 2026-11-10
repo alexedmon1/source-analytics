@@ -26,6 +26,13 @@
 
 ### Fixed
 
+- **Only the caveats that apply:** the shared caveats (Hedges g, its interval, the MDE, legacy tables) are written
+  into `analysis.json` only where the tables have what they warn about (`results_spec.common_caveats`), so the
+  NBS is no longer told about effect sizes it does not have.
+- **roi_nbs describes itself as it runs:** Welch's t for a two-group contrast, a weighted t for several groups,
+  the F for the omnibus (threshold p < 0.01), equivalence summarized per edge; its `n_edges` and `direction`
+  columns are the specification's `n_edges` and `observed_direction` (Lumière 0.4.3, now pinned at 8c86e70), so
+  the gallery's summary gives each network's size and direction.
 - **No two numbers on a colour bar overlap**, in any figure the Python side saves: `viz_ticks.install()`
   (run by `analyses/base.py` and `viz/__init__.py`) hides colour-bar tick labels that would collide, keeping
   the ends and the figure's own marks (`viz_ticks.keep_ticks`, e.g. the NBS cut) first. R's figures space

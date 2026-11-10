@@ -643,3 +643,15 @@ def test_electrode_comparison_is_described_as_a_diagnostic(tmp_path):
                                                "aperiodic_comparison_stats.csv"]
     cols = json.loads((tbl / "aperiodic_comparison_stats.json").read_text())
     assert cols["measure"]["Standard"] == "measure" and "power_type" not in cols
+
+
+def test_common_caveats_only_where_they_apply(tmp_path):
+    """The NBS has no Hedges g, interval, MDE or legacy tables, so it is told about none of them."""
+    from source_analytics.results_spec import COMMON_CAVEATS, common_caveats
+
+    (tmp_path / "roi_nbs_hypotheses.csv").write_text("x\n")
+    nbs = [{"n_edges": "27", "component_p": "0.049", "mde": "", "effect_size_type": ""}]
+    assert common_caveats(nbs, tmp_path, {"roi_nbs_hypotheses.csv"}) == []
+    (tmp_path / "roi_psd_posthoc_roi.csv").write_text("x\n")
+    contrast = [{"effect_size_type": "hedges_g", "effect_size_lcl": "0.1", "mde": "0.4"}]
+    assert common_caveats(contrast, tmp_path, {"roi_nbs_hypotheses.csv"}) == list(COMMON_CAVEATS)

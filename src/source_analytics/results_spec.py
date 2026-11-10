@@ -162,6 +162,21 @@ COMMON_CAVEATS = (
 )
 
 
+def common_caveats(rows: list[dict], folder: Path, described: set[str]) -> list[str]:
+    """The COMMON_CAVEATS that apply to these tables: each only where what it warns about is
+    there (a Hedges g, its interval, an MDE, legacy tables beside the described ones), so an
+    analysis without them, such as the NBS, is not told about them."""
+    def has(column: str, value: str | None = None) -> bool:
+        return any((str(r.get(column) or "") == value) if value else str(r.get(column) or "") not in
+                   ("", "nan", "None") for r in rows)  # fmt: skip
+
+    hedges = has("effect_size_type", "hedges_g")
+    legacy = any(p.suffix in (".csv", ".tsv") and p.name not in described
+                 and ("omnibus" in p.name or "posthoc" in p.name) for p in folder.iterdir())
+    keep = (hedges, hedges and has("effect_size_lcl"), has("mde"), legacy)
+    return [text for text, wanted in zip(COMMON_CAVEATS, keep, strict=True) if wanted]
+
+
 def available() -> bool:
     return lumiere is not None
 
@@ -478,7 +493,7 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
                                                 "model's residual SD for contrasts, partial omega squared "
                                                 "for omnibus rows, the standardized slope for regressions"},
         "tables": tables,
-        "caveats": [*spec.caveats, *COMMON_CAVEATS],
+        "caveats": [*spec.caveats, *common_caveats(all_rows, folder, {p.name for _t, p in found})],
         "run": {"id": run_id, "label": f"{analysis.name} on {paradigm}" if paradigm else analysis.name},
     }
     declared = contrasts(analysis.config, all_rows)
