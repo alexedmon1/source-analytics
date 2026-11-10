@@ -30,6 +30,9 @@
 
 ### Fixed
 
+- **Lumière 0.4.4** (e5919ad, from 50ab668): the summary keeps a facet's own case unless it is a known name or one
+  plain word; the package says its version (0.4.4, the specification's); the functional vocabulary has `ReHo_zscore`
+  and `fALFF_zscore`. All 541 tests pass.
 - **Figures say what they show:** each figure the network and directed modules draw has a caption that starts with
   what it shows (the gallery's card title), and roi_graph's whole-network bars say on the figure and in the
   caption that their stars are Welch t-tests between pairs of groups, BH over every bar, not the declared tests.
