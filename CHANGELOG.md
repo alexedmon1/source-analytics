@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added
+
+- **Group levels against 0 (engine 2026.11.10.1).** A declared table with `center: false` keeps its outcome's 0 (z is
+  scaled, not centred), so a contrast whose weights do not sum to 0 (`{KO: 1}`) reads a group's own level against 0,
+  per band and per ROI cell (the ROI cell includes its ROI x band level). For difference scores, e.g. bayes-sl's SL
+  learning effect (structured - random zITC) per genotype. With it: the ROI x band SD prior is half-N(0, 0.5), not 3
+  (`prior.w.roi_band_sd_uncentred`); set I may carry an entry on one group's level (`prior.i.level_entry`); the
+  gate's null puts every level at 0 and scores levels in ROI cells against their ROI x band level; centring is part of
+  the gate id. Catalogue: `model.group_levels_uncentred`. Tests: `tests/bayes/test_uncentred.py` (a slow fit recovers
+  known levels and checks the gate's truths). Centred runs are unchanged: the E0 replay (FORGE readouts, gate verdicts
+  and simulator draws) passes digit for digit; gates from 2026.11.09.1 need rerunning only because the engine version
+  is in the gate id.
+
+### Fixed
+
+- The Bayesian report listed a single declared outcome letter by letter ("outcomes (bands): L, o, w, ...").
+
 ## v0.9.0 — 2026-11-09 (the Bayesian group engine; field runs; figures say what they show)
 
 The Bayesian engine (engine plan E0-E6: configuration, provenance and gate ids, the gate's equivalence rule, the

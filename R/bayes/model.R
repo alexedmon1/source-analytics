@@ -19,6 +19,13 @@
 # N(0, 1/sqrt(2)) (W), so every pairwise contrast is a priori N(0, 1) and no group is privileged. A set-I entry
 # x_<band>_<group> (group - reference) re-expresses that group's level as reference level + dx_<band>_<group>, with
 # dx ~ the entry: that contrast's prior is exactly the entry, and no other group is tied to the reference.
+#
+# Uncentred outcomes (center = FALSE; declared tables' `center: false`, 2026-11-10, bayes-sl SL learning effects): z
+# is divided by the same SD but not centred, so 0 keeps its meaning (a difference score such as structured - random
+# zITC) and a group's own level can be tested against 0: a hypothesis whose weights do not sum to 0 (e.g. {KO: 1}).
+# The ROI level per band, (1 | roi:band), is then the ROI deviation of the level shared by every group: its SD prior is
+# half-N(0, BAYES_SD_ROI_BAND_UNCENTRED), not the centred outcome's 3 (no anatomical baseline in a difference). A
+# set-I entry on a single-group level hypothesis, lv_<band>_<group>, replaces that level's W prior.
 # ============================================================================
 
 suppressMessages({ library(brms); library(posterior) })
@@ -31,6 +38,8 @@ BAYES_W_EFFECT_SD <- 1  # W: every pairwise group contrast a priori N(0, 1), Tra
 BAYES_W_LEVEL_SD <- BAYES_W_EFFECT_SD / sqrt(2)   # ... from independent group levels N(0, 1/sqrt(2)) (2026-10-19)
 BAYES_CODING <- "group-levels-2026-10-19"   # fixed-effect parametrisation; a gate verdict attaches only to fits of the same
 BAYES_SD_ROI_BAND <- 3  # ROI level per band, half-N(0, 3): FORGE source power ROI means spread 0.9-3.0 SD (the Conductor, 2026-10-15; was 0.5)
+BAYES_SD_ROI_BAND_UNCENTRED <- 0.5  # ... with an uncentred outcome (a difference score; 2026-11-10): ROI deviations of
+                                    # the shared level, like the subject term's half-N(0, 0.5)
 BAYES_LOG_SIGMA <- log(0.5)  # residual SD prior median (z units) when ROI or subject terms take part of the spread
 BAYES_LOG_SIGMA_NOROI <- log(1)  # ... with no ROI and no subject term: z's within-group SD is 1 by construction, so the
                                  # residual is all of it (bayes-sl a97d, 2026-11-09: log 0.5 put 1 at the prior's 92nd pct)
@@ -41,8 +50,11 @@ BAYES_RHAT_MAX <- 1.05  # convergence rule, on what is decided: estimands and sc
 #' Code a long table for the model, for one prior set (the set decides the fixed-effect parametrisation, see the
 #' header). `informative` is a named list x_<band>_<group> -> c(mean, sd) (group - reference) for set I; terms without
 #' an entry stay W, and entries for terms not in this design are unused. Returns the data plus the term map.
-#' spatial_col = NULL: no ROI (see the header).
-bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "band", set = "W", informative = NULL) {
+#' spatial_col = NULL: no ROI (see the header). center = FALSE: z is scaled but not centred (see the header);
+#' `informative` may then also hold lv_<band>_<group> entries (a group's own level).
+bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "band", set = "W", informative = NULL,
+                          center = TRUE) {
+  center <- !isFALSE(center)
   if (!set %in% BAYES_SETS) stop(sprintf("bayes: unknown prior set '%s'", set))
   d <- as.data.frame(data)
   d <- d[!is.na(d[[dv_col]]), , drop = FALSE]
@@ -65,7 +77,7 @@ bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "b
     cell <- interaction(x$roi, x$.grp, drop = TRUE)
     n <- tapply(x[[dv_col]], cell, length); v <- tapply(x[[dv_col]], cell, var)
     ok <- n > 1 & !is.na(v)
-    data.frame(band = b, center = mean(x[[dv_col]]), scale = sqrt(sum((n[ok] - 1) * v[ok]) / sum(n[ok] - 1)))
+    data.frame(band = b, center = if (center) mean(x[[dv_col]]) else 0, scale = sqrt(sum((n[ok] - 1) * v[ok]) / sum(n[ok] - 1)))
   }))
   i <- match(d$band, scale_tab$band)
   d$z <- (d[[dv_col]] - scale_tab$center[i]) / scale_tab$scale[i]
@@ -84,8 +96,15 @@ bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "b
     M <- diag(length(levels)); dimnames(M) <- list(levels, cols)
     M[anch, cols[levels == ref]] <- 1                      # anchored level = reference level + dx
     lmap[[b]] <- M
-    ms <- t(sapply(levels, function(g)
-      if (g %in% anch) informative[[sprintf("x_%s_%s", b, .safe(g))]] else c(0, BAYES_W_LEVEL_SD)))
+    lvi <- if (identical(set, "I") && length(informative)) informative[sprintf("lv_%s_%s", b, .safe(levels))]
+           else vector("list", length(levels))                # set-I level entries, NULL where none
+    has_lv <- !vapply(lvi, is.null, logical(1))
+    if (any(has_lv) && center) stop("bayes: set-I level entries (lv_*) need an uncentred outcome (center = FALSE)")
+    if (any(has_lv & levels %in% anch))
+      stop(sprintf("bayes: band %s: a group has both a level entry and a difference entry in set I", b))
+    ms <- t(sapply(seq_along(levels), function(k) { g <- levels[k]
+      if (g %in% anch) informative[[sprintf("x_%s_%s", b, .safe(g))]]
+      else if (has_lv[k]) lvi[[k]] else c(0, BAYES_W_LEVEL_SD) }))
     fixed[[b]] <- data.frame(col = cols, band = b, group = levels, prior_mean = ms[, 1], prior_sd = ms[, 2],
                              row.names = NULL)
     for (p in cols) d[[p]] <- as.numeric(d$band == b) * M[as.character(d$.grp), p]
@@ -95,12 +114,26 @@ bayes_prepare <- function(data, spec, dv_col, spatial_col = "roi", band_col = "b
   list(data = d, terms = terms, fixed = do.call(rbind, unname(fixed)), lmap = lmap, set = set,
        levels = levels, ref = ref, bands = levels(d$band), band_labels = band_labels,
        covs = if (length(covs)) paste0("cov_", .safe(covs)) else character(0), scale = scale_tab,
-       dv = dv_col, spatial = spatial_col, no_roi = no_roi, subject_re = subject_re)
+       dv = dv_col, spatial = spatial_col, no_roi = no_roi, subject_re = subject_re, centred = center,
+       sd_roi_band = if (center) BAYES_SD_ROI_BAND else BAYES_SD_ROI_BAND_UNCENTRED)
 }
 
 #' Prior mean of log sigma for prep's design (BAYES_LOG_SIGMA_NOROI when there is no ROI and no subject term).
 bayes_log_sigma_mean <- function(prep)
   if (isTRUE(prep$no_roi) && isFALSE(prep$subject_re)) BAYES_LOG_SIGMA_NOROI else BAYES_LOG_SIGMA
+
+#' SD prior of the ROI level per band: 3 for a centred outcome, BAYES_SD_ROI_BAND_UNCENTRED otherwise (preps made
+#' before 2026-11-10 carry no sd_roi_band: centred).
+.sd_roi_band <- function(prep) prep$sd_roi_band %||% BAYES_SD_ROI_BAND
+
+#' TRUE when hypothesis weights w test a level (do not sum to 0); an error unless prep's outcome is uncentred.
+.is_level <- function(w, prep, name) {
+  lvl <- abs(sum(w)) > 1e-9
+  if (lvl && !isFALSE(prep$centred))
+    stop(sprintf(paste("hypothesis '%s': weights must sum to 0 for the Bayes adapter (a group level against 0 needs",
+                       "an uncentred outcome: the declared table's center: false)"), name))
+  lvl
+}
 
 bayes_formula <- function(prep) {
   fx <- paste(prep$fixed$col, collapse = " + ")
@@ -121,7 +154,7 @@ bayes_priors <- function(prep) {
     do.call(c, lapply(seq_len(nrow(fx)), function(k)
       set_prior(sprintf("normal(%g, %g)", fx$prior_mean[k], fx$prior_sd[k]), class = "b", coef = fx$col[k]))),
     if (!isTRUE(prep$no_roi)) c(set_prior("normal(0, 0.25)", class = "sd", group = "roi"),
-                                set_prior(sprintf("normal(0, %g)", BAYES_SD_ROI_BAND), class = "sd", group = "roi:band")),
+                                set_prior(sprintf("normal(0, %g)", .sd_roi_band(prep)), class = "sd", group = "roi:band")),
     if (!isFALSE(prep$subject_re)) set_prior("normal(0, 0.5)", class = "sd", group = "subject"),
     set_prior(sprintf("normal(%g, 0.5)", bayes_log_sigma_mean(prep)), class = "b", dpar = "sigma"))
 }

@@ -86,6 +86,17 @@ def test_report_reads_a_gated_run(tmp_path):
     assert "R-hat max 1.002" in md
 
 
+def test_report_names_the_uncentred_model_and_lists_one_outcome_whole(tmp_path):
+    table = _run(tmp_path)
+    jf = tmp_path / "bayes" / "job_value.json"
+    job = json.loads(jf.read_text()); job["center"] = False; jf.write_text(json.dumps(job))
+    mf = tmp_path / "toy_hypotheses_bayes_manifest.json"
+    man = json.loads(mf.read_text()); man["value"]["input"]["bands"] = "40 Hz ITC"; mf.write_text(json.dumps(man))
+    md = build_report(table)
+    assert "`model.group_levels_uncentred` v1 (no ROI): uncentred" in md
+    assert "outcomes (bands): 40 Hz ITC\n" in md
+
+
 def test_report_marks_a_failed_gate(tmp_path):
     md = build_report(_run(tmp_path, gate="failed"))
     assert "effect (gate failed)" in md and "**failed** (sbc)" in md

@@ -48,11 +48,12 @@ SFX <- if (SET == "W") "" else paste0("_", SET)          # W keeps the original 
 design_rows <- function(bands = NULL) {
   d <- dat
   if (!is.null(bands) && !is.null(job$band_col)) d <- d[as.character(d[[job$band_col]]) %in% bands, , drop = FALSE]
-  bayes_prepare(d, spec, job$dv, job$spatial_col, job$band_col, SET, informative)
+  bayes_prepare(d, spec, job$dv, job$spatial_col, job$band_col, SET, informative, center = !isFALSE(job$center))
 }
 
 #' One parameter draw from prep's prior set (mirrors bayes_priors()). null: every group of a band at one common
-#' level (drawn from the reference level's prior), set-I differences 0, no ROI deviations.
+#' level (drawn from the reference level's prior), set-I differences 0, no ROI deviations; with an uncentred outcome
+#' that common level is 0, so level hypotheses (a group against 0) are null too.
 draw_params <- function(prep, null = FALSE) {
   cols <- prep$terms$col; fx <- prep$fixed
   hn <- function(s, n = 1) abs(rnorm(n, 0, s))
@@ -64,11 +65,12 @@ draw_params <- function(prep, null = FALSE) {
       k <- fx$band == bd
       b[fx$col[k]] <- ifelse(startsWith(fx$col[k], "dx_"), 0, b[fx$col[k & fx$group == prep$ref]])
     }
+    if (isFALSE(prep$centred)) b[] <- 0
   }
   rois <- levels(prep$data$roi)          # with no ROI: one level, "all", whose r is never used (simulate_z)
   list(b = b, tau = tau,
        r = sapply(cols, function(cl) setNames(rnorm(length(rois), 0, tau[[cl]]), rois)),
-       sd_rb = hn(BAYES_SD_ROI_BAND), sd_sub = setNames(hn(0.5, length(prep$bands)), prep$bands),
+       sd_rb = hn(.sd_roi_band(prep)), sd_sub = setNames(hn(0.5, length(prep$bands)), prep$bands),
        sigma = setNames(exp(rnorm(length(prep$bands), bayes_log_sigma_mean(prep), 0.5)), prep$bands))
 }
 
@@ -92,7 +94,10 @@ boundary_params <- function(prep, r) {
   p
 }
 
-simulate_z <- function(prep, p) {
+#' Simulated z at prep's design under parameters p. keep_rb: the ROI x band levels drawn here are returned as
+#' attribute "rb" (named "<roi> <band>"; the truth of a level hypothesis in a ROI cell includes them). The draws are
+#' the same either way; without keep_rb the value is byte-identical to engines before 2026-11-10 (E0 replay).
+simulate_z <- function(prep, p, keep_rb = FALSE) {
   d <- prep$data
   bnd <- as.character(d$band); roi <- as.character(d$roi)
   mu <- 0
@@ -100,14 +105,17 @@ simulate_z <- function(prep, p) {
   if (!isTRUE(prep$no_roi)) {           # no ROI: neither ROI term is in the model (R/bayes/model.R)
     for (cl in prep$terms$col) mu <- mu + d[[cl]] * p$r[roi, cl]
     rb <- paste(roi, bnd); urb <- unique(rb)
-    mu <- mu + setNames(rnorm(length(urb), 0, p$sd_rb), urb)[rb]
+    rb_draw <- setNames(rnorm(length(urb), 0, p$sd_rb), urb)
+    mu <- mu + rb_draw[rb]
   }
   if (!isFALSE(prep$subject_re)) {      # one row per subject and band: no subject term
     sb <- paste(d$subject, bnd); usb <- unique(sb)
     sd_sb <- p$sd_sub[sub("^.* ", "", usb)]
     mu <- mu + setNames(rnorm(length(usb), 0, sd_sb), usb)[sb]
   }
-  as.numeric(mu + p$sigma[bnd] * rnorm(nrow(d)))
+  z <- as.numeric(mu + p$sigma[bnd] * rnorm(nrow(d)))
+  if (keep_rb && !isTRUE(prep$no_roi)) attr(z, "rb") <- rb_draw
+  z
 }
 
 #' Truth and posterior draws of every contrast/equivalence estimand: band x (ROI-average, each ROI). Equivalence
@@ -127,13 +135,15 @@ estimand_table <- function(prep, p, fit) {
   for (hyp in spec$hypotheses) {
     if (!hyp$kind %in% c("contrast", "equivalence")) next
     w <- weight_vector(hyp, prep$levels)
+    lvl <- .is_level(w, prep, hyp$name)
     for (b in prep$bands) for (sp in c("all", rois)) {
       R <- if (sp == "all") NULL else {
         m <- as.matrix(dr[, sprintf("r_roi[%s,%s]", sp, cols)]); colnames(m) <- cols; m }
-      x <- .contrast_draws(B, R, prep, b, w)
+      cell <- lvl && sp != "all"             # a level in a ROI cell includes that cell's ROI x band level
+      x <- .contrast_draws(B, R, prep, b, w, if (cell) .rb_draws(dr, sp, b) else NULL)
       t0 <- .contrast_draws(P0$b, if (sp == "all") NULL else matrix(p$r[sp, ], 1, dimnames = list(NULL, cols)),
-                            prep, b, w)
-      x0 <- .contrast_draws(pd$b, if (sp == "all") NULL else pd$r, prep, b, w)
+                            prep, b, w, if (cell) p$rb[[paste(sp, b)]] else NULL)
+      x0 <- .contrast_draws(pd$b, if (sp == "all") NULL else pd$r, prep, b, w, if (cell) pd$rb else NULL)
       dec <- .decide(x, .dens0(x0), job$rope_sd)
       is_eq <- hyp$kind == "equivalence"
       if (is_eq && !identical(hyp$margin$mode %||% "sd", "sd")) stop("bayes gate: equivalence margin mode 'sd' only")
@@ -184,7 +194,7 @@ run_reps <- function(mode, bands) {
   one_rep <- function(r) try({
     set.seed(10000 * match(mode, c("sbc", "null", "recovery", "equivalence")) + r)
     p <- if (mode == "equivalence") boundary_params(prep, r) else draw_params(prep, null = mode == "null")
-    pr <- prep; pr$data$z <- simulate_z(prep, p)
+    pr <- prep; z <- simulate_z(prep, p, keep_rb = TRUE); p$rb <- attr(z, "rb"); pr$data$z <- as.numeric(z)
     fit <- update(tpl, newdata = pr$data, recompile = FALSE, chains = opt$chains, cores = opt$chains,
                   iter = opt$iter, warmup = opt$warmup, seed = r, refresh = 0)
     s <- estimand_table(pr, p, fit); s$rep <- r; s$mode <- mode

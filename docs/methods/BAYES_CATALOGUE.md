@@ -1,6 +1,6 @@
 # Bayesian engine catalogue
 
-Every model, prior and decision rule of the Bayesian group engine, each with a stable **id** and a **version**. Engine version described: `2026.11.09.1`. Units: between-subject SD of the outcome (the unit of a per-cell Hedges g) unless stated.
+Every model, prior and decision rule of the Bayesian group engine, each with a stable **id** and a **version**. Engine version described: `2026.11.10.1`. Units: between-subject SD of the outcome (the unit of a per-cell Hedges g) unless stated.
 
 *Generated from `source_analytics/bayes/catalogue.py` (`python -m source_analytics.bayes.catalogue > docs/methods/BAYES_CATALOGUE.md`); do not edit by hand. `tests/bayes/test_catalogue.py` checks it against the R code and checks that it is current.*
 
@@ -10,6 +10,7 @@ Every model, prior and decision rule of the Bayesian group engine, each with a s
 |---|---|---|
 | `model.group_levels` | 1 | hierarchical group model over bands and ROIs |
 | `model.group_levels_noroi` | 1 | the same model with no ROI: one value per subject, e.g. along a located field |
+| `model.group_levels_uncentred` | 1 | the same model on an uncentred outcome: group levels against 0 |
 
 ### `model.group_levels` (version 1)
 
@@ -33,6 +34,17 @@ The same model with no ROI: one value per subject, e.g. along a located field.
 - **Tests:** `tests/bayes/test_no_roi.py`
 - **Reference:** docs/methods/BAYES_ENGINE.md section 3
 
+### `model.group_levels_uncentred` (version 1)
+
+The same model on an uncentred outcome: group levels against 0.
+
+- **Definition:** model.group_levels (or its no-ROI form) with center = FALSE (a declared table's center: false): z = y / the same SD, not centred, so 0 keeps its meaning (a difference score such as structured - random ITC). A hypothesis whose weights do not sum to 0 (e.g. {KO: 1}) then reads a group's own level against 0, decided by rule.contrast_decision; in a ROI cell it includes that cell's ROI x band level. The ROI x band levels are the ROI deviations of the level shared by all groups. With every group at 0 the gate's null puts every level at 0.
+- **Rests on:** `prior.w.group_level`, `prior.w.covariate`, `prior.w.roi_deviation_sd`, `prior.w.roi_band_sd_uncentred`, `prior.w.subject_sd`, `prior.w.log_sigma`, `prior.w.log_sigma_noroi`, `prior.i.contrast_entry`, `prior.i.level_entry`
+- **Validity:** As model.group_levels. Only for outcomes whose 0 means "no effect"; a centred outcome refuses level hypotheses.
+- **Implementation:** `R/bayes/model.R:bayes_prepare`
+- **Tests:** `tests/bayes/test_uncentred.py`
+- **Reference:** engine 2026.11.10.1 (bayes-sl, 2026-11-10: SL learning effect per genotype)
+
 ## Priors (set W, weakly informative; set I, informative)
 
 | id | version | what it is |
@@ -41,10 +53,12 @@ The same model with no ROI: one value per subject, e.g. along a located field.
 | `prior.w.covariate` | 1 | set W: covariate slopes |
 | `prior.w.roi_deviation_sd` | 1 | set W: how much a group effect varies by ROI |
 | `prior.w.roi_band_sd` | 1 | set W: how much ROI means vary within a band |
+| `prior.w.roi_band_sd_uncentred` | 1 | set W: how much the shared level varies by ROI, uncentred outcome |
 | `prior.w.subject_sd` | 1 | set W: subject levels |
 | `prior.w.log_sigma` | 1 | set W: residual SD per band, with ROI or subject terms |
 | `prior.w.log_sigma_noroi` | 1 | set W: residual SD per band, no ROI and no subject term |
 | `prior.i.contrast_entry` | 1 | set I: an informative prior on one contrast against the reference |
+| `prior.i.level_entry` | 1 | set I: an informative prior on one group's own level (uncentred outcome) |
 
 ### `prior.w.group_level` (version 1)
 
@@ -79,6 +93,15 @@ Set W: how much ROI means vary within a band.
 - **Values:** half-Normal scale 3 between-subject SD
 - **Implementation:** `R/bayes/model.R:bayes_priors`
 - **Reference:** raised from 0.5 (the Conductor, 2026-10-15): FORGE source-power ROI means spread 0.9-3.0 SD
+
+### `prior.w.roi_band_sd_uncentred` (version 1)
+
+Set W: how much the shared level varies by ROI, uncentred outcome.
+
+- **Definition:** SD of the ROI x band levels ~ half-Normal(0, 0.5) when the outcome is uncentred: a difference score has no anatomical baseline for its ROI means to spread around, so the scale is the subject term's, not 3.
+- **Values:** half-Normal scale 0.5 between-subject SD
+- **Implementation:** `R/bayes/model.R:bayes_priors`
+- **Reference:** engine 2026.11.10.1 (2026-11-10); checked at each design by the gate's prior predictive
 
 ### `prior.w.subject_sd` (version 1)
 
@@ -115,6 +138,17 @@ Set I: an informative prior on one contrast against the reference.
 - **Implementation:** `R/bayes/model.R:bayes_prepare`
 - **Tests:** `tests/bayes/test_e2_config.py`
 - **Reference:** docs/methods/BAYES_ENGINE.md section 5
+
+### `prior.i.level_entry` (version 1)
+
+Set I: an informative prior on one group's own level (uncentred outcome).
+
+- **Definition:** An entry lv_<band>_<group> = Normal(mean, sd) on that group's level in between-subject SD replaces its set-W prior. Only with an uncentred outcome; a group cannot carry both a level and a contrast entry in one band.
+- **Values:** mean and SD per entry, from the study's informative-prior file
+- **Validity:** As prior.i.contrast_entry: only from a logged literature search, each entry with its source.
+- **Implementation:** `R/bayes/model.R:bayes_prepare`
+- **Tests:** `tests/bayes/test_uncentred.py, tests/bayes/test_declared_tables.py`
+- **Reference:** engine 2026.11.10.1 (2026-11-10)
 
 ## Decision rules and the gate
 

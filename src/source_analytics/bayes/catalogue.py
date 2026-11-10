@@ -42,7 +42,8 @@ class ModelSpec(NamedTuple):
     reference: str = ""
     caveat: str = ""
     #: The prior row ``bayes_priors()`` writes: (class, group, dpar, coef prefix, prior string, design), with design
-    #: one of 'roi' (ROI, subject term and a covariate) or 'noroi' (no ROI, one row per subject and band).
+    #: one of 'roi' (ROI, subject term and a covariate), 'noroi' (no ROI, one row per subject and band) or
+    #: 'uncentred' (the roi design with center = FALSE).
     r_prior: Optional[Tuple[str, str, str, str, str, str]] = None
     #: R constants holding its values, name -> value (numbers, or strings for ids).
     r_constants: Tuple[Tuple[str, object], ...] = ()
@@ -77,6 +78,23 @@ MODELS: Dict[str, ModelSpec] = {
         implementation='R/bayes/model.R:bayes_prepare',
         tests='tests/bayes/test_no_roi.py',
         reference='docs/methods/BAYES_ENGINE.md section 3'),
+    'model.group_levels_uncentred': ModelSpec(
+        'model.group_levels_uncentred', 1,
+        'the same model on an uncentred outcome: group levels against 0',
+        'model.group_levels (or its no-ROI form) with center = FALSE (a declared table\'s center: false): z = y / the '
+        'same SD, not centred, so 0 keeps its meaning (a difference score such as structured - random ITC). A '
+        'hypothesis whose weights do not sum to 0 (e.g. {KO: 1}) then reads a group\'s own level against 0, decided by '
+        'rule.contrast_decision; in a ROI cell it includes that cell\'s ROI x band level. The ROI x band levels are '
+        'the ROI deviations of the level shared by all groups. With every group at 0 the gate\'s null puts every '
+        'level at 0.',
+        rests_on=('prior.w.group_level', 'prior.w.covariate', 'prior.w.roi_deviation_sd',
+                  'prior.w.roi_band_sd_uncentred', 'prior.w.subject_sd', 'prior.w.log_sigma', 'prior.w.log_sigma_noroi',
+                  'prior.i.contrast_entry', 'prior.i.level_entry'),
+        validity='As model.group_levels. Only for outcomes whose 0 means "no effect"; a centred outcome refuses level '
+                 'hypotheses.',
+        implementation='R/bayes/model.R:bayes_prepare',
+        tests='tests/bayes/test_uncentred.py',
+        reference='engine 2026.11.10.1 (bayes-sl, 2026-11-10: SL learning effect per genotype)'),
 }
 
 PRIORS: Dict[str, ModelSpec] = {
@@ -113,6 +131,16 @@ PRIORS: Dict[str, ModelSpec] = {
         implementation='R/bayes/model.R:bayes_priors',
         r_prior=('sd', 'roi:band', '', '', 'normal(0, 3)', 'roi'),
         r_constants=(('BAYES_SD_ROI_BAND', 3.0),)),
+    'prior.w.roi_band_sd_uncentred': ModelSpec(
+        'prior.w.roi_band_sd_uncentred', 1,
+        'set W: how much the shared level varies by ROI, uncentred outcome',
+        'SD of the ROI x band levels ~ half-Normal(0, 0.5) when the outcome is uncentred: a difference score has no '
+        'anatomical baseline for its ROI means to spread around, so the scale is the subject term\'s, not 3.',
+        values=('half-Normal scale 0.5 between-subject SD',),
+        reference='engine 2026.11.10.1 (2026-11-10); checked at each design by the gate\'s prior predictive',
+        implementation='R/bayes/model.R:bayes_priors',
+        r_prior=('sd', 'roi:band', '', '', 'normal(0, 0.5)', 'uncentred'),
+        r_constants=(('BAYES_SD_ROI_BAND_UNCENTRED', 0.5),)),
     'prior.w.subject_sd': ModelSpec(
         'prior.w.subject_sd', 1,
         'set W: subject levels',
@@ -151,6 +179,16 @@ PRIORS: Dict[str, ModelSpec] = {
         implementation='R/bayes/model.R:bayes_prepare',
         tests='tests/bayes/test_e2_config.py',
         reference='docs/methods/BAYES_ENGINE.md section 5'),
+    'prior.i.level_entry': ModelSpec(
+        'prior.i.level_entry', 1,
+        'set I: an informative prior on one group\'s own level (uncentred outcome)',
+        'An entry lv_<band>_<group> = Normal(mean, sd) on that group\'s level in between-subject SD replaces its set-W '
+        'prior. Only with an uncentred outcome; a group cannot carry both a level and a contrast entry in one band.',
+        values=('mean and SD per entry, from the study\'s informative-prior file',),
+        validity='As prior.i.contrast_entry: only from a logged literature search, each entry with its source.',
+        implementation='R/bayes/model.R:bayes_prepare',
+        tests='tests/bayes/test_uncentred.py, tests/bayes/test_declared_tables.py',
+        reference='engine 2026.11.10.1 (2026-11-10)'),
 }
 
 RULES: Dict[str, ModelSpec] = {

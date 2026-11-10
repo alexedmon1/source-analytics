@@ -106,6 +106,9 @@ bayes:
   that gives more than one row per subject is refused.
 - **Set I** may serve several tables from one file: every entry's band is checked against all declared outcomes (a
   misspelt band still fails), and each job keeps its own entries.
+- **`center: false`** (engine 2026.11.10.1) keeps the outcome's 0: z is divided by the same SD but not centred.
+  Use it when 0 means "no effect" (a difference score such as structured - random ITC); a group's own level is then
+  testable against 0 (section 4). Model `model.group_levels_uncentred` in the catalogue.
 - **Run:** `source-analytics bayes --study S.yaml --analysis deficit_along_field [--out DIR] [--gate]`; no
   `--paradigm` is needed. The job records the definition, every input with its sha256 and the assembled table's sha256.
 
@@ -172,6 +175,13 @@ simulator; and a fit whose contrast matches the conjugate shrinkage of OLS. The 
 | regression | slope posterior (+`by`: per-group slopes); same readouts | band (and cell) |
 | omnibus | **deferred**: one row, `status = not_implemented_bayes` | n/a |
 
+- **A group's level against 0** (uncentred outcomes only, `center: false`): a contrast whose weights do not sum to 0,
+  e.g. `{name: ko_learns, kind: contrast, weights: {KO: 1}}`, reads Σ w·level. ROI-average: the population level; in
+  a ROI cell it also includes that cell's ROI x band level. Same decision rule and Savage-Dickey BF10, the prior
+  density at 0 including the ROI x band level's prior in a cell. A centred outcome refuses such a hypothesis (its
+  levels are relative to the band mean). Set I may carry an entry on such a single-group hypothesis (`{G: 1}`): it
+  replaces that level's prior (`prior.i.level_entry`). With an uncentred outcome the gate's null puts every level at 0,
+  and the ROI x band SD prior is half-N(0, 0.5) instead of 3 (`prior.w.roi_band_sd_uncentred`).
 - **ROPE for plain contrasts:** study-level `bayes: {rope: {mode: sd, value: 0.1}}`, default 0.1 SD (section 8). An
   equivalence hypothesis uses its own margin.
 - **Multiplicity:** no FDR. Partial pooling across ROIs is the adjustment. The output states this per row

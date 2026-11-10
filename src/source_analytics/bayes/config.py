@@ -22,6 +22,8 @@
             deep midline ITC: {paradigm: assr_40hz, roi: [Brainstem_Tectum, Cerebellum, Thalamus],
                                measure_name: itc_40hz, combine: mean}
           groups: {G2_D1pre: KO, G6_D1pre: WT}  # table group -> design level; rows of other groups are dropped
+          # center: false                     # keep 0 meaningful (a difference score): group levels testable
+                                              # against 0 with a hypothesis whose weights do not sum to 0
       outcomes:                               # what `source-analytics bayes` runs when --analysis/--dv are not given
         roi_psd: [absolute]
         roi_aperiodic: [exponent]
@@ -81,6 +83,7 @@ class TableSpec:
     group: str = "group"
     subject_groups: Path | None = None          # csv tables without a group column: subject,group file
     output_dir: Path | None = None              # source tables: read this output tree instead of the study's
+    center: bool = True                         # False: scaled, not centred (R/bayes/model.R header)
 
 
 @dataclass(frozen=True)
@@ -189,7 +192,7 @@ def parse_bayes_config(block: dict | None, base_dir: Path) -> BayesConfig:
 
 
 _TABLE_KEYS = {"source", "csv", "paradigms", "value", "spatial", "outcomes", "groups", "subject", "group",
-               "subject_groups", "output_dir"}
+               "subject_groups", "output_dir", "center"}
 
 
 def _parse_tables(block, base_dir: Path) -> dict[str, TableSpec]:
@@ -223,6 +226,9 @@ def _parse_tables(block, base_dir: Path) -> dict[str, TableSpec]:
         groups = t.get("groups")
         if groups is not None and not isinstance(groups, dict):
             raise BayesConfigError(f"{w}.groups: expected a mapping table group -> design level")
+        center = t.get("center", True)
+        if not isinstance(center, bool):
+            raise BayesConfigError(f"{w}.center: true or false, got {center!r}")
         csv = (base_dir / t["csv"]).resolve() if t.get("csv") else None
         odir = (base_dir / t["output_dir"]).resolve() if t.get("output_dir") else None
         if odir is not None and not odir.is_dir():
@@ -236,5 +242,5 @@ def _parse_tables(block, base_dir: Path) -> dict[str, TableSpec]:
                               spatial=None if spatial in (None, "none") else str(spatial),
                               groups={str(k): str(v) for k, v in groups.items()} if groups else None,
                               subject=str(t.get("subject", "subject")), group=str(t.get("group", "group")),
-                              subject_groups=sg, output_dir=odir)
+                              subject_groups=sg, output_dir=odir, center=center)
     return out

@@ -42,15 +42,19 @@ tab <- function(p, design) {{
                                              group = pr$group[i], dpar = pr$dpar[i], coef = pr$coef[i]))
 }}
 rows <- c(tab(bayes_prepare(roi, spec, 'value', 'roi', NULL), 'roi'),
-          tab(bayes_prepare(one, spec, 'value', NULL, NULL), 'noroi'))
+          tab(bayes_prepare(one, spec, 'value', NULL, NULL), 'noroi'),
+          tab(bayes_prepare(roi, spec, 'value', 'roi', NULL, center = FALSE), 'uncentred'))
+lv <- bayes_prepare(roi, spec, 'value', 'roi', NULL, set = 'I', informative = list(lv_all_B = c(0.3, 0.9)),
+                    center = FALSE)
 inf <- bayes_prepare(roi, spec, 'value', 'roi', NULL, set = 'I', informative = list(x_all_B = c(-0.3, 0.4)))
 consts <- list(BAYES_CODING = BAYES_CODING, BAYES_W_EFFECT_SD = BAYES_W_EFFECT_SD, BAYES_W_LEVEL_SD = BAYES_W_LEVEL_SD,
-               BAYES_SD_ROI_BAND = BAYES_SD_ROI_BAND, BAYES_LOG_SIGMA = BAYES_LOG_SIGMA,
+               BAYES_SD_ROI_BAND = BAYES_SD_ROI_BAND, BAYES_SD_ROI_BAND_UNCENTRED = BAYES_SD_ROI_BAND_UNCENTRED,
+               BAYES_LOG_SIGMA = BAYES_LOG_SIGMA,
                BAYES_LOG_SIGMA_NOROI = BAYES_LOG_SIGMA_NOROI, BAYES_HDI = BAYES_HDI, BAYES_ROPE_SD = BAYES_ROPE_SD,
                BAYES_RHAT_MAX = BAYES_RHAT_MAX)
 for (k in names(BAYES_GATE_RULES)) consts[[paste0('BAYES_GATE_RULES$', k)]] <- BAYES_GATE_RULES[[k]]
 for (k in c('sbc', 'null', 'recovery', 'equivalence')) consts[[paste0('BAYES_GATE_DEFAULTS$', k)]] <- BAYES_GATE_DEFAULTS[[k]]
-cat(jsonlite::toJSON(list(rows = rows, consts = consts, inf = tab(inf, 'roi')), auto_unbox = TRUE, digits = NA))
+cat(jsonlite::toJSON(list(rows = rows, consts = consts, inf = tab(inf, 'roi'), lv = tab(lv, 'uncentred')), auto_unbox = TRUE, digits = NA))
 """
 
 
@@ -122,13 +126,20 @@ def test_every_prior_row_is_catalogued(r_side):
     for r in r_side['rows']:
         coef = 'lv_' if r['coef'].startswith('lv_') else r['coef']
         assert (r['class'], r['group'], r['dpar'], coef, r['design']) in known or (
-            r['design'] == 'noroi' and (r['class'], r['group'], r['dpar'], coef, 'roi') in known), r
+            r['design'] in ('noroi', 'uncentred') and (r['class'], r['group'], r['dpar'], coef, 'roi') in known
+            and not (r['design'] == 'uncentred' and r['group'] == 'roi:band')), r
 
 
 @needs_r
 def test_set_i_entry_becomes_its_contrast_prior(r_side):
     dx = [r for r in r_side['inf'] if r['coef'].startswith('dx_')]
     assert [r['prior'] for r in dx] == ['normal(-0.3, 0.4)']
+
+
+@needs_r
+def test_set_i_level_entry_becomes_that_levels_prior(r_side):
+    lv = {r['coef']: r['prior'] for r in r_side['lv'] if r['coef'].startswith('lv_')}
+    assert lv == {'lv_all_A': C._W_LEVEL, 'lv_all_B': 'normal(0.3, 0.9)'}
 
 
 def test_generated_page_is_current():

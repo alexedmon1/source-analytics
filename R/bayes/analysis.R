@@ -17,7 +17,7 @@ opt <- parse_args(OptionParser(option_list = list(make_option("--job", type = "c
 job <- fromJSON(opt$job, simplifyVector = FALSE)
 spec <- parse_design_spec(list(design = job$design, hypotheses = job$hypotheses))
 dat <- read.csv(job$data_csv, check.names = FALSE, stringsAsFactors = FALSE)
-prep <- bayes_prepare(dat, spec, job$dv, job$spatial_col, job$band_col)   # W coding: data summary and scale
+prep <- bayes_prepare(dat, spec, job$dv, job$spatial_col, job$band_col, center = !isFALSE(job$center))   # W coding: data summary and scale
 cat(sprintf("bayes: %s, %d rows, %d subjects, %d bands, %d groups\n", job$dv, nrow(prep$data),
             nlevels(prep$data$subject), length(prep$bands), length(prep$levels)))
 
@@ -33,7 +33,8 @@ write.csv(prep$scale, file.path(job$work_dir, sprintf("scale_%s.csv", job$dv)), 
 
 rows <- list(); sets_man <- list()
 for (set in unlist(job$prior_sets)) {
-  prep <- bayes_prepare(dat, spec, job$dv, job$spatial_col, job$band_col, set, informative)   # the set's coding
+  prep <- bayes_prepare(dat, spec, job$dv, job$spatial_col, job$band_col, set, informative,
+                        center = !isFALSE(job$center))   # the set's coding
   pr <- bayes_priors(prep)
   write.csv(as.data.frame(pr)[, c("prior", "class", "coef", "group", "dpar")],
             file.path(job$work_dir, sprintf("priors_%s_%s.csv", job$dv, set)), row.names = FALSE)
@@ -86,7 +87,7 @@ man <- list(
   input = list(data_csv = job$data_csv, sha256 = bayes_sha_file(job$data_csv), n_rows_file = nrow(dat),
                n_rows_used = nrow(prep$data), n_subjects = nlevels(prep$data$subject),
                groups = as.list(setNames(as.integer(g_tab), names(g_tab))), bands = unname(prep$band_labels)),
-  settings = list(rope_sd = job$rope_sd, chains = job$chains, iter = job$iter, warmup = job$warmup, seed = job$seed,
+  settings = list(center = !isFALSE(job$center), rope_sd = job$rope_sd, chains = job$chains, iter = job$iter, warmup = job$warmup, seed = job$seed,
                   gate = bayes_gate_settings(job), gate_rules = BAYES_GATE_RULES, rhat_max = BAYES_RHAT_MAX),
   sets = sets_man,
   table = list(path = job$table_out, sha256 = bayes_sha_file(job$table_out)))

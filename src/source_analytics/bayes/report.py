@@ -36,6 +36,11 @@ TABLE_COLUMNS = ("hypothesis", "kind", "role", "label", "dv", "prior_set", "band
                  "gate_id")
 
 
+
+def _as_list(x) -> list:
+    """A manifest list that JSON may have unboxed to a scalar (one band: "Low Gamma", not ["Low Gamma"])."""
+    return [] if x is None else [x] if isinstance(x, str) else list(x)
+
 def check_table(df: pd.DataFrame) -> None:
     """Raise if a results table does not have schema 1's columns."""
     missing = [c for c in TABLE_COLUMNS if c not in df.columns]
@@ -96,7 +101,9 @@ def build_report(table_csv, dv: str | None = None, ppc_files: dict | None = None
     safe = lambda b: "".join(ch for ch in str(b) if ch.isalnum())     # noqa: E731
     E = C.catalogue_entries()
     no_roi = job.get("spatial_col") is None and bool(job)
-    model_id = "model.group_levels_noroi" if no_roi else "model.group_levels"
+    uncentred = job.get("center") is False
+    model_id = ("model.group_levels_uncentred" if uncentred else "model.group_levels_noroi" if no_roi
+                else "model.group_levels")
     prov = job.get("provenance") or {}
     settings = man.get("settings") or {}
     inp = man.get("input") or {}
@@ -115,8 +122,10 @@ def build_report(table_csv, dv: str | None = None, ppc_files: dict | None = None
         L.append(f"- **Declared table** `{tab['name']}`: {ins}; {tab['n_rows']} rows, {tab['n_subjects']} subjects")
     if inp:
         L.append(f"- **Input:** {inp.get('n_rows_used')} rows, {inp.get('n_subjects')} subjects; groups "
-                 f"{inp.get('groups')}; outcomes (bands): {', '.join(map(str, inp.get('bands') or []))}")
-    L.append(f"- **Model:** `{model_id}` v{E[model_id].version}" + (" (no ROI)" if no_roi else ""))
+                 f"{inp.get('groups')}; outcomes (bands): {', '.join(map(str, _as_list(inp.get('bands'))))}")
+    L.append(f"- **Model:** `{model_id}` v{E[model_id].version}" + (" (no ROI)" if no_roi else "")
+             + (": uncentred, so a hypothesis whose weights do not sum to 0 is a group's level against 0"
+                if uncentred else ""))
     pri = [p for p in E[model_id].rests_on if p.startswith("prior.")]
     inf = prov.get("informative")
     inf_src = inf.get("path") if isinstance(inf, dict) else inf

@@ -35,6 +35,12 @@ hypotheses:
 
 Contrasts, equivalence (with a margin) and regression are supported; omnibus is not.
 
+**Is one group's effect different from 0?** When the outcome is itself an effect (a difference such as structured -
+random ITC), a declared table with `center: false` keeps its 0, and a contrast with one group, `weights: {KO: 1}`,
+tests that group's level against 0 ([BAYES_ENGINE.md, section 4](../methods/BAYES_ENGINE.md)). Without
+`center: false` the engine refuses it: the outcome is centred, so a group's level only means something relative to
+the others.
+
 ## 3. The `bayes:` block
 
 Everything that changes a number is in the study YAML; command-line flags only say what to run and where.

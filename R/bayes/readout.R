@@ -3,12 +3,15 @@
 # gate (R/bayes/gate.R) uses the same functions.
 
 #' Prior draws of the group parameters (for Savage-Dickey densities at 0): each fixed parameter (level or set-I
-#' difference) ~ N(m, s), ROI deviation r ~ N(0, tau) with tau ~ half-N(0, 0.25).
+#' difference) ~ N(m, s), ROI deviation r ~ N(0, tau) with tau ~ half-N(0, 0.25), and one ROI x band level
+#' rb ~ N(0, s_rb) with s_rb ~ half-N(0, .sd_roi_band) (read only by level hypotheses; drawn last, so b and r are the
+#' draws engines before 2026-11-10 made).
 .prior_effect_draws <- function(prep, n = 20000) {
   fx <- prep$fixed; cols <- prep$terms$col
   b <- sapply(seq_len(nrow(fx)), function(k) rnorm(n, fx$prior_mean[k], fx$prior_sd[k]))
   r <- sapply(cols, function(cl) rnorm(n, 0, abs(rnorm(n, 0, 0.25))))
-  list(b = matrix(b, n, dimnames = list(NULL, fx$col)), r = matrix(r, n, dimnames = list(NULL, cols)))
+  rb <- rnorm(n, 0, abs(rnorm(n, 0, .sd_roi_band(prep))))
+  list(b = matrix(b, n, dimnames = list(NULL, fx$col)), r = matrix(r, n, dimnames = list(NULL, cols)), rb = rb)
 }
 
 #' The ROIs a readout loops over besides "all": none when the model has no ROI.
@@ -22,17 +25,26 @@
   bw <- tryCatch(bw.SJ(x), error = function(e) bw.nrd0(x)); mean(dnorm(-x / bw)) / bw
 }
 
-#' Weighted group contrast per draw: sum_g w_g * (level_g [+ r_g]). B holds the fixed parameters (columns
-#' prep$fixed$col); levels = B %*% t(lmap). The reference group has no ROI deviation; ROI x band levels cancel when the
-#' weights sum to 0 (required here).
-.contrast_draws <- function(B, R, prep, band, w) {
+#' Weighted group contrast per draw: sum_g w_g * (level_g [+ r_g]) [+ sum(w) * rb]. B holds the fixed parameters
+#' (columns prep$fixed$col); levels = B %*% t(lmap). The reference group has no ROI deviation. The ROI x band level rb
+#' (draws of r_roi:band for one ROI cell) cancels when the weights sum to 0; a level hypothesis (uncentred outcome,
+#' .is_level) adds sum(w) * rb in a ROI cell (RB = NULL: the ROI-average, where the population mean of rb is 0).
+.contrast_draws <- function(B, R, prep, band, w, RB = NULL) {
   M <- prep$lmap[[band]]
   out <- as.numeric(B[, colnames(M), drop = FALSE] %*% (t(M) %*% w[rownames(M)]))
   if (!is.null(R)) for (g in names(w)[w != 0]) {
     if (g == prep$ref) next
     out <- out + w[[g]] * R[, sprintf("x_%s_%s", band, .safe(g))]
   }
+  if (!is.null(RB) && abs(sum(w)) > 1e-9) out <- out + sum(w) * RB
   out
+}
+
+#' Posterior draws of the ROI x band level of one ROI cell (brms names roi:band's levels "<roi>_<band>").
+.rb_draws <- function(dr, roi, band) {
+  k <- sprintf("r_roi:band[%s_%s,Intercept]", roi, band)
+  if (!k %in% names(dr)) stop(sprintf("bayes: no draws %s in the fit", k))
+  dr[[k]]
 }
 
 #' Convergence of what is decided (the Conductor, 2026-10-21): R-hat and bulk ESS of one estimand's draws, split by
@@ -100,12 +112,13 @@ bayes_readout <- function(fit, prep, spec, rope_sd = BAYES_ROPE_SD, hypotheses =
       next
     }
     w <- weight_vector(hyp, prep$levels)
-    if (abs(sum(w)) > 1e-9) stop(sprintf("hypothesis '%s': weights must sum to 0 for the Bayes adapter", hyp$name))
+    lvl <- .is_level(w, prep, hyp$name)
     for (b in prep$bands) {
       for (sp in c("all", rois)) {
         R <- if (sp == "all") NULL else Rr[[sp]]
-        x <- .contrast_draws(B, R, prep, b, w)
-        x0 <- .contrast_draws(pd$b, if (sp == "all") NULL else pd$r, prep, b, w)
+        rb <- if (lvl && sp != "all") .rb_draws(dr, sp, b) else NULL
+        x <- .contrast_draws(B, R, prep, b, w, rb)
+        x0 <- .contrast_draws(pd$b, if (sp == "all") NULL else pd$r, prep, b, w, if (sp == "all") NULL else pd$rb)
         if (hyp$kind == "equivalence") {
           mg <- hyp$margin
           if (!identical(mg$mode %||% "sd", "sd")) stop("Bayes adapter: equivalence margin mode 'sd' only (G1)")

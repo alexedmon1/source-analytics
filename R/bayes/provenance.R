@@ -1,7 +1,7 @@
 # R/bayes/provenance.R — what a number came from (engine plan E3; part of R/bayes/engine.R)
 # ============================================================================
-# Gate id (principle 3): a gate belongs to one design, outcome, hypothesis set, ROPE, prior table, engine version and
-# gate settings (with its thresholds). Its id is a hash of exactly those, computed here by the gate (written into gate.json) and by a real fit
+# Gate id (principle 3): a gate belongs to one design, outcome (and its centring), hypothesis set, ROPE, prior table,
+# engine version and gate settings (with its thresholds). Its id is a hash of exactly those, computed here by the gate (written into gate.json) and by a real fit
 # (compared with it); a fit records gate_passed only for a gate with its own id, NA otherwise.
 # Every component is hashed as text (serialize = FALSE), so ids do not move with R's serialisation format.
 #
@@ -16,7 +16,8 @@ suppressMessages(library(digest))
 #' The engine's behaviour version: bump it when the model, priors, readout or gate change what they compute. It is
 #' part of every gate id, so a gate from an older engine stops counting. (The package version and git commit are
 #' recorded in the manifest, not in the id: a commit that changes only docs must not invalidate gates.)
-BAYES_ENGINE_VERSION <- "2026.11.09.1"   # residual-SD prior centred at log 1 with no ROI and no subject term
+BAYES_ENGINE_VERSION <- "2026.11.10.1"   # uncentred outcomes: group levels against 0 (center: false)
+# (2026.11.09.1: residual-SD prior centred at log 1 with no ROI and no subject term)
 # (2026.10.28.2: the gate scores equivalence hypotheses by their own rule, E5)
 
 #' Gate thresholds, locked engine defaults (decision B3); part of the gate id.
@@ -49,6 +50,7 @@ bayes_gate_id <- function(prep, job) {
   pr <- as.data.frame(bayes_priors(prep))[, c("prior", "class", "coef", "group", "dpar")]
   comp <- list(
     engine = BAYES_ENGINE_VERSION, coding = BAYES_CODING, prior_set = prep$set,
+    centring = if (isFALSE(prep$centred)) "uncentred" else "centred",
     design = .sha_text(paste(d$subject, d$.grp, d$roi, d$band, sep = "\t")),
     outcome = .sha_text(sprintf("%.17g", d[[prep$dv]])),
     hypotheses = .sha_text(as.character(jsonlite::toJSON(job$hypotheses, auto_unbox = TRUE, digits = NA))),
@@ -59,7 +61,7 @@ bayes_gate_id <- function(prep, job) {
   list(id = substr(.sha_text(paste(names(comp), unlist(comp), sep = "=")), 1, 16), components = comp)
 }
 
-.COMPONENT_WORDS <- c(engine = "engine version", coding = "coding", prior_set = "prior set", design = "design rows",
+.COMPONENT_WORDS <- c(engine = "engine version", coding = "coding", prior_set = "prior set", centring = "centring", design = "design rows",
                       outcome = "outcome values", hypotheses = "hypotheses", rope = "ROPE", priors = "prior table",
                       gate = "gate settings", rules = "gate thresholds")
 

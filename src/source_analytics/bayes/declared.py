@@ -13,6 +13,8 @@ themselves. A declared table builds it from rows the config selects:
 - **groups**: maps the table's group labels onto the design factor's levels; rows of unmapped groups are dropped.
   This is how groups are pooled (several KO groups into one level) without changing the design spec.
 - **spatial**: ``none`` (no ROI in the model: one row per subject and outcome) or a column kept as the engine's ROI.
+- **center**: ``false`` keeps the outcome's 0 (a difference score): the engine scales it but does not centre it, so a
+  hypothesis whose weights do not sum to 0 (``{KO: 1}``) tests that group's level against 0.
 
 The assembled table, its inputs and their sha256 are recorded in the job's provenance.
 """
@@ -121,7 +123,8 @@ def assemble(spec: TableSpec, output_dir: Path, factor: str, default_paradigm: s
                            "output_dir": str(spec.output_dir) if spec.output_dir else None,
                            "paradigms": list(spec.paradigms) if spec.paradigms else None, "value": spec.value,
                            "spatial": spec.spatial or "none", "outcomes": spec.outcomes, "groups": spec.groups,
-                           "subject_groups": str(spec.subject_groups) if spec.subject_groups else None},
+                           "subject_groups": str(spec.subject_groups) if spec.subject_groups else None,
+                           "center": spec.center},
             "n_rows": int(len(out)), "n_subjects": int(out["subject"].nunique()),
             "outcomes": sorted(out["outcome"].unique().tolist())}
     return out, prov

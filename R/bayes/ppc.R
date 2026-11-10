@@ -24,7 +24,8 @@ job <- fromJSON(opt$job, simplifyVector = FALSE)
 spec <- parse_design_spec(list(design = job$design, hypotheses = job$hypotheses))
 dat <- read.csv(job$data_csv, check.names = FALSE, stringsAsFactors = FALSE)
 informative <- if (is.null(job$informative)) NULL else lapply(job$informative, function(v) as.numeric(unlist(v)))
-prep <- bayes_prepare(dat, spec, job$dv, job$spatial_col, job$band_col, opt$set, informative)
+prep <- bayes_prepare(dat, spec, job$dv, job$spatial_col, job$band_col, opt$set, informative,
+                      center = !isFALSE(job$center))
 fit <- readRDS(file.path(job$work_dir, sprintf("fit_%s_%s.rds", job$dv, opt$set)))
 set.seed(opt$seed)
 Yrep <- posterior_predict(fit, newdata = prep$data, ndraws = opt$ndraws)      # draws x rows, z units

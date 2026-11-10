@@ -162,3 +162,49 @@ class TestJob:
         cfg = StudyConfig.from_yaml(p)
         with pytest.raises(ValueError, match="design levels"):
             build_job(cfg, "field", "value", parse_bayes_config(cfg.raw["bayes"], tree), out_dir=tree / "o3")
+
+
+class TestUncentred:
+    """``center: false`` (2026-11-10): the job carries it, and set-I entries may then sit on one group's level."""
+
+    def _study(self, tree, center, hyps, priors=None):
+        t = {"field": {**TABLE["field"], **({"center": center} if center is not None else {})}}
+        cfg = {"name": "toy", "output_dir": str(tree), "results_dir": str(tree / "results"),
+               "groups": {"G2": "", "G3": "", "G6": ""},
+               "design": {"factor": "group", "reference": "WT", "levels": ["WT", "KO"]}, "hypotheses": hyps,
+               "bayes": {"prior_sets": ["W", "I"] if priors else ["W"], "tables": t,
+                         "outcomes": {"field": ["value"]}, **({"priors": {"I": priors}} if priors else {})}}
+        p = tree / "study.yaml"
+        p.write_text(yaml.safe_dump(cfg))
+        return p
+
+    def _job(self, tree, p):
+        from source_analytics.bayes import build_job
+        from source_analytics.config import StudyConfig
+        cfg = StudyConfig.from_yaml(p)
+        return build_job(cfg, "field", "value", parse_bayes_config(cfg.raw["bayes"], tree), out_dir=tree / "o")
+
+    HYPS = [{"name": "ko_level", "kind": "contrast", "weights": {"KO": 1.0}},
+            {"name": "ko", "kind": "contrast", "weights": {"KO": 1.0, "WT": -1.0}}]
+
+    def test_center_defaults_true_and_is_carried_into_the_job(self, tree):
+        assert _bayes(TABLE, tree).tables["field"].center is True
+        job = self._job(tree, self._study(tree, False, self.HYPS))
+        assert job.center is False and job.provenance["table"]["definition"]["center"] is False
+        assert self._job(tree, self._study(tree, None, self.HYPS)).center is True
+
+    def test_center_must_be_a_boolean(self, tree):
+        with pytest.raises(BayesConfigError, match="center"):
+            parse_bayes_config({"tables": {"field": {**TABLE["field"], "center": "no"}}}, tree)
+
+    def test_level_entries_map_to_lv_terms_only_when_uncentred(self, tree):
+        pri = {"version": 1, "entries": [
+            {"dv": "value", "hypothesis": "ko_level", "band": "40 ITC", "prior": {"mean": 0.3, "sd": 0.9},
+             "source": "x"},
+            {"dv": "value", "hypothesis": "ko", "band": "chirp mean ERSP", "prior": {"mean": -0.4, "sd": 0.5},
+             "source": "y"}]}
+        (tree / "pri.yaml").write_text(yaml.safe_dump(pri))
+        job = self._job(tree, self._study(tree, False, self.HYPS, priors="pri.yaml"))
+        assert job.informative == {"lv_40ITC_KO": [0.3, 0.9], "x_chirpmeanERSP_KO": [-0.4, 0.5]}
+        with pytest.raises(BayesConfigError, match="one group minus the reference"):
+            self._job(tree, self._study(tree, True, self.HYPS, priors="pri.yaml"))

@@ -34,6 +34,7 @@ class BayesJob:
     seed: int
     gate_settings: dict = dataclasses.field(default_factory=dict)   # bayes.gate: part of the gate id (E3)
     provenance: dict = dataclasses.field(default_factory=dict)      # package, study and prior files (the manifest)
+    center: bool = True                                             # False: uncentred outcome (declared tables)
 
 
 def design_payload(config: StudyConfig) -> tuple[dict, list[dict]]:
@@ -151,8 +152,8 @@ def _build_declared_job(config: StudyConfig, spec, dv: str, bayes: BayesConfig, 
         # one set-I file may serve several declared tables: check every entry's band against all of them (a misspelt
         # band still fails), then keep this table's entries only
         every = sorted({o for t in bayes.tables.values() for o in t.outcomes})
-        info = load_informative(bayes.informative, dv, design, hyps, bands=every) or {}
-        mine = tuple(f"x_{_safe(o)}_" for o in spec.outcomes)
+        info = load_informative(bayes.informative, dv, design, hyps, bands=every, levels=not spec.center) or {}
+        mine = tuple(f"{p}_{_safe(o)}_" for o in spec.outcomes for p in ("x", "lv"))
         info = {k: v for k, v in info.items() if k.startswith(mine)} or None
     hyps, sets = _select(bayes, hyps, hypotheses, prior_sets, info)
     f, g = bayes.fit, bayes.gate
@@ -165,7 +166,7 @@ def _build_declared_job(config: StudyConfig, spec, dv: str, bayes: BayesConfig, 
                     design=design, hypotheses=hyps, prior_sets=sets, informative=info, rope_sd=bayes.rope_sd,
                     table_out=str(tbl_dir / f"{spec.name}_hypotheses_bayes.csv"), work_dir=str(work), gate=gate,
                     chains=f.chains, iter=f.iter, warmup=f.warmup, seed=f.seed, gate_settings=gate_settings,
-                    provenance=provenance)
+                    provenance=provenance, center=spec.center)
 
 
 def _file_record(path: Path | None) -> dict | None:
