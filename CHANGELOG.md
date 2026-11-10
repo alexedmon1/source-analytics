@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- **The network and directed modules draw the figures source-lightbox drew** (results plan 5b.4), from
+  their own hypotheses tables, each recorded in `figures.jsonl`:
+  - `roi_nbs` (and `roi_network`): `roi_nbs_components__<measure>.png`, the largest component per declared
+    hypothesis and band, * where significant (FWE); and `circos__<measure>__<band>__<hypothesis>.png`, a
+    significance circos of each significant component of a two-group contrast (`__c<id>` when a test has
+    several). Equivalence hypotheses form no components and are not shown.
+  - `roi_graph`: `roi_graph_hypotheses__<graph metric>__<hypothesis>.png`, ROI x band heatmaps of the declared
+    test's t, one panel per connectivity measure, * from the table's `significant` (lightbox showed one
+    contrast at one measure).
+  - `roi_directed`: `roi_directed_global_hypotheses__<dv>.png`, the whole-brain test's Hedges g per declared
+    contrast and band (lightbox showed the disease effect only).
+  - `viz/hypothesis_heatmaps.py`: the grid and panel helpers they share.
+
 ### Fixed
 
 - **Equivalence rows always state a margin above 0.** A cell whose equivalence margin is not above 0 now gets no
