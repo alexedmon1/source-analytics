@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Equivalence rows always state a margin above 0.** A cell whose equivalence margin is not above 0 now gets no
+  row, in the Python tabular adapter and in R (`.adapt_equivalence`, the per-edge `.adapt_cell`). Such a cell
+  either does not vary (residual SD 0, as for a graph metric that is 0 in every subject: 550 of FORGE roi_graph's
+  8,190 equivalence rows) or has no `gap_fraction` reference. Those rows were written with a margin of 0 or blank and
+  `equivalent` False, which read as "not equivalent", and failed `neurobox check`. Methods: HYPOTHESIS.md §6.
+
 ## v0.9.0 — 2026-11-09 (the Bayesian group engine; field runs; figures say what they show)
 
 The Bayesian engine (engine plan E0-E6: configuration, provenance and gate ids, the gate's equivalence rule, the

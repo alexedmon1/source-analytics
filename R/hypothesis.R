@@ -529,7 +529,9 @@ mde_from_se <- function(se, df = Inf, alpha = MDE_ALPHA, power = MDE_POWER) {
     base$equivalent[i] <- tost_equivalent(base$estimate[i], base$SE[i], base$df[i], m)
   }
   base$stat_type <- "tost"
-  base
+  # A cell with no margin above 0 (it does not vary, or gap_fraction has no
+  # reference there) cannot be tested for equivalence: it gets no row.
+  base[!is.na(base$margin_used) & base$margin_used > 0, , drop = FALSE]
 }
 
 # ---- Runner ----------------------------------------------------------------
@@ -735,6 +737,7 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
                   resid_sd = resid_sd)
   if (hyp$kind == "equivalence") {
     m <- .equivalence_margin(hyp$margin, NA_real_, resid_sd)
+    if (is.na(m) || m <= 0) return(res[0, , drop = FALSE])  # untestable cell: no row
     res$margin_used <- m
     res$equivalent <- tost_equivalent(res$estimate, res$SE, res$df, m)
     res$stat_type <- "tost"

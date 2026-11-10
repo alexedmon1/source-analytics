@@ -190,6 +190,11 @@ Margin modes:
   explicitly (`margin: { mode: gap_fraction, value: 0.25, ref: disease_effect }`), never a
   hidden gate. (The reference wiring is added when a study uses it.)
 
+A cell whose margin is not above 0 gets no equivalence row: it does not vary (residual SD 0,
+such as a graph metric that is 0 in every subject), or `gap_fraction` has no reference there.
+Equivalence within a margin of 0 is untestable, and the results specification requires every
+equivalence row to state a margin above 0.
+
 ## 7. API reference
 
 **R (`R/hypothesis.R`)**

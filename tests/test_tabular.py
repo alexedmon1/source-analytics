@@ -183,6 +183,23 @@ def test_equivalence_verdict(tmp_path):
     assert (out["margin_used"] > 0).all()
 
 
+def test_equivalence_skips_a_cell_that_does_not_vary(tmp_path):
+    """A constant cell (residual SD 0) has a margin of 0 under mode sd: no row."""
+    df = _long_df()
+    df.loc[df.roi == "B", "value"] = 0.0
+    hyps = [Hypothesis(name="norm", kind="equivalence", role="normalization",
+                       weights={"KO_HD_ICV": 1.0, "WT_VEH": -1.0},
+                       margin={"mode": "sd", "value": 0.5})]
+    out = write_module_hypotheses_tabular(
+        df, _cfg(hyps), tmp_path, prefix="roi_graph",
+        value_col="value", spatial_col="roi",
+        facet_cols=("conn_metric", "graph_metric"), band_col="band",
+    )
+    assert out is not None
+    assert sorted(out["spatial"]) == ["A", "C"]
+    assert (out["margin_used"] > 0).all()
+
+
 def test_fdr_scope_family_size():
     # One signal cell among weak cells in band b1; b2 all weak. Per-band recovers it;
     # the hypothesis-wide family (n=10) dilutes it. (Same logic as the R §9 test.)

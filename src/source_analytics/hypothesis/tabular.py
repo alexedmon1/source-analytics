@@ -314,6 +314,11 @@ def _adapt_cell(by_group: dict[str, np.ndarray], hyp: Hypothesis,
         mode = margin.get("mode", "sd")
         val = float(margin.get("value", 0.0))
         m = val * resid_sd if mode == "sd" else float("nan")
+        if not (np.isfinite(m) and m > 0):
+            # No margin to test against: the cell does not vary (residual SD 0,
+            # e.g. a graph metric that is 0 in every subject) or the mode has
+            # no reference here. Equivalence is untestable, so the cell gets no row.
+            return None
         zc = float(st.t.ppf(0.95, df_res))
         equivalent = bool(np.isfinite(m) and (est - zc * se > -m) and (est + zc * se < m))
         row["stat_type"] = "tost"
