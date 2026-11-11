@@ -213,8 +213,16 @@ def plot_significance_circos(
     title: str = "",
     dpi: int = 200,
     sig_label: str = "region pairs p < 0.05 uncorrected",
+    edge_stat: np.ndarray | None = None,
+    stat_label: str = "t",
+    stat_threshold: float | None = None,
 ) -> None:
     """Single-panel circos highlighting significant connections.
+
+    With *edge_stat* (each marked pair's test statistic, e.g. an NBS component's edge t), the
+    marked pairs are coloured by that statistic instead of the raw difference, the others are left
+    out, and the colour bar marks ``±stat_threshold`` (the cut every marked edge passed), so the
+    picture says how far past the cut each edge is rather than a difference in raw units.
 
     Significant ROI pairs (from *sig_mask*) are drawn opaque; all others
     are ghosted so the significant ones stand out.
@@ -239,37 +247,70 @@ def plot_significance_circos(
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
 
-    diff = mat_a - mat_b
-    diff_vmax = np.nanmax(np.abs(diff))
-    if diff_vmax == 0:
-        diff_vmax = 1.0
-
     n_sig = int(sig_mask[np.triu_indices_from(sig_mask, k=1)].sum())
-
     fig, ax = plt.subplots(1, 1, figsize=(7.5, 7.5))
-    plot_circos(
-        diff, roi_labels, region_names, region_sizes, ax,
-        cmap="RdBu_r",
-        threshold=0.0,
-        vmin=-diff_vmax, vmax=diff_vmax,
-        sig_mask=sig_mask,
-    )
 
-    ax.set_title(
-        f"Difference ({group_labels[0]} \u2013 {group_labels[1]})"
-        f"\n{n_sig} {sig_label}",
-        fontsize=11, fontweight="bold", pad=12,
-    )
-
-    sm = ScalarMappable(
-        cmap="RdBu_r", norm=Normalize(vmin=-diff_vmax, vmax=diff_vmax),
-    )
-    sm.set_array([])
-    cbar = fig.colorbar(
-        sm, ax=ax, orientation="horizontal",
-        fraction=0.04, pad=0.04, shrink=0.5,
-    )
-    cbar.set_label("Difference", fontsize=12)
+    if edge_stat is not None:
+        shown = np.where(sig_mask | sig_mask.T, np.nan_to_num(edge_stat), 0.0)
+        cut = float(stat_threshold or 0.0)
+        vmax = max(float(np.nanmax(np.abs(shown))), cut * 1.25, 1e-9)
+        plot_circos(
+            shown, roi_labels, region_names, region_sizes, ax,
+            cmap="RdBu_r", threshold=1e-9, vmin=-vmax, vmax=vmax,
+            linewidth_range=(1.2, 4.0), sig_mask=sig_mask | sig_mask.T,
+        )
+        ax.set_title(
+            f"{stat_label} ({group_labels[0]} \u2013 {group_labels[1]}) per edge"
+            f"\n{n_sig} {sig_label}",
+            fontsize=11, fontweight="bold", pad=12,
+        )
+        sm = ScalarMappable(cmap="RdBu_r", norm=Normalize(vmin=-vmax, vmax=vmax))
+        sm.set_array([])
+        # pad clears the ROI names that hang below the circle
+        cbar = fig.colorbar(sm, ax=ax, orientation="horizontal",
+                            fraction=0.04, pad=0.16, shrink=0.6)
+        if cut:
+            cbar.ax.axvspan(-cut, cut, color="0.85", zorder=3)
+            for x in (-cut, cut):
+                cbar.ax.axvline(x, color="black", linewidth=1.2, zorder=4)
+            cbar.ax.text(0, 0.5, "below the cut", ha="center", va="center",
+                         fontsize=8, color="0.3", zorder=5)
+            ticks = sorted({-cut, cut, *[t for t in cbar.get_ticks()
+                                         if cut * 1.15 < abs(t) <= vmax]})
+            cbar.set_ticks(ticks)
+            cbar.ax.set_xlim(-vmax, vmax)
+            from ..viz_ticks import keep_ticks
+            keep_ticks(cbar, [-cut, cut])  # the cut's numbers win when labels would collide
+            cbar.set_label(f"{stat_label} per edge; every edge drawn has |{stat_label}| \u2265 "
+                           f"{cut:g} (the cut, marked)", fontsize=10)
+        else:
+            cbar.set_label(f"{stat_label} per edge", fontsize=11)
+    else:
+        diff = mat_a - mat_b
+        diff_vmax = np.nanmax(np.abs(diff))
+        if diff_vmax == 0:
+            diff_vmax = 1.0
+        plot_circos(
+            diff, roi_labels, region_names, region_sizes, ax,
+            cmap="RdBu_r",
+            threshold=0.0,
+            vmin=-diff_vmax, vmax=diff_vmax,
+            sig_mask=sig_mask,
+        )
+        ax.set_title(
+            f"Difference ({group_labels[0]} \u2013 {group_labels[1]})"
+            f"\n{n_sig} {sig_label}",
+            fontsize=11, fontweight="bold", pad=12,
+        )
+        sm = ScalarMappable(
+            cmap="RdBu_r", norm=Normalize(vmin=-diff_vmax, vmax=diff_vmax),
+        )
+        sm.set_array([])
+        cbar = fig.colorbar(
+            sm, ax=ax, orientation="horizontal",
+            fraction=0.04, pad=0.04, shrink=0.5,
+        )
+        cbar.set_label("Difference", fontsize=12)
 
     if title:
         fig.suptitle(title, fontsize=13, fontweight="bold", y=1.0)
@@ -279,6 +320,82 @@ def plot_significance_circos(
     fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     logger.info("Saved significance circos: %s", output_path)
+
+
+def plot_omnibus_network(
+    f_matrix: np.ndarray,
+    roi_labels: list[str],
+    region_names: list[str],
+    region_sizes: list[int],
+    groups: list[tuple[str, float, float, int]],
+    output_path: str | Path,
+    *,
+    f_cut: float,
+    n_groups: int,
+    title: str,
+    network_label: str,
+    measure_label: str,
+    dpi: int = 200,
+) -> None:
+    """A network found by an omnibus (all-groups) NBS test, and where each group sits on it.
+
+    The F test says the groups differ across the network but not which way, so the figure has two
+    parts, each labelled for what it is: on the left the network's edges, coloured by their F
+    (one colour, no direction), with the cut every edge passed marked; on the right each group's
+    mean, per animal, of the measure over exactly those edges, with its standard error. The right
+    panel describes where the groups sit; it is not a further test.
+
+    ``groups`` is (label, mean, standard error, animals) per group, in the design's order.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    shown = np.nan_to_num(f_matrix)
+    n_edges = int((np.triu(shown, k=1) > 0).sum())
+    vmax = max(float(shown.max()), f_cut * 1.25)
+    fig, (ax, side) = plt.subplots(1, 2, figsize=(13.5, 7.8), gridspec_kw={"width_ratios": [2.1, 1]})
+    mask = shown > 0
+    plot_circos(shown, roi_labels, region_names, region_sizes, ax, cmap="Purples",
+                threshold=1e-9, vmin=f_cut * 0.6, vmax=vmax, linewidth_range=(1.2, 4.0), sig_mask=mask)
+    ax.set_title(f"The network: its {n_edges} edges, coloured by F\n"
+                 f"(one-way ANOVA across the {n_groups} groups, per edge; F has no direction)",
+                 fontsize=11, fontweight="bold", pad=12)
+    sm = ScalarMappable(cmap="Purples", norm=Normalize(vmin=f_cut * 0.6, vmax=vmax))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, orientation="horizontal", fraction=0.04, pad=0.16, shrink=0.6)
+    cbar.ax.set_xlim(f_cut, vmax)
+    cbar.ax.axvline(f_cut, color="black", linewidth=1.2)
+    ticks = sorted({round(f_cut, 1), *[t for t in cbar.get_ticks() if f_cut * 1.15 < t <= vmax]})
+    cbar.set_ticks(ticks)
+    from ..viz_ticks import keep_ticks
+    keep_ticks(cbar, [round(f_cut, 1)])
+    cbar.set_label(f"F per edge; every edge drawn has F \u2265 {f_cut:.2f} (p < 0.01, the cut)", fontsize=10)
+
+    names = [g[0] for g in groups]
+    means = np.array([g[1] for g in groups])
+    errors = np.array([g[2] for g in groups])
+    y = np.arange(len(groups))[::-1]
+    side.errorbar(means, y, xerr=errors, fmt="o", color="#5b3f99", ecolor="#5b3f99", capsize=4, markersize=7)
+    side.set_yticks(y)
+    side.set_yticklabels([f"{name}  (n={g[3]})" for name, g in zip(names, groups)], fontsize=10)
+    side.set_xlabel(f"{measure_label}, mean over the network's {n_edges} edges\n(per animal; group mean \u00b1 SE)",
+                    fontsize=10)
+    side.set_title("Where each group sits on this network\n(descriptive: no further test)",
+                   fontsize=11, fontweight="bold", pad=12)
+    side.grid(axis="x", alpha=0.3)
+    side.margins(y=0.15)
+    for spine in ("top", "right"):
+        side.spines[spine].set_visible(False)
+
+    fig.suptitle(f"{title}\n{network_label}", fontsize=13, fontweight="bold", y=1.02)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved omnibus network: %s", output_path)
 
 
 # ---------------------------------------------------------------------------

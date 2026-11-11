@@ -223,10 +223,47 @@ class ROIDirectedAnalysis(BaseAnalysis):
         pass
 
     def figures(self) -> None:
-        """Regenerate R figures from existing data/tables."""
+        """Regenerate R figures from existing data/tables, then the global tests' heatmap."""
         self._call_r_figures_only(
             "roi_transfer_entropy_analysis.R", "roi_transfer_entropy_edges.csv",
         )
+        self._plot_global_hypotheses()
+
+    def _plot_global_hypotheses(self) -> None:
+        """Per directed measure: declared contrast x band heatmap of the whole-brain test's
+        Hedges g, * where significant (results plan 5b.4, moved here from source-lightbox, which
+        showed the disease effect only)."""
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        from ..figure_record import record_figure
+        from ..viz import hypothesis_heatmaps as hh
+
+        table = f"{self.name}_global_hypotheses.csv"
+        path = self.tbl_dir / table
+        if not path.exists():
+            return
+        df = pd.read_csv(path)
+        tested = df[df["kind"] == "contrast"]
+        spec = getattr(self.config, "design_spec", None)
+        declared = list(spec.hypotheses) if spec is not None else []
+        labels = {h.name: (h.label or h.name) for h in declared}
+        order = [h.name for h in declared]
+        for dv in dict.fromkeys(tested["dv"]):
+            sub = tested[tested["dv"] == dv]
+            vals, sig, rows, cols = hh.grid(sub, "hypothesis", "band", "effect_size",
+                                            row_order=order, col_order=self._selected_bands())
+            fig, ax = plt.subplots(figsize=(1.0 * len(cols) + 4.5, 0.5 * len(rows) + 2))
+            im = hh.draw(ax, vals, sig, rows, cols, row_labels=labels)
+            measure = str(sub["measure"].iloc[0]) if "measure" in sub.columns else dv
+            ax.set_title(f"Whole-brain {measure.replace('_', ' ')}: Hedges g per contrast and band "
+                         "(* significant)", fontsize=10)
+            fig.colorbar(im, ax=ax, label="Hedges g (group A - group B)")
+            out = hh.save(fig, self.fig_dir / f"{self.name}_global_hypotheses__{dv}.png")
+            record_figure(self.fig_dir, out, measure=dv, kind="summary", shows=table,
+                          caption=f"Whole-brain {measure.replace('_', ' ')}: Hedges g per declared "
+                                  "contrast and band; * significant.")
 
     def summary(self) -> None:
         """Call Rscript for statistics and summary report.

@@ -5,15 +5,15 @@ specification (a ``RESULTS_SPEC``; see results_spec.py) and has written its
 ``analysis.json``, this runs the module's own figures step (its R figures and
 brain mosaics, from the tables and data already computed), copies
 the module's figures into the analysis folder and lists them in its
-``analysis.json``, and then builds one gallery for the study with neurobox-dev's
-shell (``neurobox.gallery.build``). The study's localization summaries
+``analysis.json``, and then builds one gallery for the study with Lumière's
+shell (``lumiere.gallery.build``). The study's localization summaries
 (source-localization's ``study qc`` with its ``results`` extra) are included from
 the study config's ``paths.localizations``.
 
 The gallery goes where every tool puts one: ``<study>/gallery/``, at the top of the
 study's folder, the nearest folder above the study config that has a ``study.toml``
 (the config's own folder when none does). Settings come from ``gallery.yaml`` there
-(the format every tool shares; see ``neurobox.gallery``), or beside the study config,
+(the format every tool shares; see ``lumiere.gallery``), or beside the study config,
 and otherwise from the study config: its ``gallery_title`` or ``name``, ``groups`` and
 ``group_order``. Needs the optional ``results`` extra.
 """
@@ -57,7 +57,7 @@ def attach_figures(analysis: Any, drawn_now: set[str] | None = None) -> int:
     kind from its name and no test. The folder is checked afterwards, and the previous
     analysis.json restored if it no longer conforms. Returns the figures listed.
     """
-    from neurobox import check_analysis
+    from lumiere import check_analysis
 
     from .figure_record import read_records
 
@@ -146,7 +146,7 @@ def build(study_yaml: Path, out: Path | None = None, paradigms: list[str] | None
           draw: bool = True) -> Path:
     """Build the study's gallery; the path of its index.html."""
     try:
-        from neurobox import gallery as shell
+        from lumiere import gallery as shell
     except ImportError as exc:
         raise RuntimeError("the gallery needs the optional `results` extra: "
                            "pip install 'source-analytics[results]'") from exc

@@ -14,10 +14,57 @@
   known levels and checks the gate's truths). Centred runs are unchanged: the E0 replay (FORGE readouts, gate verdicts
   and simulator draws) passes digit for digit; gates from 2026.11.09.1 need rerunning only because the engine version
   is in the gate id.
+- **Lumière:** the results extra is `lumiere` (github.com/alexedmon1/lumiere, c977884; formerly neurobox-dev), imported
+  as `lumiere`. Galleries built by `gallery build` are Lumière's: the suite's top bar and sections, its mark, its
+  significance summary, `.lumiere-gallery` as their marker. An environment that had `neurobox-dev` should drop it
+  (`uv pip uninstall neurobox-dev`) before installing `lumiere`: both provide a `neurobox` folder.
+- **The network and directed modules draw the figures source-lightbox drew** (results plan 5b.4), from
+  their own hypotheses tables, each recorded in `figures.jsonl`:
+  - `roi_nbs` (and `roi_network`): `roi_nbs_components__<measure>.png`, the largest component per declared
+    hypothesis and band, * where significant (FWE); and `circos__<measure>__<band>__<hypothesis>.png`, a
+    significance circos of each significant component of a two-group contrast (`__c<id>` when a test has
+    several). Equivalence hypotheses form no components and are not shown.
+  - `roi_graph`: `roi_graph_hypotheses__<graph metric>__<hypothesis>.png`, ROI x band heatmaps of the declared
+    test's t, one panel per connectivity measure, * from the table's `significant` (lightbox showed one
+    contrast at one measure).
+  - `roi_directed`: `roi_directed_global_hypotheses__<dv>.png`, the whole-brain test's Hedges g per declared
+    contrast and band (lightbox showed the disease effect only).
+  - `viz/hypothesis_heatmaps.py`: the grid and panel helpers they share.
+  - A significant omnibus (all-groups) NBS component gets `circos__<measure>__<band>__<hypothesis>.png` too
+    (`viz.connectivity_plots.plot_omnibus_network`): its edges coloured by F (no direction) with the cut
+    (p < 0.01) marked, beside each group's mean of the measure over exactly those edges, per animal, ± SE,
+    labelled as descriptive and not a further test.
+  - NBS circos are coloured by each edge's t (`plot_significance_circos(edge_stat=, stat_threshold=)`), with
+    the cut (`threshold`, |t| ≥ 2.5 unless set) marked on the colour bar and the component's FWE p in the
+    title: NBS tests the network, not any one edge, and a raw difference in connectivity units said neither.
 
 ### Fixed
 
 - The Bayesian report listed a single declared outcome letter by letter ("outcomes (bands): L, o, w, ...").
+- **Lumière 0.4.4** (e5919ad, from 50ab668): the summary keeps a facet's own case unless it is a known name or one
+  plain word; the package says its version (0.4.4, the specification's); the functional vocabulary has `ReHo_zscore`
+  and `fALFF_zscore`. All 541 tests pass.
+- **Figures say what they show:** each figure the network and directed modules draw has a caption that starts with
+  what it shows (the gallery's card title), and roi_graph's whole-network bars say on the figure and in the
+  caption that their stars are Welch t-tests between pairs of groups, BH over every bar, not the declared tests.
+  roi_graph's description names the declared tests (a one-way model's t, the omnibus F, TOST; BH per family).
+  Lumière pinned at 50ab668.
+- **Only the caveats that apply:** the shared caveats (Hedges g, its interval, the MDE, legacy tables) are written
+  into `analysis.json` only where the tables have what they warn about (`results_spec.common_caveats`), so the
+  NBS is no longer told about effect sizes it does not have.
+- **roi_nbs describes itself as it runs:** Welch's t for a two-group contrast, a weighted t for several groups,
+  the F for the omnibus (threshold p < 0.01), equivalence summarized per edge; its `n_edges` and `direction`
+  columns are the specification's `n_edges` and `observed_direction` (Lumière 0.4.3, now pinned at 8c86e70), so
+  the gallery's summary gives each network's size and direction.
+- **No two numbers on a colour bar overlap**, in any figure the Python side saves: `viz_ticks.install()`
+  (run by `analyses/base.py` and `viz/__init__.py`) hides colour-bar tick labels that would collide, keeping
+  the ends and the figure's own marks (`viz_ticks.keep_ticks`, e.g. the NBS cut) first. R's figures space
+  their legends themselves. The NBS circos colour bar also sits clear of the ROI names below the circle.
+- **Equivalence rows always state a margin above 0.** A cell whose equivalence margin is not above 0 now gets no
+  row, in the Python tabular adapter and in R (`.adapt_equivalence`, the per-edge `.adapt_cell`). Such a cell
+  either does not vary (residual SD 0, as for a graph metric that is 0 in every subject: 550 of FORGE roi_graph's
+  8,190 equivalence rows) or has no `gap_fraction` reference. Those rows were written with a margin of 0 or blank and
+  `equivalent` False, which read as "not equivalent", and failed `neurobox check`. Methods: HYPOTHESIS.md §6.
 
 ## v0.9.0 — 2026-11-09 (the Bayesian group engine; field runs; figures say what they show)
 

@@ -321,6 +321,60 @@ class _ROINetworkBase(NetworkAnalysisBase):
         global_csv = self.output_dir / "data" / f"{self.name}_global_metrics.csv"
         if global_csv.exists():
             self._plot_global_metrics(global_csv, self.fig_dir)
+        hyp_csv = self.tbl_dir / f"{self.name}_hypotheses.csv"
+        if hyp_csv.exists():
+            self._plot_graph_hypotheses(pd.read_csv(hyp_csv), self.fig_dir)
+
+    def _plot_graph_hypotheses(self, hyps: pd.DataFrame, fig_dir: Path) -> None:
+        """Per graph metric and declared contrast: ROI x band heatmaps of the test's t, one panel
+        per connectivity measure, * where the declared test is significant (results plan 5b.4,
+        moved here from source-lightbox, which showed one contrast and measure)."""
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        from ..figure_record import record_figure
+        from ..viz import hypothesis_heatmaps as hh
+
+        needed = {"hypothesis", "kind", "graph_metric", "conn_metric", "spatial", "band", "stat"}
+        if not needed <= set(hyps.columns):
+            return
+        tested = hyps[(hyps["kind"] == "contrast") & hyps["spatial"].notna()
+                      & (hyps["spatial"].astype(str) != "")]
+        labels = {h.name: (h.label or h.name) for h in self._declared()}
+        order = [h.name for h in self._declared() if h.name in set(tested["hypothesis"])]
+        order += [h for h in dict.fromkeys(tested["hypothesis"]) if h not in order]
+        conns = [m for m in self._connectivity_metrics if m in set(tested["conn_metric"])]
+        conns += [m for m in dict.fromkeys(tested["conn_metric"]) if m not in conns]
+        bands = self._selected_bands()
+        n_figs = 0
+        for gm in dict.fromkeys(tested["graph_metric"]):
+            for hyp in order:
+                sub = tested[(tested["graph_metric"] == gm) & (tested["hypothesis"] == hyp)]
+                if sub.empty:
+                    continue
+                top = float(np.nanmax(np.abs(pd.to_numeric(sub["stat"], errors="coerce")))) or 1.0
+                fig, axes = plt.subplots(1, len(conns), figsize=(2.3 * len(conns) + 2.5, 8.5),
+                                         sharey=True, squeeze=False)
+                im = None
+                for ax, conn in zip(axes[0], conns):
+                    vals, sig, rows, cols = hh.grid(sub[sub["conn_metric"] == conn], "spatial",
+                                                    "band", "stat", col_order=bands)
+                    im = hh.draw(ax, vals, sig, rows, cols, vmax=top, annotate=False)
+                    ax.set_title(METRIC_LABELS.get(conn, conn), fontsize=10)
+                fig.suptitle(f"{gm.replace('_', ' ').title()}: {labels.get(hyp, hyp)} "
+                             "(t per region; * significant, BH within the declared family)")
+                if im is not None:
+                    fig.colorbar(im, ax=axes[0].tolist(), shrink=0.6, label="t (group A - group B)")
+                out = hh.save(fig, fig_dir / f"{self.name}_hypotheses__{gm}__{hyp}.png")
+                record_figure(fig_dir, out, measure=gm, contrast=hyp, kind="summary",
+                              shows=f"{self.name}_hypotheses.csv",
+                              caption=f"{gm.replace('_', ' ').capitalize()}, {labels.get(hyp, hyp)}: t per "
+                                      "region and band, one panel per connectivity measure; * significant "
+                                      "(BH within the declared family). A blank cell had no test: the "
+                                      "measure did not vary there.")
+                n_figs += 1
+        logger.info("%s: %d hypothesis heatmaps", self.name, n_figs)
 
     def _plot_global_metrics(self, csv_path: Path, fig_dir: Path) -> None:
         import matplotlib
@@ -412,14 +466,218 @@ class _ROINetworkBase(NetworkAnalysisBase):
                 ax.set_ylabel(gm_name.replace("_", " ").title())
                 ax.set_title(f"{gm_name.replace('_', ' ').title()} — {metric_label}")
                 ax.legend()
-                fig.tight_layout()
+                # the stars are Welch t-tests BH-corrected over every bar (_global_pairwise.csv), not the
+                # declared hypotheses, which test the nodal metrics: say so on the figure itself
+                fig.text(0.01, 0.005, "Bars: group mean \u00b1 SE. Stars: Welch t-tests between pairs of "
+                         "groups, BH over every bar here; not the analysis's declared tests.",
+                         fontsize=8, color="0.35", ha="left", va="bottom")
+                fig.tight_layout(rect=(0, 0.04, 1, 1))
                 out = fig_dir / (f"{self.name}_{metric}_{gm_name}".lower() + ".png")
                 fig.savefig(out, dpi=150)
                 plt.close(fig)
-                # the stars are Welch t-tests BH-corrected over every bar (_global_pairwise.csv), not the
-                # declared hypotheses, which test the nodal metrics
+                title = gm_name.replace("_", " ").capitalize()
                 record_figure(fig_dir, out, measure=gm_name, facets={"connectivity": metric},
-                              kind="distribution")
+                              kind="distribution",
+                              caption=f"{title}, {metric_label} (whole network): each group's mean \u00b1 SE "
+                                      "per band. Stars: Welch t-tests between pairs of groups, BH over every "
+                                      "bar; not the analysis's declared tests.")
+
+    # -------------------------------------------------------- NBS figures -- #
+    def _nbs_figures(self) -> None:
+        """The declared hypotheses' NBS results, drawn from the module's own tables: per
+        connectivity measure, a heatmap of the largest component per hypothesis and band; and a
+        circos of each significant component of a two-group contrast (results plan 5b.4, moved
+        here from source-lightbox)."""
+        hyp_csv = self.tbl_dir / f"{self.name}_hypotheses.csv"
+        if not hyp_csv.exists():
+            logger.info("%s: no hypotheses table, so no NBS figures", self.name)
+            return
+        hyps = pd.read_csv(hyp_csv)
+        self._plot_nbs_heatmaps(hyps, self.fig_dir)
+        edges_csv = self.tbl_dir / f"{self.name}_subnetwork_edges.csv"
+        if edges_csv.exists():
+            self._plot_nbs_circos(hyps, pd.read_csv(edges_csv), self.fig_dir)
+
+    def _declared(self) -> list:
+        spec = getattr(self.config, "design_spec", None)
+        return list(spec.hypotheses) if spec is not None else []
+
+    def _plot_nbs_heatmaps(self, hyps: pd.DataFrame, fig_dir: Path) -> None:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        from ..figure_record import record_figure
+
+        tested = hyps[hyps["kind"].isin(["contrast", "omnibus"])].copy()
+        if tested.empty:
+            return
+        tested["component_id"] = pd.to_numeric(tested["component_id"], errors="coerce").fillna(0)
+        tested["n_edges"] = pd.to_numeric(tested["n_edges"], errors="coerce").fillna(0)
+        tested["sig"] = tested["significant"].astype(str).str.lower().isin(["true", "1"])
+        order = [h.name for h in self._declared() if h.name in set(tested["hypothesis"])]
+        order += [h for h in dict.fromkeys(tested["hypothesis"]) if h not in order]
+        labels = {h.name: (h.label or h.name) for h in self._declared()}
+        bands = [b for b in self._selected_bands() if b in set(tested["band"])]
+        bands += [b for b in dict.fromkeys(tested["band"]) if b not in bands]
+        for metric in dict.fromkeys(tested["dv"]):
+            sub = tested[tested["dv"] == metric]
+            size = np.zeros((len(order), len(bands)))
+            star = np.zeros((len(order), len(bands)), dtype=bool)
+            for (h, b), cell in sub.groupby(["hypothesis", "band"]):
+                i, j = order.index(h), bands.index(b)
+                formed = cell[cell["component_id"] > 0]
+                size[i, j] = formed["n_edges"].max() if not formed.empty else 0
+                star[i, j] = bool(formed["sig"].any())
+            fig, ax = plt.subplots(figsize=(1.1 * len(bands) + 4.5, 0.55 * len(order) + 2))
+            im = ax.imshow(size, cmap="Blues", aspect="auto", vmin=0)
+            top = size.max() or 1
+            for i in range(len(order)):
+                for j in range(len(bands)):
+                    text = f"{int(size[i, j])}" + ("*" if star[i, j] else "")
+                    ax.text(j, i, text, ha="center", va="center", fontsize=9,
+                            fontweight="bold" if star[i, j] else "normal",
+                            color="white" if size[i, j] > 0.6 * top else "black")
+            ax.set_xticks(range(len(bands)))
+            ax.set_xticklabels(bands, rotation=45, ha="right")
+            ax.set_yticks(range(len(order)))
+            ax.set_yticklabels([labels.get(h, h) for h in order])
+            metric_label = METRIC_LABELS.get(metric, metric)
+            ax.set_title(f"NBS: largest component per hypothesis and band, {metric_label}")
+            cbar = fig.colorbar(im, ax=ax)
+            cbar.set_label("edges in the largest component; * p < 0.05 (FWE)")
+            fig.tight_layout()
+            out = fig_dir / f"{self.name}_components__{metric}.png"
+            fig.savefig(out, dpi=150)
+            plt.close(fig)
+            record_figure(fig_dir, out, measure=metric, kind="summary",
+                          shows=f"{self.name}_hypotheses.csv",
+                          caption=f"NBS, {metric_label}: the largest component per declared hypothesis "
+                                  "and band, in edges; * significant (FWE). Equivalence hypotheses form "
+                                  "no components and are not shown.")
+
+    def _plot_nbs_circos(self, hyps: pd.DataFrame, edges: pd.DataFrame, fig_dir: Path) -> None:
+        from ..figure_record import record_figure
+        from ..viz.connectivity_plots import build_roi_matrix, plot_significance_circos
+
+        roi_cats = self.config.roi_categories
+        if not roi_cats or self._edges_df is None:
+            logger.warning("%s: no roi_categories or connectivity edges, so no NBS circos", self.name)
+            return
+        declared = {h.name: h for h in self._declared()}
+        significant = hyps[hyps["significant"].astype(str).str.lower().isin(["true", "1"])]
+        n_figs = self._plot_omnibus_networks(significant[significant["kind"] == "omnibus"], edges,
+                                             declared, roi_cats, fig_dir)
+        sig = significant[significant["kind"] == "contrast"]
+        for _, row in sig.iterrows():
+            hyp = declared.get(str(row["hypothesis"]))
+            ends = hyp.pairwise_endpoints() if hyp is not None else None
+            if ends is None:
+                continue  # a weighted contrast of more than two groups has no two-group picture
+            ga, gb = ends
+            band, metric, cid = str(row["band"]), str(row["dv"]), int(row["component_id"])
+            members = edges[(edges["hypothesis"] == row["hypothesis"]) & (edges["band"] == band)
+                            & (edges["dv"] == metric)
+                            & (pd.to_numeric(edges["component_id"], errors="coerce") == cid)]
+            band_df = self._edges_df[self._edges_df["band"] == band]
+            if members.empty or band_df.empty or metric not in band_df.columns:
+                continue
+            mat_a, rl, rn, rs = build_roi_matrix(band_df, roi_cats, metric, group=ga)
+            mat_b, *_ = build_roi_matrix(band_df, roi_cats, metric, group=gb)
+            index = {r: i for i, r in enumerate(rl)}
+            mask = np.zeros((len(rl), len(rl)), dtype=bool)
+            tvals = np.zeros((len(rl), len(rl)))
+            stats = pd.to_numeric(members["stat"], errors="coerce").fillna(0.0)
+            for a, b, t in zip(members["roi_i"], members["roi_j"], stats):
+                if a in index and b in index:
+                    mask[index[a], index[b]] = mask[index[b], index[a]] = True
+                    tvals[index[a], index[b]] = tvals[index[b], index[a]] = t
+            if not mask.any():
+                continue
+            same_test = sig[(sig["hypothesis"] == row["hypothesis"]) & (sig["band"] == band)
+                            & (sig["dv"] == metric)]
+            several = len(same_test) > 1
+            out = fig_dir / (f"circos__{metric}__{band.replace(' ', '_')}__{row['hypothesis']}"
+                             + (f"__c{cid}" if several else "") + ".png")
+            label = hyp.label or hyp.name
+            cut = pd.to_numeric(pd.Series([row.get("threshold")]), errors="coerce").iloc[0]
+            cut = float(cut) if np.isfinite(cut) else float(self._nbs_threshold)
+            p_value = float(row["component_p"])
+            plot_significance_circos(
+                mat_a, mat_b, rl, rn, rs, mask, out,
+                group_labels=(self.config.get_group_label(ga), self.config.get_group_label(gb)),
+                title=f"{label}: {band} ({METRIC_LABELS.get(metric, metric)})",
+                sig_label=f"edges past the cut (|t| \u2265 {cut:g}) form one network, significant "
+                          f"as a whole: p = {p_value:.3g} (FWE)\nNBS tests the network, not "
+                          "any single edge",
+                edge_stat=tvals, stat_label="t", stat_threshold=cut,
+            )
+            record_figure(fig_dir, out, measure=metric, contrast=hyp.name,
+                          facets={"band": band}, kind="matrix",
+                          shows=f"{self.name}_subnetwork_edges.csv",
+                          caption=f"{label}, {band} ({METRIC_LABELS.get(metric, metric)}): the network's "
+                                  f"{int(row['n_edges'])} edges coloured by their t, the cut marked; "
+                                  f"p = {p_value:.3g} for the network as a whole (FWE).")
+            n_figs += 1
+        logger.info("%s: %d NBS circos", self.name, n_figs)
+
+    def _plot_omnibus_networks(self, rows: pd.DataFrame, edges: pd.DataFrame, declared: dict,
+                               roi_cats: dict, fig_dir: Path) -> int:
+        """Each significant omnibus component: its edges by F, and each group's mean over them."""
+        from scipy import stats as sp_stats
+
+        from ..figure_record import record_figure
+        from ..viz.connectivity_plots import build_roi_matrix, plot_omnibus_network
+
+        spec = getattr(self.config, "design_spec", None)
+        order = list(spec.levels) if spec is not None and spec.levels else list(self.config.groups)
+        n_figs = 0
+        for _, row in rows.iterrows():
+            band, metric, cid = str(row["band"]), str(row["dv"]), int(row["component_id"])
+            members = edges[(edges["hypothesis"] == row["hypothesis"]) & (edges["band"] == band)
+                            & (edges["dv"] == metric)
+                            & (pd.to_numeric(edges["component_id"], errors="coerce") == cid)]
+            band_df = self._edges_df[self._edges_df["band"] == band]
+            if members.empty or band_df.empty or metric not in band_df.columns:
+                continue
+            _, rl, rn, rs = build_roi_matrix(band_df, roi_cats, metric)
+            index = {r: i for i, r in enumerate(rl)}
+            fmat = np.zeros((len(rl), len(rl)))
+            pairs = set()
+            for a, b, f in zip(members["roi_i"], members["roi_j"],
+                               pd.to_numeric(members["stat"], errors="coerce").fillna(0.0)):
+                pairs.add(frozenset((a, b)))
+                if a in index and b in index:
+                    fmat[index[a], index[b]] = fmat[index[b], index[a]] = f
+            on = band_df[[frozenset(p) in pairs for p in zip(band_df["roi1"], band_df["roi2"])]]
+            per_animal = on.groupby(["subject", "group"])[metric].mean().reset_index()
+            present = [g for g in order if g in set(per_animal["group"])]
+            groups = []
+            for g in present:
+                vals = per_animal.loc[per_animal["group"] == g, metric].to_numpy()
+                se = float(vals.std(ddof=1) / np.sqrt(len(vals))) if len(vals) > 1 else 0.0
+                groups.append((self.config.get_group_label(g), float(vals.mean()), se, len(vals)))
+            n_animals = int(per_animal["subject"].nunique())
+            f_cut = float(sp_stats.f.ppf(0.99, len(present) - 1, n_animals - len(present)))
+            hyp = declared.get(str(row["hypothesis"]))
+            label = (hyp.label or hyp.name) if hyp is not None else str(row["hypothesis"])
+            measure_label = METRIC_LABELS.get(metric, metric)
+            out = fig_dir / f"circos__{metric}__{band.replace(' ', '_')}__{row['hypothesis']}.png"
+            plot_omnibus_network(
+                fmat, rl, rn, rs, groups, out, f_cut=f_cut, n_groups=len(present),
+                title=f"{label}: {band} ({measure_label})",
+                network_label=f"An NBS network of {int(row['n_edges'])} edges, significant as a whole: "
+                              f"p = {float(row['component_p']):.3g} (FWE); NBS tests the network, not any "
+                              "single edge",
+                measure_label=measure_label,
+            )
+            record_figure(fig_dir, out, measure=metric, contrast=str(row["hypothesis"]),
+                          facets={"band": band}, kind="matrix", shows=f"{self.name}_subnetwork_edges.csv",
+                          caption=f"{label}, {band} ({measure_label}): the network's edges by F (no "
+                                  "direction), and each group's mean of the measure over those edges, per "
+                                  "animal, \u00b1 SE (descriptive, not a further test).")
+            n_figs += 1
+        return n_figs
 
     # --------------------------------------------------------- summaries --- #
     def _write_summary(self, graph: bool = True, nbs: bool = True) -> None:
@@ -548,11 +806,12 @@ class ROINBSAnalysis(_ROINetworkBase):
                                              "equivalence summary)", "Standard": "element",
                               "ElementName": "component"}),
             ("n_edges", {"Description": "the component's supra-threshold edges (equivalence rows: the edges "
-                                        "tested)"}),
+                                        "tested)", "Standard": "n_edges"}),
             ("n_edges_increase", {"Description": "t rows: the component's edges where group_a is higher"}),
             ("n_edges_decrease", {"Description": "t rows: the component's edges where group_a is lower"}),
             ("mean_stat", {"Description": "t rows: the mean signed t over the component's edges"}),
             ("direction", {"Description": "t rows: which way the component's edges go",
+                           "Standard": "observed_direction",
                            "Levels": {"increase": "every edge higher in the contrast's positive side",
                                       "decrease": "every edge lower", "mixed": "both"}}),
             ("node_i", {"Description": "the edge's first ROI, by its index in the connectivity matrix"}),
@@ -590,7 +849,7 @@ class ROINBSAnalysis(_ROINetworkBase):
         self._run_nbs_hypotheses()
 
     def figures(self) -> None:
-        pass
+        self._nbs_figures()
 
     def summary(self) -> None:
         self._write_summary(graph=False, nbs=True)
@@ -616,6 +875,7 @@ class ROINetworkAnalysis(_ROINetworkBase):
 
     def figures(self) -> None:
         self._graph_figures()
+        self._nbs_figures()
 
     def summary(self) -> None:
         # The combined alias has no R report of its own (graph + NBS statistics

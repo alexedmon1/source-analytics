@@ -1,5 +1,9 @@
 """Visualization — R for ROI-level plots, Python for glass brain & connectivity."""
 
+from .. import viz_ticks
+
+viz_ticks.install()  # no colour bar's numbers overlap
+
 from .constants import (
     BAND_ORDER,
     order_bands,

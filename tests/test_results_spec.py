@@ -2,7 +2,7 @@
 
 The tables here are synthetic but have exactly the columns R's hypothesis layer
 writes (write_module_hypotheses), with R's ``NA`` for missing values. The
-conformance tests need the optional ``results`` extra (neurobox-dev) and skip
+conformance tests need the optional ``results`` extra (Lumière) and skip
 without it; the rest check that a missing extra, or a table the writer cannot
 describe, leaves the run and its tables alone.
 
@@ -93,8 +93,8 @@ RECORD = {"schema": 1, "analysis": "roi_aperiodic",
 
 
 def test_a_module_declares_canonical_measures_and_a_known_domain():
-    neurobox = pytest.importorskip("neurobox")
-    from neurobox.spec import canonical_measure, domain_vocabulary
+    lumiere = pytest.importorskip("lumiere")
+    from lumiere.spec import canonical_measure, domain_vocabulary
 
     declared = {n: c.RESULTS_SPEC for n, c in ANALYSIS_REGISTRY.items() if c.RESULTS_SPEC is not None}
     assert {"roi_aperiodic", "roi_psd", "electrode_psd", "roi_cross_freq"} <= set(declared)
@@ -102,12 +102,12 @@ def test_a_module_declares_canonical_measures_and_a_known_domain():
         assert spec.domain in domain_vocabulary(), name
         for measure in spec.measures.values():
             assert canonical_measure(measure) == (measure, True), (name, measure)
-    assert neurobox.SPEC_VERSION >= "0.4"
+    assert lumiere.SPEC_VERSION >= "0.4"
 
 
 def test_the_tables_are_described_and_conform(module):
-    pytest.importorskip("neurobox")
-    from neurobox import check
+    pytest.importorskip("lumiere")
+    from lumiere import check
 
     rep = rs.write(module, dict(RECORD), "2026-11-03T12:00:00+00:00")
     assert rep is not None and rep.ok and not rep.warnings, (rep and rep.errors, rep and rep.warnings)
@@ -142,7 +142,7 @@ def test_the_tables_are_described_and_conform(module):
 
 
 def test_families_of_different_kinds_say_per_family(module):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     _write_table(module.tbl_dir / "roi_aperiodic_hypotheses.csv",
                  _rows(spatial=("V1", "M1"), method="holm"))
     rep = rs.write(module, dict(RECORD), "2026-11-03T12:00:00+00:00")
@@ -166,7 +166,7 @@ def test_family_labels():
 
 
 def test_without_the_extra_nothing_is_written(module, monkeypatch):
-    monkeypatch.setattr(rs, "neurobox", None)
+    monkeypatch.setattr(rs, "lumiere", None)
     before = (module.tbl_dir / "roi_aperiodic_global_hypotheses.csv").read_text()
     assert rs.write(module, dict(RECORD), "2026-11-03T12:00:00+00:00") is None
     assert not (module.tbl_dir / "analysis.json").exists()
@@ -174,7 +174,7 @@ def test_without_the_extra_nothing_is_written(module, monkeypatch):
 
 
 def test_a_column_nobody_described_writes_no_analysis_and_does_not_raise(module):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     rows = [dict(r, mystery="1") for r in _rows()]
     _write_table(module.tbl_dir / "roi_aperiodic_global_hypotheses.csv", rows, extra_cols=("mystery",))
     assert rs.write(module, dict(RECORD), "2026-11-03T12:00:00+00:00") is None
@@ -228,7 +228,7 @@ def _declared_module(tmp_path, name):
 
 @pytest.mark.parametrize("name", sorted(MODULES))
 def test_each_declared_module_conforms(tmp_path, name):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     module = _declared_module(tmp_path, name)
     rep = rs.write(module, dict(RECORD), "2026-11-04T12:00:00+00:00")
     assert rep is not None and rep.ok and not rep.warnings, (rep and rep.errors, rep and rep.warnings)
@@ -281,7 +281,7 @@ def _study_config(paradigm="cartesian_mc", group="Resting", siblings=("cartesian
 
 
 def test_declared_contrasts_and_the_variant_are_written(module):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     module.config = _study_config()
     rep = rs.write(module, dict(RECORD), "2026-11-04T12:00:00+00:00")
     assert rep is not None and rep.ok and not rep.warnings, (rep and rep.errors, rep and rep.warnings)
@@ -305,7 +305,7 @@ def test_a_paradigm_is_a_variant_only_beside_others_of_its_group(over):
 def test_roi_graph_conforms_from_the_python_layer(tmp_path):
     """roi_graph's table comes from the Python tabular adapter: the graph metric is the measure
     (``measure_col``) and the connectivity measure a second facet (``extra_facets``)."""
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     import numpy as np
     import pandas as pd
 
@@ -419,7 +419,7 @@ def _write_and_check(tmp_path, name, cls, cfg):
 
 
 def test_roi_nbs_conforms_from_the_edge_layer(tmp_path):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     import numpy as np
 
     from source_analytics.analyses.roi_network_analysis import ROINBSAnalysis
@@ -454,7 +454,7 @@ def test_roi_nbs_conforms_from_the_edge_layer(tmp_path):
 
 
 def test_electrode_connectivity_conforms_from_the_cluster_layer(tmp_path):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     import numpy as np
 
     from source_analytics.analyses.electrode_connectivity_analysis import (
@@ -505,7 +505,7 @@ def test_the_balanced_accuracy_interval_and_bh():
 
 @pytest.mark.parametrize("name", ["electrode_signature", "roi_signature"])
 def test_signature_modules_conform(tmp_path, name):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     pytest.importorskip("sklearn")
     import numpy as np
 
@@ -576,7 +576,7 @@ def test_signature_statistics_read_the_saved_features(tmp_path):
 
 # ---------------------------------------------------------- roi_connectivity (descriptive) ---
 def test_roi_connectivity_writes_descriptive_tables_that_conform(tmp_path):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     import pandas as pd
 
     from source_analytics.analyses.roi_connectivity_analysis import ConnectivityAnalysis
@@ -613,7 +613,7 @@ def test_roi_connectivity_writes_descriptive_tables_that_conform(tmp_path):
 
 # ------------------------------------------------------- electrode_comparison (diagnostic) ---
 def test_electrode_comparison_is_described_as_a_diagnostic(tmp_path):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     import pandas as pd
 
     from source_analytics.analyses.electrode_comparison_analysis import ElectrodeComparisonAnalysis
@@ -643,3 +643,15 @@ def test_electrode_comparison_is_described_as_a_diagnostic(tmp_path):
                                                "aperiodic_comparison_stats.csv"]
     cols = json.loads((tbl / "aperiodic_comparison_stats.json").read_text())
     assert cols["measure"]["Standard"] == "measure" and "power_type" not in cols
+
+
+def test_common_caveats_only_where_they_apply(tmp_path):
+    """The NBS has no Hedges g, interval, MDE or legacy tables, so it is told about none of them."""
+    from source_analytics.results_spec import COMMON_CAVEATS, common_caveats
+
+    (tmp_path / "roi_nbs_hypotheses.csv").write_text("x\n")
+    nbs = [{"n_edges": "27", "component_p": "0.049", "mde": "", "effect_size_type": ""}]
+    assert common_caveats(nbs, tmp_path, {"roi_nbs_hypotheses.csv"}) == []
+    (tmp_path / "roi_psd_posthoc_roi.csv").write_text("x\n")
+    contrast = [{"effect_size_type": "hedges_g", "effect_size_lcl": "0.1", "mde": "0.4"}]
+    assert common_caveats(contrast, tmp_path, {"roi_nbs_hypotheses.csv"}) == list(COMMON_CAVEATS)

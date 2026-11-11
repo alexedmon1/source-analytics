@@ -22,7 +22,7 @@ def test_figure_kinds_and_captions():
 
 
 def test_figures_are_copied_listed_and_checked(module, tmp_path):  # noqa: F811
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     assert rs.write(module, dict(RECORD), "2026-11-03T12:00:00+00:00").ok
     figs = tmp_path / "figs"
     figs.mkdir()

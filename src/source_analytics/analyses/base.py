@@ -8,10 +8,12 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .. import viz_ticks
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
 
 logger = logging.getLogger(__name__)
+viz_ticks.install()  # no colour bar's numbers overlap, in any module's figures
 
 
 class RStepFailed(RuntimeError):
@@ -71,7 +73,7 @@ class BaseAnalysis(ABC):
     SELECTABLE: dict[str, str] = {}
 
     # How this module's hypothesis tables are described by the results
-    # specification (neurobox-dev; see results_spec.py). None = not described yet.
+    # specification (Lumière; see results_spec.py). None = not described yet.
     RESULTS_SPEC = None
 
     def __init__(self, config: StudyConfig, output_dir: Path):

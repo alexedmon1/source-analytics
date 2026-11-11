@@ -97,7 +97,7 @@ run** — add `--steps …,figures` or use `source-analytics figure`.
 pip install -e ".[all]"   # or:  uv pip install -e ".[all]"
 ```
 
-The optional `results` extra (in `all`) installs neurobox-dev, the shared results
+The optional `results` extra (in `all`) installs Lumière, the shared results
 specification; with it, modules that opt in also write `analysis.json` and column
 dictionaries beside their tables (see *Output structure*).
 
@@ -753,22 +753,22 @@ difference, partial omega squared's interval for an omnibus row (as
 `effectsize::F_to_omega2` gives it), the standardized slope's for a regression.
 
 **The study gallery.** `source-analytics gallery build --study study.yaml [--out DIR]`
-(with the `results` extra) builds one static gallery for the study with neurobox-dev's
+(with the `results` extra) builds one static gallery for the study with Lumière's
 shared shell, the same for every tool: it draws each opted-in module's figures from its
 tables, lists them in its `analysis.json`, and adds the localization summaries that
 source-localization's `study qc` writes. Settings come from a `gallery.yaml` beside the
-study config (sections, links, group labels; the format is in `neurobox.gallery`), or
+study config (sections, links, group labels; the format is in `lumiere.gallery`), or
 from the config itself. It will not replace a folder it did not build, such as a
 source-lightbox gallery.
 
 **The shared results specification.** With the `results` extra installed, a module
 that declares a `RESULTS_SPEC` (today `roi_aperiodic`) describes its hypothesis
-tables by neurobox-dev's results specification whenever its statistics run: an
+tables by Lumière's results specification whenever its statistics run: an
 `analysis.json` saying what the analysis is (id `eeg/<type>/<name>/<paradigm>`,
 domain, task, atlas, the correction families from `fdr_family`, caveats), a column
 dictionary `<table>.json` beside each hypothesis table, and the specification's
 fields added to `provenance.json`. Any reader can then use the tables without this
-package, and `python -m neurobox check <tables dir>` checks them. In those tables R's
+package, and `lumiere check <tables dir>` checks them. In those tables R's
 `NA` becomes an empty cell and a `measure` column gives the vocabulary's name for
 `dv` (`aperiodic_exponent`). Without the extra nothing is written and nothing else
 changes. The writer is `results_spec.py`.
