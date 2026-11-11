@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.10.0 — 2026-11-11 (a group's level against 0; Lumière galleries; network figures)
+
+The Bayesian engine reads a group's own level against 0 on uncentred outcomes (engine 2026.11.10.1); centred runs
+are unchanged (E0 replay passes). With main's results work: Lumière 0.4.4 as the results extra, and the network and
+directed modules draw their own figures; equivalence rows without a margin above 0 are no longer written.
 
 ### Added
 
