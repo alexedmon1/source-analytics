@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Where the data came from, in `provenance.json` (Lumière 0.4.5's `derived_from`).** Each analysis names the
+  source-localization run(s) it read, upstream of source-analytics: the version, the stage ("source localization",
+  or "field projection" for a field readout) and the settings' one-line description. A cohort localized with more
+  than one source-localization version gets one entry each, saying how many of its recordings each made; the
+  localization record counts every version (`localization.versions`), since a cohort must agree on its settings but
+  not on the package version. Sensor-level analyses, with no localization manifests, name nothing. The gallery
+  shows it as each analysis's "Data from" line. Lumière moves from e5919ad to 98072ed (0.4.5) for it.
+
 ## v0.10.0 — 2026-11-11 (a group's level against 0; Lumière galleries; network figures)
 
 The Bayesian engine reads a group's own level against 0 on uncentred outcomes (engine 2026.11.10.1); centred runs

@@ -8,6 +8,7 @@ or writing it can never take down a run that already produced its numbers.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import pickle
 from pathlib import Path
@@ -84,6 +85,15 @@ class TestRecordContents:
         assert loc["version"] == "0.5.1"
         assert loc["n_with_manifest"] == 2
         assert loc["n_unrecorded"] == 0
+        assert loc["versions"] == {"0.5.1": 2}
+
+    def test_every_localization_version_is_counted(self, tmp_path):
+        """A cohort agrees on its settings, not on source-localization's version: a cohort
+        localized across a fix must say so, not report one recording's version."""
+        subs, man = _cohort(tmp_path)
+        man["sub-2"] = dataclasses.replace(man["sub-2"], version="0.9.0")
+        loc = build_provenance(analysis="roi_psd", subjects=subs, manifests=man)["localization"]
+        assert loc["versions"] == {"0.5.1": 1, "0.9.0": 1}
 
     def test_monte_carlo_draw_parameters_are_recorded(self, tmp_path):
         subs, man = _cohort(tmp_path, sampling="monte_carlo")

@@ -86,6 +86,13 @@ def _localization(manifests: "dict[str, RunManifest]", n_subjects: int) -> dict:
         "n_unrecorded": n_subjects - len(manifests),
         "description": sample.describe(),
     }
+    # The cohort must agree on its localization settings, not on the package version (RunManifest.signature),
+    # so every version is counted: a sample's alone would hide a cohort localized across a fix.
+    versions: dict[str, int] = {}
+    for m in manifests.values():
+        v = str(m.version) if m.version else "unknown"
+        versions[v] = versions.get(v, 0) + 1
+    record["versions"] = dict(sorted(versions.items()))
     for field in _MANIFEST_FIELDS:
         record[field] = getattr(sample, field, None)
     if sample.is_monte_carlo:

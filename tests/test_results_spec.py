@@ -655,3 +655,27 @@ def test_common_caveats_only_where_they_apply(tmp_path):
     (tmp_path / "roi_psd_posthoc_roi.csv").write_text("x\n")
     contrast = [{"effect_size_type": "hedges_g", "effect_size_lcl": "0.1", "mde": "0.4"}]
     assert common_caveats(contrast, tmp_path, {"roi_nbs_hypotheses.csv"}) == list(COMMON_CAVEATS)
+
+
+def test_provenance_says_which_localization_the_data_came_from(module):
+    """Lumière 0.4.5's derived_from: source-localization's version(s) and settings, upstream of
+    source-analytics, so the gallery can say where an analysis's data came from."""
+    pytest.importorskip("lumiere")
+    record = {**RECORD, "localization": {"atlas": "allen26", "n_with_manifest": 20, "n_unrecorded": 0,
+                                         "version": "0.9.1", "versions": {"0.9.1": 20},
+                                         "description": "roi_based_ellipsoid, allen26, sLORETA"}}
+    rep = rs.write(module, record, "2026-11-16T12:00:00+00:00")
+    assert rep is not None and rep.ok, rep and rep.errors
+    p = json.loads((module.tbl_dir / "provenance.json").read_text())
+    assert p["derived_from"] == [{"Name": "source-localization", "Version": "0.9.1", "Stage": "source localization",
+                                  "Description": "roi_based_ellipsoid, allen26, sLORETA"}]
+
+
+def test_derived_from_splits_a_cohort_and_says_nothing_without_manifests():
+    split = rs.derived_from({"n_with_manifest": 3, "n_unrecorded": 1, "versions": {"0.5.1": 2, "0.9.0": 1}})
+    assert [(d["Version"], d["Description"]) for d in split] == [("0.5.1", "2 of 4 recordings"),
+                                                                ("0.9.0", "1 of 4 recordings")]
+    older = rs.derived_from({"n_with_manifest": 2, "n_unrecorded": 0, "version": "0.5.1"})   # before "versions"
+    assert older == [{"Name": "source-localization", "Version": "0.5.1", "Stage": "source localization"}]
+    assert rs.derived_from({"n_with_manifest": 0, "n_unrecorded": 5}) == []
+    assert rs.derived_from(None) == []

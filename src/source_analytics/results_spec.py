@@ -420,6 +420,28 @@ def _test_kinds(rows: list[dict[str, str]]) -> list[str]:
     return [k for k in order if k in kinds]
 
 
+def derived_from(localization: dict | None) -> list[dict]:
+    """The source-localization run(s) an analysis read, for ``provenance.json``'s ``derived_from``
+    (Lumière 0.4.5): one entry a source-localization version, saying how many recordings it made
+    when the cohort is split or partly unrecorded. Nothing for a cohort with no manifests (sensor
+    level, or localizations made before manifests were written)."""
+    loc = localization or {}
+    n = int(loc.get("n_with_manifest") or 0)
+    if not n:
+        return []
+    total = n + int(loc.get("n_unrecorded") or 0)
+    versions = loc.get("versions") or {str(loc.get("version") or "unknown"): n}
+    stage = "field projection" if loc.get("readout_mode") == "field" else "source localization"
+    out = []
+    for version, count in versions.items():
+        bits = [loc["description"]] if loc.get("description") else []
+        if len(versions) > 1 or total > n:
+            bits.append(f"{count} of {total} recordings")
+        out.append({"Name": "source-localization", "Version": str(version), "Stage": stage,
+                    **({"Description": "; ".join(bits)} if bits else {})})
+    return out
+
+
 def write(analysis, record: dict | None, started: str) -> Any:
     """Describe ``analysis``'s tables by the specification; the checker's report, or None.
 
@@ -524,7 +546,8 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
     spec_prov = lumiere.provenance(
         generated_by, status="completed", start=started,
         end=datetime.now(timezone.utc).isoformat(timespec="seconds"), run_id=run_id, inputs=inputs,
-        settings={"paradigm": paradigm, "profile": profile, "analysis": analysis.name})
+        settings={"paradigm": paradigm, "profile": profile, "analysis": analysis.name},
+        derived_from=derived_from(record.get("localization")) or None)
     merged = {**record, **spec_prov}                # this package's fields stay for source-lightbox
     report = lumiere.write_analysis(folder, analysis_json, merged, strict=False)
     if report.ok:
