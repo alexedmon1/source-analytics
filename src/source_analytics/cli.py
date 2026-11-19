@@ -470,7 +470,8 @@ def _print_plugins():
 
     absent = sorted(n for n in MOVED_CANONICAL if n not in ANALYSIS_REGISTRY)
     if absent:
-        print("\n    Not available in this install — these moved out of core:")
+        print("\n    Removed in v0.8.0 (the vertex level is retired; v0.7.1 reproduces them).")
+        print("    Unmaintained plugin that registers them, if installed:")
         by_plugin: dict[str, list[str]] = {}
         for n in absent:
             by_plugin.setdefault(MOVED_CANONICAL[n], []).append(n)

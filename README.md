@@ -603,7 +603,8 @@ A vertex map describes one arbitrary placement of the source grid. The ROI
 analyses over Monte Carlo source operators integrate over placement instead, and
 match what a 30-channel dorsal array can actually resolve, so they replaced them.
 
-- A config or `--analysis` naming one now fails with a message naming the plugin.
+- A config or `--analysis` naming one now fails with a message saying it was
+  removed in v0.8.0 and that v0.7.1 reproduces earlier vertex results.
 - `source-analytics list --plugins` prints them, and what provides them.
 - They live in the unmaintained `source-analytics-vertex` plugin. Installing it
   registers them again through the `source_analytics.plugins` entry point.

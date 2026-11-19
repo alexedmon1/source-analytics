@@ -70,11 +70,14 @@ def test_the_vertex_analyses_left_core():
     assert "source-analytics-vertex" in plugins.missing_analysis_hint("vertex_cluster")
     assert "source-analytics-vertex" in plugins.missing_analysis_hint("wholebrain")
     assert plugins.missing_analysis_hint("roi_psd") == ""
+    # Retired, not moved: the hint must not tell the user to install the plugin.
+    hint = plugins.missing_analysis_hint("vertex_cluster")
+    assert "retired" in hint and "v0.7.1" in hint and "install " not in hint
 
 
 def test_unknown_analysis_error_names_the_plugin():
     if "vertex_cluster" in ANALYSIS_REGISTRY:
         pytest.skip("source-analytics-vertex is installed in this environment")
     analyzer = StudyAnalyzer(config=None, subjects=[object()])
-    with pytest.raises(ValueError, match="install source-analytics-vertex"):
+    with pytest.raises(ValueError, match="removed from source-analytics in v0.8.0"):
         analyzer.run_analysis("vertex_cluster")

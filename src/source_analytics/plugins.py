@@ -35,9 +35,10 @@ logger = logging.getLogger(__name__)
 
 ENTRY_POINT_GROUP = "source_analytics.plugins"
 
-# Analyses that left the core package, and the plugin that now provides them.
-# Only used to turn "unknown analysis" into an instruction.
-#: Canonical names of the analyses that left core, by plugin. Listed to a user.
+# Analyses removed from the core package in v0.8.0 (the vertex level, retired),
+# and the unmaintained plugin that still registers them if installed. Only used
+# to turn "unknown analysis" into an explanation.
+#: Canonical names of the removed analyses, by plugin. Listed to a user.
 MOVED_CANONICAL: dict[str, str] = {
     name: "source-analytics-vertex"
     for name in (
@@ -103,11 +104,12 @@ def install_plugins(
 
 
 def missing_analysis_hint(name: str) -> str:
-    """A sentence naming the plugin that provides ``name``, or ``""``."""
+    """A sentence saying ``name`` was removed with the retired vertex level, or ``""``."""
     plugin = MOVED_TO_PLUGIN.get(name)
     if plugin is None:
         return ""
     return (
-        f" '{name}' moved out of source-analytics in v0.8.0 into the {plugin} "
-        f"plugin; install {plugin} to run it."
+        f" '{name}' was removed from source-analytics in v0.8.0: the vertex analyses "
+        f"are retired. v0.7.1 reproduces earlier vertex results (the unmaintained "
+        f"{plugin} plugin also registers them, if installed)."
     )
