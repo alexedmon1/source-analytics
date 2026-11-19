@@ -1,7 +1,7 @@
 # source-analytics
 
-Analysis modules for EEG source-localized ROI, vertex and electrode data, driven
-by a single study YAML.
+Analysis modules for EEG source-localized ROI and electrode data, driven by a
+single study YAML.
 
 The full usage guide — installation, the CLI, the module list, output layout —
 lives in the [README](https://github.com/alexedmon1/source-analytics#readme).
@@ -19,6 +19,18 @@ implemented here, and any deviation from the canonical form.
 | [Connectivity metrics](methods/CONNECTIVITY_METHODS.md) | Per-metric provenance: reference, defining equation, implementation, deviations |
 | [Hypothesis layer — usage](methods/HYPOTHESIS.md) | Declarative hypotheses: how to declare and run them |
 | [Hypothesis layer — design](methods/DESIGN_SPEC.md) | Why the design/hypothesis spec is shaped the way it is |
+| [Bayesian engine](methods/BAYES_ENGINE.md) | The Bayesian hypothesis adapter: model, hypothesis kinds, the two prior sets, the simulation gate, declared outcome tables |
+| [Bayesian engine catalogue](methods/BAYES_CATALOGUE.md) | Every model, prior and decision rule with its id, version and values (generated from the code) |
+| [Benchmark scoring](methods/BENCHMARK.md) | One scoring contract for every method, against simulated cohorts with known truth |
+
+## Guides
+
+| Page | Covers |
+|---|---|
+| [Bayesian engine user guide](guides/BAYES_USER_GUIDE.md) | From installation to reading a result: declare, gate, fit, read the report, long runs, worked examples |
+
+[Known issues](KNOWN_ISSUES.md) lists the defects and open follow-ups in the
+effect sizes and the minimum detectable effect columns.
 
 ## Two rules that keep this site useful
 

@@ -1,6 +1,7 @@
-# Bayesian hypothesis adapter (`feat/bayes-group`): design, G1
+# Bayesian hypothesis adapter: design and method
 
-**Status:** design agreed 2026-10-14 (section 8); no code yet. Plan and decisions:
+**Status:** implemented. Released in v0.9.0 (2026-11-09); v0.10.0 carries engine version 2026.11.10.1 (see the
+[catalogue](BAYES_CATALOGUE.md)). Design agreed 2026-10-14 (section 8). Plan and decisions:
 `/mnt/e/research/EEG/bayes-sl/PLAN.md`, Phase G. Method precedent: bayes-sl Track A (`R/model.R`, `R/03_recovery_sbc.R`)
 and the tectum-pair model (`R/tp_model.R`, `R/tp_gate.R`).
 

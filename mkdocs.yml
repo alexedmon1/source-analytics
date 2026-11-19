@@ -1,5 +1,5 @@
 site_name: source-analytics
-site_description: Analysis modules for EEG source-localized ROI, vertex and electrode data
+site_description: Analysis modules for EEG source-localized ROI and electrode data
 repo_url: https://github.com/alexedmon1/source-analytics
 edit_uri: edit/main/docs/
 
@@ -34,6 +34,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Publishing this site: PUBLISHING.md
+  - Known issues: KNOWN_ISSUES.md
   - Methods:
       - Aperiodic fit window: methods/APERIODIC_FIT_WINDOW.md
       - Connectivity metrics: methods/CONNECTIVITY_METHODS.md

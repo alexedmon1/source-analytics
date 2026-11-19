@@ -1,4 +1,4 @@
-# Benchmark: one scoring contract for every method (Stage 2, `feat/bayes-group`)
+# Benchmark: one scoring contract for every method (Stage 2)
 
 Plan and decisions: bayes-sl `reports/2026-10-28_stage2_benchmark_plan.md` (BD1-BD7, the Conductor 2026-10-28).
 Code: `source_analytics.bayes.benchmark`. Tests: `tests/bayes/test_benchmark.py`.
