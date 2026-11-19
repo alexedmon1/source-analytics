@@ -8,8 +8,8 @@
 #   - FDR (BH) correction across bands per contrast
 #   - power_type: "relative" or "absolute"
 #   - Every post-hoc row carries the minimum detectable effect (mde, mde_percent
-#     of group_b's emmean, mde_power, mde_alpha, mde_note); the helper .add_mde
-#     lives in hypothesis.R, which every caller sources.
+#     of the design reference group's emmean, mde_power, mde_alpha, mde_note); the
+#     helper .add_posthoc_mde lives in hypothesis.R, which every caller sources.
 
 library(dplyr)
 library(tidyr)
@@ -226,13 +226,10 @@ run_posthoc_emmeans <- function(band_df, contrasts, bands, omnibus_df,
     }
   }
 
-  # Minimum detectable effect per row (DUET #151; .add_mde in hypothesis.R, which
-  # every caller sources): group_b is the legacy reference, so its emmean scales
-  # mde_percent, left NA when it is within one residual SD of zero.
-  posthoc_df <- bind_rows(results)
-  posthoc_df <- .add_mde(posthoc_df, ref_mean = posthoc_df$emmean_b,
-                         resid_sd = posthoc_df$.resid_sd)
-  posthoc_df$.resid_sd <- NULL
+  # Minimum detectable effect per row (DUET #151; .add_posthoc_mde in hypothesis.R,
+  # which every caller sources): mde_percent of the design reference group's
+  # emmean, left NA when it is within one residual SD of zero.
+  posthoc_df <- .add_posthoc_mde(bind_rows(results), contrasts)
   return(posthoc_df)
 }
 
@@ -449,13 +446,10 @@ run_posthoc_emmeans_region <- function(band_df, contrasts, bands, roi_categories
     }
   }
 
-  # Minimum detectable effect per row (DUET #151; .add_mde in hypothesis.R, which
-  # every caller sources): group_b is the legacy reference, so its emmean scales
-  # mde_percent, left NA when it is within one residual SD of zero.
-  posthoc_df <- bind_rows(results)
-  posthoc_df <- .add_mde(posthoc_df, ref_mean = posthoc_df$emmean_b,
-                         resid_sd = posthoc_df$.resid_sd)
-  posthoc_df$.resid_sd <- NULL
+  # Minimum detectable effect per row (DUET #151; .add_posthoc_mde in hypothesis.R,
+  # which every caller sources): mde_percent of the design reference group's
+  # emmean, left NA when it is within one residual SD of zero.
+  posthoc_df <- .add_posthoc_mde(bind_rows(results), contrasts)
   return(posthoc_df)
 }
 
@@ -669,11 +663,9 @@ run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
   }
 
   global_df <- bind_rows(results)
-  # Minimum detectable effect (DUET #151): scaled by group_b's marginal emmean,
-  # left NA when it is within one residual SD of zero.
-  global_df <- .add_mde(global_df, ref_mean = global_df$emmean_b,
-                        resid_sd = global_df$.resid_sd)
-  global_df$.resid_sd <- NULL
+  # Minimum detectable effect (DUET #151): scaled by the design reference group's
+  # marginal emmean, left NA when it is within one residual SD of zero.
+  global_df <- .add_posthoc_mde(global_df, contrasts)
   if (nrow(global_df) > 0) {
     # No cross-band correction: per-band p-values reported directly
     global_df$q_value <- global_df$p_value
@@ -771,13 +763,10 @@ run_posthoc_emmeans_region_nested <- function(band_df, contrasts, bands, roi_cat
     }
   }
 
-  # Minimum detectable effect per row (DUET #151; .add_mde in hypothesis.R, which
-  # every caller sources): group_b is the legacy reference, so its emmean scales
-  # mde_percent, left NA when it is within one residual SD of zero.
-  posthoc_df <- bind_rows(results)
-  posthoc_df <- .add_mde(posthoc_df, ref_mean = posthoc_df$emmean_b,
-                         resid_sd = posthoc_df$.resid_sd)
-  posthoc_df$.resid_sd <- NULL
+  # Minimum detectable effect per row (DUET #151; .add_posthoc_mde in hypothesis.R,
+  # which every caller sources): mde_percent of the design reference group's
+  # emmean, left NA when it is within one residual SD of zero.
+  posthoc_df <- .add_posthoc_mde(bind_rows(results), contrasts)
   return(posthoc_df)
 }
 

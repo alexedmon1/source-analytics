@@ -106,9 +106,34 @@ contrasts_from_spec <- function(spec) {
     pos <- names(w)[w > 0]; neg <- names(w)[w < 0]
     if (length(pos) == 1 && length(neg) == 1)
       out[[length(out) + 1]] <- list(name = hyp$name, group_a = pos, group_b = neg,
-                                     label = hyp$label, role = hyp$role)
+                                     label = hyp$label, role = hyp$role,
+                                     reference = spec$reference)
   }
   out
+}
+
+#' Append the MDE columns to pairwise post-hoc rows (group_a - group_b).
+#'
+#' `df` has one row per post-hoc cell with `contrast` (the contrast's name),
+#' `SE`, `df`, `emmean_a`, `emmean_b` and, when the fit gave one, `.resid_sd`
+#' (dropped here). `contrasts` is the list the rows were computed from
+#' (`contrasts_from_spec` records). mde_percent divides by the design reference
+#' group's emmean, the rule the hypothesis layer uses (.mde_reference_weights):
+#' emmean_a when group_a is `design.reference`, otherwise emmean_b, the
+#' contrast's negative side. Decided 2026-11-19 (KNOWN_ISSUES 4).
+.add_posthoc_mde <- function(df, contrasts) {
+  if (is.null(df) || nrow(df) == 0) return(df)
+  ref_is_a <- vapply(contrasts, function(ct)
+    !is.null(ct$reference) && identical(as.character(ct$reference), as.character(ct$group_a)),
+    logical(1))
+  names(ref_is_a) <- vapply(contrasts, function(ct) as.character(ct$name), character(1))
+  use_a <- unname(ref_is_a[as.character(df$contrast)])
+  use_a[is.na(use_a)] <- FALSE
+  ref <- ifelse(use_a, df$emmean_a, df$emmean_b)
+  sdv <- if (".resid_sd" %in% names(df)) df$.resid_sd else NA_real_
+  df <- .add_mde(df, ref_mean = ref, resid_sd = sdv)
+  df$.resid_sd <- NULL
+  df
 }
 
 #' Pairwise contrasts for a module's descriptive / diagnostic models.

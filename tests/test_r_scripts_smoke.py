@@ -114,6 +114,59 @@ def test_evoked_scripts_derive_contrasts_from_design_spec(tmp_path, design_confi
         assert len(omnibus) > 0, "descriptive LMM table is empty — contrast loop did not run"
         assert set(omnibus["contrast"]) == {"disease_effect"}
         _assert_mde(pd.read_csv(out / "tables" / f"{level}_evoked_posthoc_global.csv"))
+        # The module's own post-hoc tables carry the MDE too (KNOWN_ISSUES 5), as a
+        # percent of the design reference group's emmean (WT_VEH, group_b here).
+        spatial = "roi" if level == "roi" else "channel"
+        tables = [f"{level}_evoked_posthoc_{spatial}.csv"]
+        if level == "roi":
+            tables.append("roi_evoked_posthoc_region.csv")
+        for name in tables:
+            ph = pd.read_csv(out / "tables" / name)
+            assert len(ph) > 0, f"{name} is empty"
+            _assert_mde(ph)
+            assert (ph["mde"] > 0).all()
+            pct = ph.dropna(subset=["mde_percent"])
+            assert len(pct) > 0
+            assert np.allclose(pct["mde_percent"], 100 * pct["mde"] / pct["emmean_b"].abs())
+
+
+def test_electrode_aperiodic_region_posthoc_carries_mde_of_the_reference(tmp_path, design_config):
+    """The region-nested post-hoc table has the MDE columns, with mde_percent of the
+    design reference group's emmean. The contrast here is WT - KO with reference WT,
+    so the reference is group_a, the side the old emmean_b rule got wrong."""
+    cfg = yaml.safe_load(design_config.read_text())
+    chans = ["Fz", "F3", "C3", "C4", "P3", "P4"]
+    cfg["electrode_categories"] = {"Frontal": chans[:2], "Central": chans[2:4], "Parietal": chans[4:]}
+    cfg["hypotheses"] = [{"name": "wt_minus_ko", "kind": "contrast",
+                          "weights": {"WT_VEH": 1, "KO_VEH": -1}}]
+    config = tmp_path / "ea_config.yaml"
+    config.write_text(yaml.safe_dump(cfg))
+    rng = np.random.default_rng(1)
+    rows = []
+    for uid, g in _subjects():
+        subj = rng.normal(0, 0.05)
+        for ch in chans:
+            rows.append({"subject": uid, "group": g, "channel": ch,
+                         "exponent": 1.5 + (0.4 if g == "KO_VEH" else 0) + subj + rng.normal(0, 0.05),
+                         "offset": 3.0 + (0.6 if g == "KO_VEH" else 0) + subj + rng.normal(0, 0.05),
+                         "r_squared": 0.98})
+    out = tmp_path / "ea"
+    data = out / "data"
+    data.mkdir(parents=True)
+    pd.DataFrame(rows).to_csv(data / "electrode_aperiodic_params.csv", index=False)
+
+    _run("electrode_aperiodic_analysis.R", data, config, out)
+    # One row per subject x channel, as Python writes it: the region model must fit
+    # ((1|subject/channel) never did, so this tier was all NA until 2026-11-19).
+    om = pd.read_csv(out / "tables" / "electrode_aperiodic_omnibus_region_nested.csv")
+    assert om["group_F"].notna().all() and om["converged"].all()
+    ph = pd.read_csv(out / "tables" / "electrode_aperiodic_posthoc_region_nested.csv")
+    assert len(ph) > 0
+    _assert_mde(ph)
+    assert {"emmean_a", "emmean_b"} <= set(ph.columns) and (ph["mde"] > 0).all()
+    pct = ph.dropna(subset=["mde_percent"])
+    assert len(pct) > 0
+    assert np.allclose(pct["mde_percent"], 100 * pct["mde"] / pct["emmean_a"].abs())
 
 
 def test_connectivity_script_runs_on_single_metric_csv(tmp_path, design_config):

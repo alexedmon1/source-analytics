@@ -26,17 +26,20 @@ later.
    with an SD of 3 passes. `mde_percent` should be blank for measures declared
    as log or dB scale, which needs a scale per measure in the study config.
 
-4. **Two rules choose the reference group.** The hypothesis layer divides by the
+4. **Fixed 2026-11-19** (decided: the design reference everywhere). **Two rules
+   chose the reference group.** The hypothesis layer divided by the
    `design.reference` group's mean when the contrast weights it; the older
-   posthoc tables (`R/stats_utils.R`) divide by `emmean_b`. For a contrast like
-   `{WT: +1, KO: -1}` with reference WT, the two give percents of different
-   groups' means. One rule should hold everywhere.
+   posthoc tables (`R/stats_utils.R`) divided by `emmean_b`. Every post-hoc table
+   now uses the hypothesis layer's rule through `.add_posthoc_mde` in
+   `R/hypothesis.R`: `emmean_a` when `group_a` is the reference, else `emmean_b`.
 
-5. **Not yet covered:** the posthoc functions defined inside individual module
-   scripts (roi_aperiodic, electrode_aperiodic region_nested, roi/electrode_evoked
-   channel and region, roi_pac region, roi_transfer_entropy, roi_connectivity)
-   write tables without the MDE columns. The three `run_global_ttests` functions
-   are retired and not called.
+5. **Fixed 2026-11-19.** The post-hoc tables the module scripts still write
+   (roi/electrode_evoked ROI or channel and region, electrode_aperiodic
+   region_nested) carry the MDE columns. The rest of the list was already
+   covered or is dead code: roi_aperiodic's and roi_pac's post-hoc tables are
+   hypothesis-layer rows, and the post-hoc functions left in roi_aperiodic,
+   roi_pac, roi_transfer_entropy and roi_connectivity are not called. The three
+   `run_global_ttests` functions are retired and not called.
 
 6. **Multiple-comparison correction.** The MDE uses a nominal alpha of 0.05 by
    decision; with BH correction across a band x spatial family the real bar is

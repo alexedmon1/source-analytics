@@ -145,9 +145,11 @@ anticipate it.
   negative-weight side, |w|-weighted (the baseline the estimate is taken from).
 - *directed edges and the Python tabular adapter:* the same rule on the raw cell
   means of the one-way model.
-- *legacy post-hoc tables in `stats_utils.R`* (`run_posthoc_emmeans*`,
-  `run_posthoc_global`): `emmean_b`, since `group_b` is the reference in the
-  pairwise `group_a - group_b` convention.
+- *legacy post-hoc tables* (`run_posthoc_emmeans*` and `run_posthoc_global` in
+  `stats_utils.R`, and the evoked and electrode_aperiodic scripts' own post-hoc):
+  the same rule for a pairwise `group_a - group_b` row, through `.add_posthoc_mde`:
+  `emmean_a` when `group_a` is `design.reference`, otherwise `emmean_b`. (Until
+  2026-11-19 these used `emmean_b` always.)
 - *regression (emtrends):* none; `mde` is the smallest detectable slope.
 
 **Not computed:** omnibus F rows (`not computed: omnibus F test`), cluster-permutation

@@ -3,7 +3,8 @@
 #
 # Reads electrode_aperiodic_params.csv, runs:
 #   1. Channel-level omnibus: dv ~ group * channel + (1|subject)
-#   2. Region-nested omnibus: dv ~ group * region + (1|subject/channel)
+#   2. Region-nested omnibus: dv ~ group * region + (1|subject), channels as
+#      repeated measures within subject
 #   3. Post-hoc emmeans for significant effects
 
 library(argparse)
@@ -220,7 +221,10 @@ run_posthoc_channel <- function(ap_df, contrasts, dv_name, omnibus_df, gate = TR
 
 
 # ============================================================
-# Region-nested omnibus: dv ~ group * region + (1|subject/channel)
+# Region-nested omnibus: dv ~ group * region + (1|subject)
+# Channels are the repeated measures within a subject. The params CSV has one row
+# per subject x channel, so a (1|subject/channel) term is the residual itself and
+# lme4 refused the fit: until 2026-11-19 this tier never produced a result.
 # ============================================================
 run_omnibus_region_nested <- function(ap_df, contrasts, electrode_categories, dv_name) {
   # Map channels to regions
@@ -255,7 +259,7 @@ run_omnibus_region_nested <- function(ap_df, contrasts, electrode_categories, dv
     converged <- TRUE; singular <- FALSE
 
     tryCatch({
-      fit <- lmer(dv ~ group * region + (1 | subject / channel), data = cdata)
+      fit <- lmer(dv ~ group * region + (1 | subject), data = cdata)
       singular <- isSingular(fit)
       aov <- anova(fit, type = 3)
 
@@ -337,12 +341,16 @@ run_posthoc_region_nested <- function(ap_df, contrasts, electrode_categories, om
     cdata$dv <- cdata[[dv_name]]
 
     tryCatch({
-      fit <- lmer(dv ~ group * region + (1 | subject / channel), data = cdata)
+      fit <- lmer(dv ~ group * region + (1 | subject), data = cdata)
       emm <- emmeans(fit, pairwise ~ group | region, lmer.df = "satterthwaite")
       contr <- as.data.frame(summary(emm$contrasts))
+      emm_df <- as.data.frame(emm$emmeans)
+      resid_sd <- sigma(fit)
 
       for (i in seq_len(nrow(contr))) {
         reg <- contr$region[i]
+        emm_a <- emm_df$emmean[as.character(emm_df$region) == as.character(reg) & emm_df$group == ga]
+        emm_b <- emm_df$emmean[as.character(emm_df$region) == as.character(reg) & emm_df$group == gb]
         reg_data <- cdata %>% filter(region == reg) %>%
           group_by(subject, group) %>%
           summarise(mean_val = mean(dv, na.rm = TRUE), .groups = "drop")
@@ -352,9 +360,11 @@ run_posthoc_region_nested <- function(ap_df, contrasts, electrode_categories, om
 
         results[[length(results) + 1]] <- data.frame(
           contrast = cname, dv = dv_name, region = as.character(reg),
-          estimate = contr$estimate[i], SE = contr$SE[i],
+          estimate = contr$estimate[i], SE = contr$SE[i], df = contr$df[i],
           t_ratio = contr$t.ratio[i], p_value = contr$p.value[i],
-          hedges_g = g_val,
+          emmean_a = if (length(emm_a) > 0) emm_a[1] else NA_real_,
+          emmean_b = if (length(emm_b) > 0) emm_b[1] else NA_real_,
+          hedges_g = g_val, .resid_sd = resid_sd,
           stringsAsFactors = FALSE
         )
       }
@@ -363,7 +373,8 @@ run_posthoc_region_nested <- function(ap_df, contrasts, electrode_categories, om
     })
   }
 
-  df <- bind_rows(results)
+  # MDE per row, mde_percent of the design reference group's emmean (.add_posthoc_mde).
+  df <- .add_posthoc_mde(bind_rows(results), contrasts)
   if (nrow(df) > 0) {
     df$q_fdr <- p.adjust(df$p_value, method = "BH")
     df$significant <- df$q_fdr < 0.05
@@ -404,11 +415,11 @@ for (dv_name in dvs) {
   # Channel-level per-contrast post-hoc now comes from the hypothesis layer
   # (run_posthoc_channel retired). See the write_module_hypotheses call below.
 
-  # Region-nested (if electrode_categories defined). KEPT on the legacy nested
-  # model dv ~ group*region + (1|subject/channel); the hypothesis layer fits
-  # (1|subject) only and cannot express this nesting.
+  # Region-nested (if electrode_categories defined): channels mapped to regions,
+  # dv ~ group*region + (1|subject), the model the PSD region-nested tier fits
+  # (stats_utils.R). Descriptive; the hypotheses are the channel level below.
   if (length(electrode_categories) > 0) {
-    message("Running region-nested omnibus LMM (group * region, channels nested)...")
+    message("Running region-nested omnibus LMM (group * region, channels within subject)...")
     omnibus_reg <- run_omnibus_region_nested(ap_df, diag_contrasts, electrode_categories, dv_name)
     all_omnibus_region[[dv_name]] <- omnibus_reg
 

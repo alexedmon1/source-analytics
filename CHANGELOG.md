@@ -12,8 +12,24 @@
   not on the package version. Sensor-level analyses, with no localization manifests, name nothing. The gallery
   shows it as each analysis's "Data from" line. Lumière moves from e5919ad to 98072ed (0.4.5) for it.
 
+### Changed
+
+- **`mde_percent` divides by the design reference group's mean in every post-hoc table**, as it does in the
+  hypothesis tables. The `R/stats_utils.R` post-hoc tables divided by `emmean_b`, which for a contrast like
+  `{WT: +1, KO: -1}` with reference WT is the KO mean. They now use `.add_posthoc_mde` (`R/hypothesis.R`):
+  `emmean_a` when `group_a` is `design.reference`, otherwise `emmean_b`. Contrast records from
+  `contrasts_from_spec` carry `reference` for it. Only `mde_percent` changes, and only for such contrasts.
+
 ### Fixed
 
+- **The module scripts' own post-hoc tables carry the MDE columns** (KNOWN_ISSUES 5): roi_evoked ROI and region,
+  electrode_evoked channel and region, and electrode_aperiodic region_nested, which also gains `df`, `emmean_a`
+  and `emmean_b`.
+- **electrode_aperiodic's region tier fits.** Its model was `dv ~ group * region + (1 | subject/channel)`, but
+  the params table has one row per subject x channel, so the `subject:channel` term was the residual itself and
+  lme4 refused every fit: the region omnibus was all NA and the region post-hoc table was never written. It is
+  now `(1 | subject)`, the model the PSD region-nested tier fits. Region tables appear for electrode_aperiodic
+  where there were none.
 - **A design spec that fails to parse is reported, not swallowed, by the descriptive models.** Six R modules
   (roi_psd, electrode_psd, roi_aperiodic, electrode_aperiodic, roi_evoked, electrode_evoked) wrapped
   `contrasts_from_spec(parse_design_spec(config))` in a `tryCatch` that fell back to `config$contrasts` without a

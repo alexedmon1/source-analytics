@@ -282,6 +282,7 @@ for (contrast in contrasts) {
           emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
           hedges_g = hg,
           significant = con_df$q_value[i] < 0.05,
+          .resid_sd = resid_sd,
           stringsAsFactors = FALSE
         )
       }
@@ -293,7 +294,8 @@ for (contrast in contrasts) {
   }
 }
 
-posthoc_df <- bind_rows(all_posthoc)
+# MDE per row, mde_percent of the design reference group's emmean (.add_posthoc_mde).
+posthoc_df <- .add_posthoc_mde(bind_rows(all_posthoc), contrasts)
 
 if (nrow(posthoc_df) > 0) {
   sig_count <- sum(posthoc_df$significant, na.rm = TRUE)
@@ -467,6 +469,7 @@ if (length(config$roi_categories) > 0) {
             emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
             hedges_g = hg,
             significant = con_df$q_value[i] < 0.05,
+            .resid_sd = resid_sd,
             stringsAsFactors = FALSE
           )
         }
@@ -478,7 +481,7 @@ if (length(config$roi_categories) > 0) {
     }
   }
 
-  posthoc_region_df <- bind_rows(all_posthoc_reg)
+  posthoc_region_df <- .add_posthoc_mde(bind_rows(all_posthoc_reg), contrasts)
 }
 
 # --- Export tables (clean up stale files first) ---

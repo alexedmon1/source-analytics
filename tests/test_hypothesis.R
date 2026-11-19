@@ -370,4 +370,27 @@ ok(is.null(dc_bad) && any(grepl("could not derive contrasts", said)) &&
      any(grepl("missing 'name'", said)),
    "diagnostic_contrasts: a spec that fails to parse says why and returns no contrasts")
 
+# ---- .add_posthoc_mde: mde_percent of the design reference group's emmean ----
+ref_cfg <- list(design = list(reference = "WT_VEH"),
+                hypotheses = list(list(name = "wt_minus_ko", group_a = "WT_VEH", group_b = "KO_VEH"),
+                                  list(name = "ko_minus_wt", group_a = "KO_VEH", group_b = "WT_VEH"),
+                                  list(name = "icv_vs_iv", group_a = "KO_HD_ICV", group_b = "KO_HD_IV")))
+rc <- diagnostic_contrasts(ref_cfg)
+ok(all(vapply(rc, function(ct) identical(ct$reference, "WT_VEH"), logical(1))),
+   "contrasts_from_spec: each record carries the design reference")
+ph <- data.frame(contrast = c("wt_minus_ko", "ko_minus_wt", "icv_vs_iv"),
+                 SE = 0.5, df = 40, emmean_a = c(10, 20, 30), emmean_b = c(20, 10, 40),
+                 .resid_sd = 1, check.names = FALSE)
+ph <- .add_posthoc_mde(ph, rc)
+m <- mde_from_se(0.5, 40)
+ok(near(ph$mde_percent[1], 100 * m / 10) && near(ph$mde_percent[2], 100 * m / 10),
+   "post-hoc mde_percent divides by the reference group's emmean, on either side of the contrast")
+ok(near(ph$mde_percent[3], 100 * m / 40),
+   "post-hoc mde_percent falls back to emmean_b when the contrast does not include the reference")
+ok(!".resid_sd" %in% names(ph) && all(ph$mde_note == ""), "post-hoc MDE: helper column dropped, no note")
+ph0 <- .add_posthoc_mde(data.frame(contrast = "ko_vs_wt", SE = 0.5, df = 40, emmean_a = 3, emmean_b = 5),
+                        diagnostic_contrasts(good_cfg))
+ok(!is.na(ph0$mde) && is.na(ph0$mde_percent),
+   "post-hoc MDE: no residual SD, no mde_percent (the near-zero rule cannot be checked)")
+
 cat("\nAll hypothesis-layer checks passed.\n")
