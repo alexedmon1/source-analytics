@@ -111,6 +111,24 @@ contrasts_from_spec <- function(spec) {
   out
 }
 
+#' Pairwise contrasts for a module's descriptive / diagnostic models.
+#'
+#' `contrasts_from_spec(parse_design_spec(config))`, except that a spec that
+#' fails to parse does not stop the script: the reason is reported and the
+#' legacy `contrasts:` block (usually NULL) is returned instead. These models
+#' are not the hypothesis tables, which parse the spec themselves and fail loudly.
+#' Before this helper each module swallowed the error, so a bad spec left the
+#' descriptive tables empty with nothing in the log to say why.
+diagnostic_contrasts <- function(config) {
+  tryCatch(contrasts_from_spec(parse_design_spec(config)), error = function(e) {
+    message("WARNING: could not derive contrasts from design:/hypotheses: (",
+            conditionMessage(e), "); descriptive models use ",
+            if (is.null(config$contrasts)) "no contrasts"
+            else "the legacy contrasts: block")
+    config$contrasts
+  })
+}
+
 # ---- Multiple-comparison control -------------------------------------------
 
 .FDR_SCOPES  <- c("hypothesis", "band", "spatial", "none")

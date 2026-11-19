@@ -12,6 +12,17 @@
   not on the package version. Sensor-level analyses, with no localization manifests, name nothing. The gallery
   shows it as each analysis's "Data from" line. Lumière moves from e5919ad to 98072ed (0.4.5) for it.
 
+### Fixed
+
+- **A design spec that fails to parse is reported, not swallowed, by the descriptive models.** Six R modules
+  (roi_psd, electrode_psd, roi_aperiodic, electrode_aperiodic, roi_evoked, electrode_evoked) wrapped
+  `contrasts_from_spec(parse_design_spec(config))` in a `tryCatch` that fell back to `config$contrasts` without a
+  word, so a bad spec left their descriptive/diagnostic tables empty with nothing in the log. They now call
+  `diagnostic_contrasts(config)` (`R/hypothesis.R`), which logs the parse error before falling back. The
+  hypothesis tables are unaffected. Found re-checking the 2026-09-04 audit.
+- **README: the Bayesian engine's R packages.** The R install section now names `brms`, `posterior`, `digest`,
+  `jsonlite` and `cmdstanr`/CmdStan, and links to the user guide's install steps.
+
 ## v0.10.0 — 2026-11-11 (a group's level against 0; Lumière galleries; network figures)
 
 The Bayesian engine reads a group's own level against 0 on uncentred outcomes (engine 2026.11.10.1); centred runs

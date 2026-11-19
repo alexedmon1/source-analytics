@@ -356,4 +356,18 @@ ok(all(!is.na(new_reg$effect_size_lcl)) && all(new_reg$effect_size_lcl <= new_re
 ok(all(de_ab$n_a + de_ab$n_b <= de_ab$n) && !is.na(de_ab$effect_size_lcl) &&
      all(!is.na(de_om$effect_size_ucl)), "directed edges: n, n_a, n_b and intervals")
 
+# ---- diagnostic_contrasts: a bad spec is reported, not swallowed ----
+good_cfg <- list(hypotheses = list(list(name = "ko_vs_wt", group_a = "KO_VEH", group_b = "WT_VEH")))
+dc <- diagnostic_contrasts(good_cfg)
+ok(length(dc) == 1 && dc[[1]]$group_a == "KO_VEH" && dc[[1]]$group_b == "WT_VEH",
+   "diagnostic_contrasts: a valid spec gives its pairwise contrasts")
+bad_cfg <- list(hypotheses = list(list(group_a = "KO_VEH", group_b = "WT_VEH")))  # no name
+said <- character(0)
+dc_bad <- withCallingHandlers(diagnostic_contrasts(bad_cfg), message = function(m) {
+  said <<- c(said, conditionMessage(m)); invokeRestart("muffleMessage")
+})
+ok(is.null(dc_bad) && any(grepl("could not derive contrasts", said)) &&
+     any(grepl("missing 'name'", said)),
+   "diagnostic_contrasts: a spec that fails to parse says why and returns no contrasts")
+
 cat("\nAll hypothesis-layer checks passed.\n")

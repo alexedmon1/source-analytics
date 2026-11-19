@@ -99,8 +99,7 @@ group_order <- config$group_order
 # Legacy pairwise contrast list for the kept run_omnibus_lmm* DIAGNOSTIC. Derived
 # from the design spec because config$contrasts is no longer populated post
 # design-spec migration; falls back to config$contrasts if hypothesis.R is absent.
-diag_contrasts <- tryCatch(contrasts_from_spec(parse_design_spec(config)),
-                           error = function(e) config$contrasts)
+diag_contrasts <- diagnostic_contrasts(config)
 
 # --- Profile-narrowed contrast set for the DIAGNOSTIC omnibus ---
 # The declarative hypothesis layer already honors --hypothesis, but the omnibus

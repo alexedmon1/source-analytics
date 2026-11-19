@@ -90,7 +90,9 @@ figures → summary`. `DEFAULT_RUN_STEPS` excludes `figures`.
 - Deprecated analysis names (`psd`, `pac`, `vertex_mvpa`, …) are in
   `core._DEPRECATED_NAMES`; output always goes under the canonical name.
 - R scripts derive contrasts with `contrasts_from_spec(parse_design_spec(config))`
-  from `R/hypothesis.R`; never read `config$contrasts` directly.
+  from `R/hypothesis.R`; never read `config$contrasts` directly. For descriptive /
+  diagnostic models that must not stop the run, use `diagnostic_contrasts(config)`,
+  which reports a spec that fails to parse instead of swallowing it.
 - Optional deps are lazy: mne (evoked/TFR), scikit-learn (signature), networkx
   (graph). The package must import without them.
 - Adding an analysis: subclass `BaseAnalysis`, register in `ANALYSIS_REGISTRY`,

@@ -161,6 +161,11 @@ install.packages(c(
 (`ggsignif` draws the significance brackets in the PSD/aperiodic/evoked figures;
 `argparse` is used by the ROI/electrode report scripts.)
 
+The Bayesian group engine (a study's `bayes:` block) needs more: `brms`,
+`posterior`, `digest` and `jsonlite`, plus `cmdstanr` and CmdStan, which are not
+on CRAN. Only install them if you use it; the commands are in
+[`docs/guides/BAYES_USER_GUIDE.md`](docs/guides/BAYES_USER_GUIDE.md#1-install).
+
 ---
 
 ## Core concepts

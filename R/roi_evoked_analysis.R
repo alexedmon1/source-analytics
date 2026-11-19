@@ -95,8 +95,7 @@ group_order <- config$group_order
 # Pairwise contrast list for the descriptive group*spatial LMM below. Derived from
 # the design:/hypotheses: spec (config$contrasts is NULL for modern configs);
 # falls back to a legacy contrasts: block if the spec has none.
-contrasts <- tryCatch(contrasts_from_spec(parse_design_spec(config)),
-                      error = function(e) config$contrasts)
+contrasts <- diagnostic_contrasts(config)
 if (is.null(contrasts)) contrasts <- list()
 if (!is.null(args$hypothesis) && length(contrasts) > 0) {
   want <- trimws(strsplit(args$hypothesis, ",")[[1]])

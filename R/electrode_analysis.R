@@ -83,8 +83,7 @@ group_order <- config$group_order
 
 # Legacy pairwise contrast list for the kept omnibus/nested DIAGNOSTIC (derived
 # from the design spec; config$contrasts is no longer populated post-migration).
-diag_contrasts <- tryCatch(contrasts_from_spec(parse_design_spec(config)),
-                           error = function(e) config$contrasts)
+diag_contrasts <- diagnostic_contrasts(config)
 
 message("Study: ", config$name)
 message("Groups: ", paste(group_order, collapse = ", "))
