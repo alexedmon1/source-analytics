@@ -113,6 +113,8 @@ def test_evoked_scripts_derive_contrasts_from_design_spec(tmp_path, design_confi
         omnibus = pd.read_csv(out / "tables" / f"{level}_evoked_omnibus.csv")
         assert len(omnibus) > 0, "descriptive LMM table is empty — contrast loop did not run"
         assert set(omnibus["contrast"]) == {"disease_effect"}
+        # The inline model blocks record warnings in a column instead of dropping rows.
+        assert "fit_warning" in omnibus.columns
         _assert_mde(pd.read_csv(out / "tables" / f"{level}_evoked_posthoc_global.csv"))
         # The module's own post-hoc tables carry the MDE too (KNOWN_ISSUES 5), as a
         # percent of the design reference group's emmean (WT_VEH, group_b here).
@@ -124,6 +126,7 @@ def test_evoked_scripts_derive_contrasts_from_design_spec(tmp_path, design_confi
             ph = pd.read_csv(out / "tables" / name)
             assert len(ph) > 0, f"{name} is empty"
             _assert_mde(ph)
+            assert "fit_warning" in ph.columns
             assert (ph["mde"] > 0).all()
             pct = ph.dropna(subset=["mde_percent"])
             assert len(pct) > 0
@@ -343,6 +346,68 @@ def test_psd_summary_names_the_correction_its_tables_used(tmp_path, design_confi
     out2 = tmp_path / "holm"
     _run("roi_psd_analysis.R", data, holm, out2)
     assert "Holm correction within each hypothesis family" in (out2 / "ANALYSIS_SUMMARY.md").read_text()
+
+
+def test_model_warning_keeps_the_rows_and_records_it(tmp_path):
+    """A warning inside a model block used to abort the block: tryCatch(warning = )
+    unwinds at the first warning, so a convergence warning from lmer dropped every
+    post-hoc row of that contrast x band and blanked the omnibus F (labelled
+    singular). Now the rows are kept, the warning is in fit_warning, and the omnibus
+    row says converged = FALSE. lmer is stubbed to warn so the test is deterministic."""
+    rng = np.random.default_rng(3)
+    rows = []
+    for uid, g in _subjects():
+        subj = rng.normal(0, 0.3)
+        for roi in ROIS:
+            rows.append({"subject": uid, "group": g, "roi": roi, "band": "Alpha",
+                         "relative": subj + (1.0 if g == "KO_VEH" else 0) + rng.normal(0, 0.2)})
+    csv = tmp_path / "band.csv"
+    pd.DataFrame(rows).to_csv(csv, index=False)
+    out = tmp_path / "out"
+    out.mkdir()
+    code = f"""
+suppressPackageStartupMessages({{source("{R_DIR / 'stats_utils.R'}"); source("{R_DIR / 'hypothesis.R'}")}})
+d <- read.csv("{csv}")
+con <- list(list(name = "ko_vs_wt", group_a = "KO_VEH", group_b = "WT_VEH", reference = "WT_VEH"))
+bands <- list(Alpha = c(10, 13))
+cats <- list(Motor = c("Motor_L", "Motor_R"), Deep = c("Hipp_L", "Hipp_R", "Thal_L", "Thal_R"))
+run_all <- function(tag) {{
+  om <- run_omnibus_lmm(d, con, bands)
+  write.csv(om, file.path("{out}", paste0(tag, "_omnibus.csv")), row.names = FALSE)
+  write.csv(run_posthoc_emmeans(d, con, bands, om, gate = FALSE),
+            file.path("{out}", paste0(tag, "_posthoc.csv")), row.names = FALSE)
+  omr <- run_omnibus_lmm_region_nested(d, con, bands, cats)
+  write.csv(omr, file.path("{out}", paste0(tag, "_omnibus_region.csv")), row.names = FALSE)
+  write.csv(run_posthoc_emmeans_region(d, con, bands, cats, omr, gate = FALSE),
+            file.path("{out}", paste0(tag, "_posthoc_region.csv")), row.names = FALSE)
+  write.csv(run_posthoc_global(d, con, spatial_col = "roi", dv_col = "relative",
+                               dv_label = "relative", band_label = "Alpha"),
+            file.path("{out}", paste0(tag, "_global.csv")), row.names = FALSE)
+}}
+run_all("clean")
+lmer <- function(...) {{
+  warning("Model failed to converge with max|grad| = 0.0123 (tol = 0.002, component 1)")
+  lmerTest::lmer(...)
+}}
+run_all("warned")
+"""
+    res = subprocess.run(["Rscript", "-e", code], capture_output=True, text=True, timeout=300)
+    assert res.returncode == 0, res.stderr
+    assert "Warning in ko_vs_wt/Alpha/relative: Model failed to converge" in res.stderr
+    for name in ("omnibus", "posthoc", "omnibus_region", "posthoc_region", "global"):
+        clean = pd.read_csv(out / f"clean_{name}.csv", keep_default_na=False)
+        warned = pd.read_csv(out / f"warned_{name}.csv", keep_default_na=False)
+        assert len(clean) > 0 and len(warned) == len(clean), name
+        assert (clean["fit_warning"] == "").all(), name
+        assert warned["fit_warning"].str.startswith("Model failed to converge").all(), name
+        # The stub changes nothing but the warning, so the numbers are the same fit's.
+        num = "group_F" if name.startswith("omnibus") else "estimate"
+        assert np.allclose(warned[num].astype(float), clean[num].astype(float)), name
+        if name.startswith("omnibus"):
+            assert clean["converged"].astype(bool).all() and not warned["converged"].astype(bool).any()
+            assert (warned["singular"] == clean["singular"]).all(), "singular comes from isSingular only"
+        else:
+            assert (warned["mde"].astype(float) > 0).all(), name
 
 
 def test_correction_phrase_reads_fdr_family_and_keeps_legacy_holm():

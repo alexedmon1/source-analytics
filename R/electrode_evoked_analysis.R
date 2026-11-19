@@ -132,32 +132,32 @@ for (contrast in contrasts) {
     interaction_F <- NA; interaction_p <- NA
     converged <- TRUE; singular <- FALSE
 
+    fit_warning <- ""
     tryCatch({
-      fit <- lmer(value ~ group * channel + (1 | subject), data = mdata)
-      singular <- isSingular(fit)
+      fit_warning <- .collect_warnings({
+        fit <- lmer(value ~ group * channel + (1 | subject), data = mdata)
+        singular <- isSingular(fit)
 
-      aov <- anova(fit, type = 3)
+        aov <- anova(fit, type = 3)
 
-      if ("group" %in% rownames(aov)) {
-        group_F <- aov["group", "F value"]
-        group_p <- aov["group", "Pr(>F)"]
-      }
-      if ("channel" %in% rownames(aov)) {
-        channel_F <- aov["channel", "F value"]
-        channel_p <- aov["channel", "Pr(>F)"]
-      }
-      if ("group:channel" %in% rownames(aov)) {
-        interaction_F <- aov["group:channel", "F value"]
-        interaction_p <- aov["group:channel", "Pr(>F)"]
-      }
-    }, warning = function(w) {
-      if (grepl("singular|converge", conditionMessage(w), ignore.case = TRUE)) {
-        singular <<- TRUE
-      }
+        if ("group" %in% rownames(aov)) {
+          group_F <- aov["group", "F value"]
+          group_p <- aov["group", "Pr(>F)"]
+        }
+        if ("channel" %in% rownames(aov)) {
+          channel_F <- aov["channel", "F value"]
+          channel_p <- aov["channel", "Pr(>F)"]
+        }
+        if ("group:channel" %in% rownames(aov)) {
+          interaction_F <- aov["group:channel", "F value"]
+          interaction_p <- aov["group:channel", "Pr(>F)"]
+        }
+      }, context = paste0(cname, "/", mname))
     }, error = function(e) {
       converged <<- FALSE
       message("  LMM failed for ", cname, "/", mname, ": ", conditionMessage(e))
     })
+    if (.is_convergence_warning(fit_warning)) converged <- FALSE
 
     all_omnibus[[length(all_omnibus) + 1]] <- data.frame(
       contrast = cname,
@@ -176,6 +176,7 @@ for (contrast in contrasts) {
       interaction_p = as.numeric(interaction_p),
       converged = converged,
       singular = singular,
+      fit_warning = fit_warning,
       stringsAsFactors = FALSE
     )
   }
@@ -232,55 +233,57 @@ for (contrast in contrasts) {
     mdata$group <- factor(mdata$group, levels = c(ga, gb))
     mdata$channel <- factor(mdata$channel)
 
+    n_before <- length(all_posthoc); fit_warning <- ""
     tryCatch({
-      fit <- lmer(value ~ group * channel + (1 | subject), data = mdata)
+      fit_warning <- .collect_warnings({
+        fit <- lmer(value ~ group * channel + (1 | subject), data = mdata)
 
-      emm <- emmeans(fit, pairwise ~ group | channel)
-      con_df <- as.data.frame(emm$contrasts)
-      emm_df <- as.data.frame(emm$emmeans)
+        emm <- emmeans(fit, pairwise ~ group | channel)
+        con_df <- as.data.frame(emm$contrasts)
+        emm_df <- as.data.frame(emm$emmeans)
 
-      resid_sd <- sigma(fit)
-      con_df$q_value <- p.adjust(con_df$p.value, method = "holm")
+        resid_sd <- sigma(fit)
+        con_df$q_value <- p.adjust(con_df$p.value, method = "holm")
 
-      for (i in seq_len(nrow(con_df))) {
-        ch_name <- as.character(con_df$channel[i])
+        for (i in seq_len(nrow(con_df))) {
+          ch_name <- as.character(con_df$channel[i])
 
-        emm_a <- emm_df %>%
-          filter(channel == ch_name, group == ga) %>%
-          pull(emmean)
-        emm_b <- emm_df %>%
-          filter(channel == ch_name, group == gb) %>%
-          pull(emmean)
+          emm_a <- emm_df %>%
+            filter(channel == ch_name, group == ga) %>%
+            pull(emmean)
+          emm_b <- emm_df %>%
+            filter(channel == ch_name, group == gb) %>%
+            pull(emmean)
 
-        # Explicitly compute estimate as ga - gb
-        est <- if (length(emm_a) > 0 && length(emm_b) > 0) emm_a[1] - emm_b[1] else con_df$estimate[i]
-        t_val <- est / con_df$SE[i]
-        hg <- est / resid_sd
+          # Explicitly compute estimate as ga - gb
+          est <- if (length(emm_a) > 0 && length(emm_b) > 0) emm_a[1] - emm_b[1] else con_df$estimate[i]
+          t_val <- est / con_df$SE[i]
+          hg <- est / resid_sd
 
-        all_posthoc[[length(all_posthoc) + 1]] <- data.frame(
-          contrast = cname,
-          measure = mname,
-          measure_type = mtype,
-          channel = ch_name,
-          estimate = est,
-          SE = con_df$SE[i],
-          df = con_df$df[i],
-          t_ratio = t_val,
-          p_value = con_df$p.value[i],
-          q_value = con_df$q_value[i],
-          emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
-          emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-          hedges_g = hg,
-          significant = con_df$q_value[i] < 0.05,
-          .resid_sd = resid_sd,
-          stringsAsFactors = FALSE
-        )
-      }
-    }, warning = function(w) {
-      # Continue on singular fit warnings
+          all_posthoc[[length(all_posthoc) + 1]] <- data.frame(
+            contrast = cname,
+            measure = mname,
+            measure_type = mtype,
+            channel = ch_name,
+            estimate = est,
+            SE = con_df$SE[i],
+            df = con_df$df[i],
+            t_ratio = t_val,
+            p_value = con_df$p.value[i],
+            q_value = con_df$q_value[i],
+            emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
+            emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
+            hedges_g = hg,
+            significant = con_df$q_value[i] < 0.05,
+            .resid_sd = resid_sd,
+            stringsAsFactors = FALSE
+          )
+        }
+      }, context = paste0(cname, "/", mname))
     }, error = function(e) {
       message("  Post-hoc failed for ", cname, "/", mname, ": ", conditionMessage(e))
     })
+    all_posthoc <- .stamp_fit_warning(all_posthoc, n_before, fit_warning)
   }
 }
 
@@ -335,31 +338,31 @@ if (length(electrode_categories) > 0) {
       interaction_F <- NA; interaction_p <- NA
       converged <- TRUE; singular <- FALSE
 
+      fit_warning <- ""
       tryCatch({
-        fit <- lmer(value ~ group * region + (1 | subject), data = rdata)
-        singular <- isSingular(fit)
+        fit_warning <- .collect_warnings({
+          fit <- lmer(value ~ group * region + (1 | subject), data = rdata)
+          singular <- isSingular(fit)
 
-        aov <- anova(fit, type = 3)
+          aov <- anova(fit, type = 3)
 
-        if ("group" %in% rownames(aov)) {
-          group_F <- aov["group", "F value"]
-          group_p <- aov["group", "Pr(>F)"]
-        }
-        if ("region" %in% rownames(aov)) {
-          region_F <- aov["region", "F value"]
-          region_p <- aov["region", "Pr(>F)"]
-        }
-        if ("group:region" %in% rownames(aov)) {
-          interaction_F <- aov["group:region", "F value"]
-          interaction_p <- aov["group:region", "Pr(>F)"]
-        }
-      }, warning = function(w) {
-        if (grepl("singular|converge", conditionMessage(w), ignore.case = TRUE)) {
-          singular <<- TRUE
-        }
+          if ("group" %in% rownames(aov)) {
+            group_F <- aov["group", "F value"]
+            group_p <- aov["group", "Pr(>F)"]
+          }
+          if ("region" %in% rownames(aov)) {
+            region_F <- aov["region", "F value"]
+            region_p <- aov["region", "Pr(>F)"]
+          }
+          if ("group:region" %in% rownames(aov)) {
+            interaction_F <- aov["group:region", "F value"]
+            interaction_p <- aov["group:region", "Pr(>F)"]
+          }
+        }, context = paste0(cname, "/", mname, " (region)"))
       }, error = function(e) {
         converged <<- FALSE
       })
+      if (.is_convergence_warning(fit_warning)) converged <- FALSE
 
       all_omnibus_reg[[length(all_omnibus_reg) + 1]] <- data.frame(
         contrast = cname,
@@ -378,6 +381,7 @@ if (length(electrode_categories) > 0) {
         interaction_p = as.numeric(interaction_p),
         converged = converged,
         singular = singular,
+        fit_warning = fit_warning,
         stringsAsFactors = FALSE
       )
     }
@@ -418,53 +422,56 @@ if (length(electrode_categories) > 0) {
       rdata$group <- factor(rdata$group, levels = c(ga, gb))
       rdata$region <- factor(rdata$region)
 
+      n_before <- length(all_posthoc_reg); fit_warning <- ""
       tryCatch({
-        fit <- lmer(value ~ group * region + (1 | subject), data = rdata)
+        fit_warning <- .collect_warnings({
+          fit <- lmer(value ~ group * region + (1 | subject), data = rdata)
 
-        emm <- emmeans(fit, pairwise ~ group | region)
-        con_df <- as.data.frame(emm$contrasts)
-        emm_df <- as.data.frame(emm$emmeans)
+          emm <- emmeans(fit, pairwise ~ group | region)
+          con_df <- as.data.frame(emm$contrasts)
+          emm_df <- as.data.frame(emm$emmeans)
 
-        resid_sd <- sigma(fit)
-        con_df$q_value <- p.adjust(con_df$p.value, method = "holm")
+          resid_sd <- sigma(fit)
+          con_df$q_value <- p.adjust(con_df$p.value, method = "holm")
 
-        for (i in seq_len(nrow(con_df))) {
-          region_name <- as.character(con_df$region[i])
+          for (i in seq_len(nrow(con_df))) {
+            region_name <- as.character(con_df$region[i])
 
-          emm_a <- emm_df %>%
-            filter(region == region_name, group == ga) %>%
-            pull(emmean)
-          emm_b <- emm_df %>%
-            filter(region == region_name, group == gb) %>%
-            pull(emmean)
+            emm_a <- emm_df %>%
+              filter(region == region_name, group == ga) %>%
+              pull(emmean)
+            emm_b <- emm_df %>%
+              filter(region == region_name, group == gb) %>%
+              pull(emmean)
 
-          est <- if (length(emm_a) > 0 && length(emm_b) > 0) emm_a[1] - emm_b[1] else con_df$estimate[i]
-          t_val <- est / con_df$SE[i]
-          hg <- est / resid_sd
+            est <- if (length(emm_a) > 0 && length(emm_b) > 0) emm_a[1] - emm_b[1] else con_df$estimate[i]
+            t_val <- est / con_df$SE[i]
+            hg <- est / resid_sd
 
-          all_posthoc_reg[[length(all_posthoc_reg) + 1]] <- data.frame(
-            contrast = cname,
-            measure = mname,
-            measure_type = mtype,
-            region = region_name,
-            estimate = est,
-            SE = con_df$SE[i],
-            df = con_df$df[i],
-            t_ratio = t_val,
-            p_value = con_df$p.value[i],
-            q_value = con_df$q_value[i],
-            emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
-            emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-            hedges_g = hg,
-            significant = con_df$q_value[i] < 0.05,
-            .resid_sd = resid_sd,
-            stringsAsFactors = FALSE
-          )
-        }
-      }, warning = function(w) {
+            all_posthoc_reg[[length(all_posthoc_reg) + 1]] <- data.frame(
+              contrast = cname,
+              measure = mname,
+              measure_type = mtype,
+              region = region_name,
+              estimate = est,
+              SE = con_df$SE[i],
+              df = con_df$df[i],
+              t_ratio = t_val,
+              p_value = con_df$p.value[i],
+              q_value = con_df$q_value[i],
+              emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
+              emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
+              hedges_g = hg,
+              significant = con_df$q_value[i] < 0.05,
+              .resid_sd = resid_sd,
+              stringsAsFactors = FALSE
+            )
+          }
+        }, context = paste0(cname, "/", mname))
       }, error = function(e) {
         message("  Region post-hoc failed for ", cname, "/", mname, ": ", conditionMessage(e))
       })
+      all_posthoc_reg <- .stamp_fit_warning(all_posthoc_reg, n_before, fit_warning)
     }
   }
 

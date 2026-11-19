@@ -110,27 +110,27 @@ run_omnibus_channel <- function(ap_df, contrasts, dv_name) {
     interaction_F <- NA; interaction_p <- NA
     converged <- TRUE; singular <- FALSE
 
+    fit_warning <- ""
     tryCatch({
-      fit <- lmer(dv ~ group * channel + (1 | subject), data = cdata)
-      singular <- isSingular(fit)
-      aov <- anova(fit, type = 3)
+      fit_warning <- .collect_warnings({
+        fit <- lmer(dv ~ group * channel + (1 | subject), data = cdata)
+        singular <- isSingular(fit)
+        aov <- anova(fit, type = 3)
 
-      if ("group" %in% rownames(aov)) {
-        group_F <- aov["group", "F value"]
-        group_p <- aov["group", "Pr(>F)"]
-      }
-      if ("group:channel" %in% rownames(aov)) {
-        interaction_F <- aov["group:channel", "F value"]
-        interaction_p <- aov["group:channel", "Pr(>F)"]
-      }
-    }, warning = function(w) {
-      if (grepl("singular|converge", conditionMessage(w), ignore.case = TRUE)) {
-        singular <<- TRUE
-      }
+        if ("group" %in% rownames(aov)) {
+          group_F <- aov["group", "F value"]
+          group_p <- aov["group", "Pr(>F)"]
+        }
+        if ("group:channel" %in% rownames(aov)) {
+          interaction_F <- aov["group:channel", "F value"]
+          interaction_p <- aov["group:channel", "Pr(>F)"]
+        }
+      }, context = paste0(cname, "/", dv_name))
     }, error = function(e) {
       converged <<- FALSE
       message("  LMM failed for ", cname, "/", dv_name, ": ", conditionMessage(e))
     })
+    if (.is_convergence_warning(fit_warning)) converged <- FALSE
 
     # Global Hedges' g
     subj_means <- cdata %>% group_by(subject, group) %>%
@@ -149,6 +149,7 @@ run_omnibus_channel <- function(ap_df, contrasts, dv_name) {
       interaction_F = as.numeric(interaction_F), interaction_p = as.numeric(interaction_p),
       hedges_g = g_val,
       converged = converged, singular = singular,
+      fit_warning = fit_warning,
       stringsAsFactors = FALSE
     )
   }
@@ -258,27 +259,27 @@ run_omnibus_region_nested <- function(ap_df, contrasts, electrode_categories, dv
     interaction_F <- NA; interaction_p <- NA
     converged <- TRUE; singular <- FALSE
 
+    fit_warning <- ""
     tryCatch({
-      fit <- lmer(dv ~ group * region + (1 | subject), data = cdata)
-      singular <- isSingular(fit)
-      aov <- anova(fit, type = 3)
+      fit_warning <- .collect_warnings({
+        fit <- lmer(dv ~ group * region + (1 | subject), data = cdata)
+        singular <- isSingular(fit)
+        aov <- anova(fit, type = 3)
 
-      if ("group" %in% rownames(aov)) {
-        group_F <- aov["group", "F value"]
-        group_p <- aov["group", "Pr(>F)"]
-      }
-      if ("group:region" %in% rownames(aov)) {
-        interaction_F <- aov["group:region", "F value"]
-        interaction_p <- aov["group:region", "Pr(>F)"]
-      }
-    }, warning = function(w) {
-      if (grepl("singular|converge", conditionMessage(w), ignore.case = TRUE)) {
-        singular <<- TRUE
-      }
+        if ("group" %in% rownames(aov)) {
+          group_F <- aov["group", "F value"]
+          group_p <- aov["group", "Pr(>F)"]
+        }
+        if ("group:region" %in% rownames(aov)) {
+          interaction_F <- aov["group:region", "F value"]
+          interaction_p <- aov["group:region", "Pr(>F)"]
+        }
+      }, context = paste0(cname, "/", dv_name))
     }, error = function(e) {
       converged <<- FALSE
       message("  Region-nested LMM failed for ", cname, "/", dv_name, ": ", conditionMessage(e))
     })
+    if (.is_convergence_warning(fit_warning)) converged <- FALSE
 
     # Global Hedges' g
     subj_means <- cdata %>% group_by(subject, group) %>%
@@ -295,6 +296,7 @@ run_omnibus_region_nested <- function(ap_df, contrasts, electrode_categories, dv
       interaction_F = as.numeric(interaction_F), interaction_p = as.numeric(interaction_p),
       hedges_g = g_val,
       converged = converged, singular = singular,
+      fit_warning = fit_warning,
       stringsAsFactors = FALSE
     )
   }

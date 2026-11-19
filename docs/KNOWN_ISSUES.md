@@ -1,8 +1,8 @@
 # Known issues
 
 Recorded 2026-10-20, while adding the minimum detectable effect (MDE) to the
-hypothesis tables (`feat/power-mde`). None is fixed yet; each is to be fixed
-later.
+hypothesis tables (`feat/power-mde`), and added to since. Items marked
+**Fixed** say when and how; the rest are open.
 
 ## Defects
 
@@ -47,3 +47,17 @@ later.
 
 7. **TOST rows** carry the MDE of the two-sided difference test, not of the
    equivalence test itself.
+
+## Model fitting
+
+8. **Fixed 2026-11-19.** **A warning dropped the whole contrast x band.** The
+   legacy omnibus and post-hoc blocks (`R/stats_utils.R` and the module scripts)
+   caught warnings with `tryCatch(warning = )`, which stops the block at the
+   first warning. A convergence warning from lmer, or any warning from emmeans,
+   left no post-hoc rows for that contrast x band, and the omnibus row kept
+   blank F and p values marked `singular`. (lme4's singular-fit notice is a
+   message, so it was never affected.) Now `.collect_warnings` muffles each
+   warning so the block finishes, logs it, and writes it to a `fit_warning`
+   column (empty when there was none). The omnibus row's `converged` is FALSE on
+   an lme4 convergence warning, and `singular` comes only from `isSingular()`.
+   The hypothesis-layer tables never caught warnings and are unchanged.

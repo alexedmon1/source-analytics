@@ -15,7 +15,7 @@ format_omnibus_table <- function(df) {
       "n_rois", "n_regions",
       "group_F", "group_p", "group_q", "group_significant",
       "interaction_F", "interaction_p", "interaction_q",
-      "interaction_significant", "singular"),
+      "interaction_significant", "converged", "singular"),
     names(df)
   )
   tbl <- df[, display_cols]
