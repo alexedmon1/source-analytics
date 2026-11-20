@@ -1,6 +1,6 @@
 # Bayesian coverage for every outcome: the D10 plan (20 Nov 2026)
 
-**Status:** step 1 (M1) built and its check passed on branch `d10-m1-arms` (20 Nov), waiting for your yes to merge; steps 2-17 not started. Written from the coverage table ([BAYES_COVERAGE.md](BAYES_COVERAGE.md)). It is
+**Status:** step 1 (M1) merged 20 Nov (393a08c); steps 2-17 not started. Written from the coverage table ([BAYES_COVERAGE.md](BAYES_COVERAGE.md)). It is
 step 3 of bayes-sl's close-out plan section 9 (`/mnt/e/research/EEG/bayes-sl/reports/2026-11-18_closeout_migration_plan.md`).
 
 **What was decided (the user):**
@@ -23,8 +23,10 @@ step 3 of bayes-sl's close-out plan section 9 (`/mnt/e/research/EEG/bayes-sl/rep
   median inside the frequentist 95% CI. A step that adds a model also runs the gate (prior predictive check,
   simulation-based calibration, the no-difference null and recovery) at a real study's design.
 - **Frequentist gaps go in the same step** as the outcome they belong to (D12). They are listed with that step.
-- **Version numbers.** Each merged step is a minor release (0.11.0, 0.12.0, ...). 1.0.0 comes once every step is in
-  and source-localization 1.0.0's file format is read.
+- **Version numbers** (the user, 20 Nov: releases at milestones, not per step). A merged step is not a release by
+  itself: outputs already record the exact commit (`v0.10.0-13-g393a08c`). 0.11.0 comes once steps 1-3 are in
+  (bayes-sl's M1-M3 retired), or sooner to put the `cohens_d` rename under a version number. 1.0.0 comes once every
+  step is in and source-localization 1.0.0's file format is read.
 - bayes-sl supplies reference numbers only (decision D6). The work happens in source-analytics.
 
 ## 2. Order
