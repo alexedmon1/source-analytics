@@ -331,6 +331,21 @@ and check; `renv` only if two machines disagree).
 4. **Unit tests** (pytest, no Stan): spec → model terms; weights → contrast vector; prior table from the spec; and
    the output schema. A tiny-design brms fit runs as a slow, marked test.
 
+**Result (October 2026).** Run in bayes-sl; reports `reports/G1_forge_exponent.md` (19 Oct, engine `dbfe4ff`) and
+`reports/G1_forge_power.md` (23 Oct, engine `618a2b5`), both committed there:
+
+- **Exponent:** the gate passes under W and I. Against emmeans the direction agrees in 10 of 10 contrasts and every
+  posterior median lies inside the emmeans CI (gap 0.01-0.13 SD, the group levels' prior shrinkage).
+- **Band power:** both gates pass. The direction agrees in 49 of 49 ROI-average contrasts, every median lies inside
+  the emmeans CI (gap at most 0.12 SD), and the Bayesian decisions are a strict subset of p < .05. Open in the
+  report: a subject SD per group (the new-subject check misses in five bands), the shape misfit (left skew), and W's
+  scale R-hat of 1.046, which passes close to the limit.
+- These fits and gate verdicts were frozen on 28 Oct as the E0 fixtures. `tests/bayes/test_e0_regression.py`
+  replays them, and engine 2026.11.09.1 reproduces them.
+- The FORGE source estimates predate source-localization's BEM surface-order fix (bayes-sl
+  `reports/2026-11-14_bemfix_remeasure_plan.md`). That fault affects what the FORGE regions mean, not the
+  comparison, which fits both methods to the same table.
+
 ## 8. Decisions (the Conductor, 2026-10-14)
 
 1. **ROPE for plain contrasts: 0.1 SD** (`bayes: {rope: {mode: sd, value: 0.1}}` default). An equivalence hypothesis

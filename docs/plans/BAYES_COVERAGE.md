@@ -5,7 +5,7 @@ tests and the hypothesis layer) and with the Bayesian engine. It is the first st
 section 9 (decision D10: the Bayesian analyses must be available for every outcome source-analytics handles). It
 describes `main` at 81339ff; nothing was run to make it, so every mark rests on the code and the tests named.
 Checked against the code on 20 Nov: `electrode_signature`'s statistics are tested (corrected below), and the
-Bayesian evidence for `roi_psd` and `roi_aperiodic` is the E0 replay, not a recorded G1 result.
+Bayesian evidence for `roi_psd` and `roi_aperiodic` is the G1 test, now recorded in `BAYES_ENGINE.md` section 7.
 
 **Marks.**
 - **works**: an automated test runs this path, or it has been checked against a reference on real data (named).
@@ -33,8 +33,8 @@ been counted).
 
 | Module | Per-subject table: outcome columns | Frequentist path | Frequentist | Bayesian | Evidence / note |
 |---|---|---|---|---|---|
-| `roi_psd` | `band_power.csv`: absolute (dB/Hz), relative (fraction), delta_ref; per ROI x band | LMM + emmeans; hypothesis layer (R) | **works** | absolute: **works**; relative, delta_ref: **possible, untested** | freq: `test_r_scripts_smoke` (3 tests), `test_psd_analysis`, lifecycle run. Bayes: E0 replay of the frozen FORGE G1 fits and gate verdicts (`tests/bayes/test_e0_regression.py`; opt-in, needs `SA_BAYES_E0`; passed on engine 2026.11.09.1, 9-10 Nov), `tests/bayes/test_e5_slow.py` tiny fits (slow). G1's comparison against the emmeans tables (`BAYES_ENGINE.md` section 7) has no recorded result. Relative power is a fraction in 0-1: the Gaussian model is an approximation there |
-| `roi_aperiodic` | `aperiodic_params.csv`: exponent, offset; per ROI | LMM; hypothesis layer (R) | **works** | exponent: **works**; offset: **possible, untested** | freq: smoke test (model-warning test). Bayes: E0 replay of the FORGE G1 fits (exponent), as `roi_psd` |
+| `roi_psd` | `band_power.csv`: absolute (dB/Hz), relative (fraction), delta_ref; per ROI x band | LMM + emmeans; hypothesis layer (R) | **works** | absolute: **works**; relative, delta_ref: **possible, untested** | freq: `test_r_scripts_smoke` (3 tests), `test_psd_analysis`, lifecycle run. Bayes: FORGE G1 test, against emmeans 49 of 49 directions, medians inside the CI (`BAYES_ENGINE.md` section 7); its fits are replayed by `tests/bayes/test_e0_regression.py` (opt-in, needs `SA_BAYES_E0`); `tests/bayes/test_e5_slow.py` tiny fits (slow). Relative power is a fraction in 0-1: the Gaussian model is an approximation there |
+| `roi_aperiodic` | `aperiodic_params.csv`: exponent, offset; per ROI | LMM; hypothesis layer (R) | **works** | exponent: **works**; offset: **possible, untested** | freq: smoke test (model-warning test). Bayes: FORGE G1 test (exponent: 10 of 10 directions, medians inside the CI), replayed by the E0 test |
 | `electrode_psd` | `electrode_band_power.csv`: absolute, relative, delta_ref; per channel x band | LMM per channel and region model; hypothesis layer (R) | **runs, untested** | **possible, untested** (`csv:` table, `spatial: channel`) | no test runs `electrode_analysis.R`; `test_results_spec` checks only its table specification; used on FORGE |
 | `electrode_aperiodic` | `electrode_aperiodic_params.csv`: exponent, offset, offset_centered; per channel | LMM per channel + region model (R) | **works** | **possible, untested** (`csv:`) | freq: `test_electrode_aperiodic_region_posthoc_carries_mde_of_the_reference` |
 | `electrode_comparison` | `comparison_data.csv` (electrode vs source power per band), `aperiodic_comparison_data.csv`, `regional_source_power.csv` | Pearson r per band; Hedges g with 95% CI per level; no correction | **runs, untested** | **missing** (a concordance and a two-level comparison, not a group test; would need its own model) | only metadata tested (`test_audit_fixes`) |
@@ -81,9 +81,9 @@ Grouped by what a Bayesian path needs, cheapest first:
    the Gaussian approximation fails a check.
 3. **Needs a new model:** per-edge outcomes (connectivity, AAC/PPC, TE, electrode pairs: two spatial columns, and
    what pools across edges); the NBS counterpart (a sub-network claim).
-4. **Probably out of scope for a group model:** the signature modules (classification accuracy) and
-   `electrode_comparison` (source-sensor concordance). Proposed: record them as frequentist-only, with the reason,
-   unless the user wants otherwise.
+4. **Needs its own model:** the signature modules (classification accuracy) and `electrode_comparison`
+   (source-sensor concordance). Proposed on 19 Nov to keep them frequentist-only; the user decided on 20 Nov that
+   they get Bayesian paths too (see [BAYES_D10_PLAN.md](BAYES_D10_PLAN.md), steps 15-16).
 
 Frequentist gaps found on the way (D12: main stays working): no test runs `electrode_psd`'s R script,
 `electrode_comparison`'s statistics or `electrode_connectivity` as a module;
