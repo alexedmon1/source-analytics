@@ -47,6 +47,8 @@ format_omnibus_table <- function(df) {
 .native_posthoc <- function(df) {
   if (!"dv" %in% names(df) && "power_type" %in% names(df)) df$dv <- df$power_type
   if (!"stat" %in% names(df) && "t_ratio" %in% names(df)) df$stat <- df$t_ratio
+  # cohens_d: the legacy post-hoc column; hedges_g: its name before 2026-11-20 (the same uncorrected value)
+  if (!"effect_size" %in% names(df) && "cohens_d" %in% names(df)) df$effect_size <- df$cohens_d
   if (!"effect_size" %in% names(df) && "hedges_g" %in% names(df)) df$effect_size <- df$hedges_g
   if (!"spatial" %in% names(df) && "roi" %in% names(df)) df$spatial <- df$roi
   df
@@ -69,7 +71,7 @@ format_posthoc_section <- function(sig_df, spatial_col = "spatial",
         band_sig <- sig_df %>% filter(dv == pt, band == bname)
         add("#### ", bname, " (", pt, ")")
         add("")
-        add("| ", label, " | Estimate | SE | t | q | Hedges' g |")
+        add("| ", label, " | Estimate | SE | t | q | Cohen's d |")
         add("| --- | --- | --- | --- | --- | --- |")
         for (i in seq_len(nrow(band_sig))) {
           row <- band_sig[i, ]
@@ -175,7 +177,7 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
       "Post-hoc: emmeans pairwise group contrasts, gated on significant omnibus effects. ",
       "Holm correction within each band. ")
   }
-  stats_lines <- paste0(stats_lines, "Hedges' g = emmean difference / residual SD.")
+  stats_lines <- paste0(stats_lines, "Cohen's d = emmean difference / residual SD.")
   add(stats_lines)
   add("")
 
@@ -282,7 +284,7 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
             filter(hypothesis == row$contrast, band == row$band,
                    dv == row$power_type, significant == TRUE)
           if (nrow(band_regions) > 0) {
-            reg_strs <- sprintf("%s (g=%.2f)", band_regions$region, band_regions$effect_size)
+            reg_strs <- sprintf("%s (d=%.2f)", band_regions$region, band_regions$effect_size)
             add("  - Significant regions: ", paste(reg_strs, collapse = ", "))
           }
         }
@@ -303,11 +305,11 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
         add(sprintf("- **%s %s** [%s, region-nested]: %s", row$band, row$power_type, row$contrast,
                     paste(findings, collapse = "; ")))
         if (nrow(posthoc_region_nested_df) > 0) {
-          band_regions <- posthoc_region_nested_df %>%
+          band_regions <- .native_posthoc(posthoc_region_nested_df) %>%
             filter(contrast == row$contrast, band == row$band,
                    power_type == row$power_type, significant == TRUE)
           if (nrow(band_regions) > 0) {
-            reg_strs <- sprintf("%s (g=%.2f)", band_regions$region, band_regions$hedges_g)
+            reg_strs <- sprintf("%s (d=%.2f)", band_regions$region, band_regions$effect_size)
             add("  - Significant regions: ", paste(reg_strs, collapse = ", "))
           }
         }
@@ -332,7 +334,7 @@ write_summary <- function(omnibus_df, posthoc_df, config, n_subjects, sfreq,
             filter(hypothesis == row$contrast, band == row$band,
                    dv == row$power_type, significant == TRUE)
           if (nrow(band_rois) > 0) {
-            roi_strs <- sprintf("%s (g=%.2f)", band_rois$spatial, band_rois$effect_size)
+            roi_strs <- sprintf("%s (d=%.2f)", band_rois$spatial, band_rois$effect_size)
             add("  - Significant ROIs: ", paste(roi_strs, collapse = ", "))
           }
         }

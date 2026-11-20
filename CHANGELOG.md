@@ -14,13 +14,17 @@
 
 ### Changed
 
-- **The hypothesis tables label their contrast effect size `cohens_d`, not `hedges_g`** (KNOWN_ISSUES 1). The
-  value, the estimate over the model's residual SD, is unchanged: it never had Hedges' small-sample correction,
-  so the old name overstated it. Rows of kind contrast and equivalence, from the R adapter and the Python
-  tabular adapter (roi_graph, evoked), now say `effect_size_type = cohens_d`; the brain mosaics and roi_directed's
-  heatmaps drawn from these tables say "Cohen's d". The results specification describes both labels, and its
-  caveat about the misleading name now appears only for tables written before this change. The legacy post-hoc
-  tables' `hedges_g` columns are unchanged.
+- **The uncorrected standardized difference is called Cohen's d, not Hedges' g** (KNOWN_ISSUES 1). The value,
+  the estimate over the model's residual SD (or a per-edge difference over the pooled SD), never had Hedges'
+  small-sample correction, so the old name overstated it; the values do not change. The hypothesis tables say
+  `effect_size_type = cohens_d` (R adapter and the Python tabular adapter: roi_graph, evoked). The legacy
+  post-hoc tables' `hedges_g`, `hedges_g_lcl` and `hedges_g_ucl` columns are now `cohens_d`, `cohens_d_lcl` and
+  `cohens_d_ucl` (`R/stats_utils.R`; roi_aperiodic, roi_evoked, electrode_evoked, roi_connectivity, roi_pac,
+  roi_transfer_entropy). Reports, figures and their annotations say Cohen's d and "d="; the report, the summary
+  figures and the results specification still read tables written before under the old name. Genuinely corrected
+  Hedges' g keeps its name (electrode_aperiodic's legacy tables, roi_graph's global metrics,
+  electrode_comparison, the cluster helper behind electrode_connectivity, roi_network and TFCE). A reader outside
+  this package that looks for `hedges_g` in the legacy tables needs the new name (source-lightbox does).
 - **`mde_percent` divides by the design reference group's mean in every post-hoc table**, as it does in the
   hypothesis tables. The `R/stats_utils.R` post-hoc tables divided by `emmean_b`, which for a contrast like
   `{WT: +1, KO: -1}` with reference WT is the KO mean. They now use `.add_posthoc_mde` (`R/hypothesis.R`):

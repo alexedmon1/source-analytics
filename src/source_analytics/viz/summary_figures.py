@@ -30,6 +30,7 @@ from .theme import (
     FONT_SUBTITLE,
     FONT_ANNOTATION,
 )
+from .figure_registry import effect_symbol
 from .palettes import get_diverging_cmap_name
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ def plot_effect_heatmap(
 
     Cell color = estimated difference (estimate, coefficient, or mean diff).
     Non-significant cells are greyed out.  Cells annotated with the estimate
-    value plus Hedges' g in parentheses.
+    value plus the standardized effect (Cohen's d) in parentheses.
     """
     analysis = kwargs.pop("analysis", None) or _infer_analysis(tbl_dir)
     df, schema = _load_and_normalise(tbl_dir, analysis, **kwargs)
@@ -107,6 +108,7 @@ def plot_effect_heatmap(
     # Need either _estimate or effect_col
     has_estimate = "_estimate" in df.columns and df["_estimate"].notna().any()
     has_effect = schema.effect_col in df.columns
+    sym = effect_symbol(schema.effect_col)
     if not has_estimate and not has_effect:
         logger.warning("No estimate or effect column found for %s", analysis)
         return []
@@ -165,7 +167,7 @@ def plot_effect_heatmap(
                     (j - 0.5, i - 0.5), 1, 1,
                     facecolor=COLOR_NONSIG, alpha=0.55, edgecolor="white", linewidth=0.5,
                 ))
-            # Build annotation text: estimate value + (g=X.XX)
+            # Build annotation text: estimate value + (d=X.XX), or g for a corrected Hedges' g
             est_val = est_matrix[i, j]
             g_val = g_matrix[i, j]
             color_val = color_matrix[i, j]
@@ -177,9 +179,9 @@ def plot_effect_heatmap(
             if has_estimate and not np.isnan(est_val):
                 txt = f"{est_val:.2f}"
                 if has_effect and not np.isnan(g_val):
-                    txt += f"\n(g={g_val:.2f})"
+                    txt += f"\n({sym}={g_val:.2f})"
             elif has_effect and not np.isnan(g_val):
-                txt = f"g={g_val:.2f}"
+                txt = f"{sym}={g_val:.2f}"
             else:
                 continue
 
@@ -221,7 +223,7 @@ def plot_volcano(
     """Volcano plot: estimated difference (x) vs -log10(p) (y), colored by significance.
 
     Uses the actual measured difference (estimate/coefficient/mean diff) on the
-    x-axis.  Significant points are labeled with name and Hedges' g.
+    x-axis.  Significant points are labeled with name and the standardized effect.
     """
     analysis = kwargs.pop("analysis", None) or _infer_analysis(tbl_dir)
     df, schema = _load_and_normalise(tbl_dir, analysis, **kwargs)
@@ -277,7 +279,7 @@ def plot_volcano(
             if has_effect and schema.effect_col in row.index:
                 g = row[schema.effect_col]
                 if not pd.isna(g):
-                    lbl += f" (g={g:.2f})"
+                    lbl += f" ({effect_symbol(schema.effect_col)}={g:.2f})"
             ax.annotate(
                 lbl,
                 (row[x_col], -np.log10(max(row[schema.p_col], 1e-300))),
@@ -377,7 +379,7 @@ def plot_summary_circos(
             parts = [p.strip() for p in row["region_pair"].split(" - ")]
             if len(parts) == 2 and parts[0] in reg_idx and parts[1] in reg_idx:
                 i, j = reg_idx[parts[0]], reg_idx[parts[1]]
-                val = row.get("hedges_g", row.get("estimate", 0))
+                val = row.get("cohens_d", row.get("hedges_g", row.get("estimate", 0)))
                 matrix[i, j] = val
                 matrix[j, i] = val
 
@@ -401,7 +403,7 @@ def plot_summary_circos(
             if len(parts) != 2 or parts[0] not in reg_idx or parts[1] not in reg_idx:
                 continue
             i, j = reg_idx[parts[0]], reg_idx[parts[1]]
-            g = row.get("hedges_g", 0)
+            g = row.get("cohens_d", row.get("hedges_g", 0))
             color = COLOR_SIG if abs(g) > 0.5 else COLOR_TREND
             lw = min(3, max(0.5, abs(g)))
             ax.plot([angles[i], angles[j]], [0.9, 0.9],

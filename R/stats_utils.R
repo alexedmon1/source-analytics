@@ -248,9 +248,9 @@ run_posthoc_emmeans <- function(band_df, contrasts, bands, omnibus_df,
               q_value = con_df$q_value[i],
               emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
               emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-              hedges_g = hg,
-              hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
-              hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
+              cohens_d = hg,
+              cohens_d_lcl = con_df$lower.CL[i] / resid_sd,
+              cohens_d_ucl = con_df$upper.CL[i] / resid_sd,
               significant = con_df$q_value[i] < 0.05,
               .resid_sd = resid_sd,
               stringsAsFactors = FALSE
@@ -471,9 +471,9 @@ run_posthoc_emmeans_region <- function(band_df, contrasts, bands, roi_categories
               q_value = con_df$q_value[i],
               emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
               emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-              hedges_g = hg,
-              hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
-              hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
+              cohens_d = hg,
+              cohens_d_lcl = con_df$lower.CL[i] / resid_sd,
+              cohens_d_ucl = con_df$upper.CL[i] / resid_sd,
               significant = con_df$q_value[i] < 0.05,
               .resid_sd = resid_sd,
               stringsAsFactors = FALSE
@@ -643,7 +643,7 @@ sig_stars <- function(q) {
 #' @param dv_col name of dependent variable column (default "dv")
 #' @param dv_label character label for the DV in output (e.g., "absolute", "relative", "exponent")
 #' @param band_label optional band name (for multi-band analyses)
-#' @return data.frame with one row per contrast: contrast, dv, band, estimate, SE, df, t_ratio, p_value, emmean_a, emmean_b, hedges_g, mde, mde_percent, mde_power, mde_alpha, mde_note, q_value, significant, sig_label
+#' @return data.frame with one row per contrast: contrast, dv, band, estimate, SE, df, t_ratio, p_value, emmean_a, emmean_b, cohens_d, mde, mde_percent, mde_power, mde_alpha, mde_note, q_value, significant, sig_label
 run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
                                dv_col = "dv", dv_label = "",
                                band_label = NA_character_) {
@@ -691,9 +691,9 @@ run_posthoc_global <- function(data, contrasts, spatial_col = "roi",
           p_value = con_df$p.value[1],
           emmean_a = if (length(emm_a) > 0) emm_a[1] else NA_real_,
           emmean_b = if (length(emm_b) > 0) emm_b[1] else NA_real_,
-          hedges_g = hg,
-          hedges_g_lcl = con_df$lower.CL[1] / resid_sd,
-          hedges_g_ucl = con_df$upper.CL[1] / resid_sd,
+          cohens_d = hg,
+          cohens_d_lcl = con_df$lower.CL[1] / resid_sd,
+          cohens_d_ucl = con_df$upper.CL[1] / resid_sd,
           .resid_sd = resid_sd,
           stringsAsFactors = FALSE
         )
@@ -793,9 +793,9 @@ run_posthoc_emmeans_region_nested <- function(band_df, contrasts, bands, roi_cat
               q_value = con_df$q_value[i],
               emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
               emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-              hedges_g = hg,
-              hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
-              hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
+              cohens_d = hg,
+              cohens_d_lcl = con_df$lower.CL[i] / resid_sd,
+              cohens_d_ucl = con_df$upper.CL[i] / resid_sd,
               significant = con_df$q_value[i] < 0.05,
               .resid_sd = resid_sd,
               stringsAsFactors = FALSE

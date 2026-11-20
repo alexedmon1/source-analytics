@@ -147,7 +147,7 @@ run_global_ttests <- function(global_df, contrasts, bands) {
       })
 
       pooled_sd <- sqrt(((n_a - 1) * sd_a^2 + (n_b - 1) * sd_b^2) / (n_a + n_b - 2))
-      hedges_g <- if (!is.na(pooled_sd) && pooled_sd > 0) (mean_a - mean_b) / pooled_sd else NA
+      cohens_d <- if (!is.na(pooled_sd) && pooled_sd > 0) (mean_a - mean_b) / pooled_sd else NA
 
       results[[length(results) + 1]] <- data.frame(
         contrast = cname,
@@ -160,7 +160,7 @@ run_global_ttests <- function(global_df, contrasts, bands) {
         t_stat = as.numeric(t_stat),
         df = as.numeric(df_val),
         p_value = as.numeric(p_val),
-        hedges_g = hedges_g,
+        cohens_d = cohens_d,
         stringsAsFactors = FALSE
       )
     }
@@ -435,7 +435,7 @@ run_posthoc_emmeans <- function(region_pair_df, contrasts, bands, omnibus_df, ga
               q_value = con_df$q_value[i],
               emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
               emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-              hedges_g = hg,
+              cohens_d = hg,
               significant = con_df$q_value[i] < 0.05,
               stringsAsFactors = FALSE
             )
@@ -587,7 +587,7 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
   gc <- if (!is.null(hyp_global) && nrow(hyp_global) > 0)
           hyp_global[hyp_global$kind == "contrast", , drop = FALSE] else data.frame()
   if (nrow(gc) > 0) {
-    add("| Hypothesis | DV | Band | estimate | t | df | q | Hedges' g | Sig |")
+    add("| Hypothesis | DV | Band | estimate | t | df | q | Cohen's d | Sig |")
     add("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for (i in seq_len(nrow(gc))) {
       row <- gc[i, ]
@@ -622,7 +622,7 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
       top_e <- head(sig_e, 30)
       add("Top significant directed edges (FDR q < 0.05, up to 30 shown):")
       add("")
-      add("| Hypothesis | Band | Source \u2192 Target | estimate | t | q | Hedges' g |")
+      add("| Hypothesis | Band | Source \u2192 Target | estimate | t | q | Cohen's d |")
       add("| --- | --- | --- | --- | --- | --- | --- |")
       for (i in seq_len(nrow(top_e))) {
         row <- top_e[i, ]
@@ -668,7 +668,7 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
       if (nrow(sig_ph) > 0) {
         add("### Significant Region-Pair Contrasts (q < 0.05; ", correction_phrase(posthoc_df), ")")
         add("")
-        add("| Band | Region Pair | Estimate | SE | t | q | Hedges' g |")
+        add("| Band | Region Pair | Estimate | SE | t | q | Cohen's d |")
         add("| --- | --- | --- | --- | --- | --- | --- |")
         for (i in seq_len(nrow(sig_ph))) {
           row <- sig_ph[i, ]
@@ -699,7 +699,7 @@ write_te_summary <- function(global_df, hyp_global, hyp_edges,
       any_sig <- TRUE
       for (i in seq_len(nrow(sig_global))) {
         row <- sig_global[i, ]
-        add(sprintf("- **%s TE** [%s, global]: t=%.2f, q=%.4f, g=%.2f",
+        add(sprintf("- **%s TE** [%s, global]: t=%.2f, q=%.4f, d=%.2f",
                     row$band, row$label %||% row$hypothesis, row$stat, row$q_value, row$effect_size))
       }
     }

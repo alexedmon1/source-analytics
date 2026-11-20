@@ -115,8 +115,8 @@ def _atlas_or_skip(name):
 def test_render_end_to_end(tmp_path):
     names = _atlas_or_skip("allen26")
     rng = np.random.default_rng(0)
-    eff = pd.DataFrame({"roi": names, "hedges_g": rng.uniform(-1.2, 1.2, len(names))})
-    eff["significant"] = eff.hedges_g.abs() > 1.0
+    eff = pd.DataFrame({"roi": names, "cohens_d": rng.uniform(-1.2, 1.2, len(names))})
+    eff["significant"] = eff.cohens_d.abs() > 1.0
     disp = pd.DataFrame({"roi": names, "displacement_mm": rng.uniform(0.3, 4.0, len(names))})
     out = tmp_path / "map.png"
     ranges = plot_attribution_mosaic([("row", eff)], out, disp, atlas="allen26", g_limit=1.5, dpi=60)

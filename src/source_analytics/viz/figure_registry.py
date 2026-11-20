@@ -17,6 +17,17 @@ logger = logging.getLogger(__name__)
 
 # ── Column schema per analysis ───────────────────────────────────────
 
+#: The legacy post-hoc tables' standardized difference is ``cohens_d`` (the estimate over the residual or
+#: pooled SD, no small-sample correction). Tables written before 2026-11-20 call the same value ``hedges_g``.
+#: ``roi_network``'s global table holds a genuinely corrected Hedges' g and keeps that name.
+OLD_EFFECT_NAMES = {"cohens_d": "hedges_g"}
+
+
+def effect_symbol(effect_col: str) -> str:
+    """The letter figures print before an effect: d for Cohen's d, g for Hedges' g."""
+    return "g" if effect_col == "hedges_g" else "d"
+
+
 class TableSchema:
     """Describes how to read a posthoc CSV for a given analysis."""
 
@@ -24,7 +35,7 @@ class TableSchema:
         self,
         posthoc_file: str,
         estimate_col: str | None = "estimate",
-        effect_col: str = "hedges_g",
+        effect_col: str = "cohens_d",
         p_col: str = "p_value",
         q_col: str = "q_value",
         sig_col: str = "significant",
@@ -157,6 +168,9 @@ def load_posthoc(tbl_dir: Path, analysis: str) -> pd.DataFrame | None:
         logger.warning("Posthoc file not found: %s", path)
         return None
     df = pd.read_csv(path)
+    old = OLD_EFFECT_NAMES.get(schema.effect_col)
+    if old and schema.effect_col not in df.columns and old in df.columns:
+        df = df.rename(columns={old: schema.effect_col})     # written before the rename: the same value
     # Normalize the 'significant' column to boolean
     if schema.sig_col in df.columns:
         col = df[schema.sig_col]

@@ -115,7 +115,11 @@ def test_evoked_scripts_derive_contrasts_from_design_spec(tmp_path, design_confi
         assert set(omnibus["contrast"]) == {"disease_effect"}
         # The inline model blocks record warnings in a column instead of dropping rows.
         assert "fit_warning" in omnibus.columns
-        _assert_mde(pd.read_csv(out / "tables" / f"{level}_evoked_posthoc_global.csv"))
+        glob = pd.read_csv(out / "tables" / f"{level}_evoked_posthoc_global.csv")
+        _assert_mde(glob)
+        # an uncorrected standardized difference is Cohen's d, not Hedges' g (KNOWN_ISSUES 1)
+        assert {"cohens_d", "cohens_d_lcl", "cohens_d_ucl"} <= set(glob.columns)
+        assert not any(c.startswith("hedges_g") for c in glob.columns)
         # The module's own post-hoc tables carry the MDE too (KNOWN_ISSUES 5), as a
         # percent of the design reference group's emmean (WT_VEH, group_b here).
         spatial = "roi" if level == "roi" else "channel"
@@ -127,6 +131,7 @@ def test_evoked_scripts_derive_contrasts_from_design_spec(tmp_path, design_confi
             assert len(ph) > 0, f"{name} is empty"
             _assert_mde(ph)
             assert "fit_warning" in ph.columns
+            assert "cohens_d" in ph.columns and "hedges_g" not in ph.columns
             assert (ph["mde"] > 0).all()
             pct = ph.dropna(subset=["mde_percent"])
             assert len(pct) > 0
@@ -167,6 +172,8 @@ def test_electrode_aperiodic_region_posthoc_carries_mde_of_the_reference(tmp_pat
     assert len(ph) > 0
     _assert_mde(ph)
     assert {"emmean_a", "emmean_b"} <= set(ph.columns) and (ph["mde"] > 0).all()
+    # effectsize::hedges_g applies the small-sample correction, so this one keeps its name
+    assert "hedges_g" in ph.columns and "cohens_d" not in ph.columns
     pct = ph.dropna(subset=["mde_percent"])
     assert len(pct) > 0
     assert np.allclose(pct["mde_percent"], 100 * pct["mde"] / pct["emmean_a"].abs())

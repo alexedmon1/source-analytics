@@ -7,7 +7,7 @@ operator can use it.
 
 What the colour is
 ------------------
-Each parcel's effect (Hedges' g) comes from the analysis **unchanged**. The only thing
+Each parcel's effect (Cohen's d) comes from the analysis **unchanged**. The only thing
 added is where it is drawn: the value is spread by a Gaussian whose sigma is that
 parcel's own **peak displacement** for the operator that produced the data, and
 overlapping contributions combine as a weighted average
@@ -123,7 +123,7 @@ def attribution_volume(labels: np.ndarray, affine: np.ndarray, id2name: dict[int
 
 def attribution_field_range(rows: pd.DataFrame | list[tuple[str, pd.DataFrame]], displacement: pd.DataFrame,
                             *, atlas="allen", roi_col: str = "roi",
-                            effect_col: str = "hedges_g") -> list[tuple[float, float]]:
+                            effect_col: str = "cohens_d") -> list[tuple[float, float]]:
     """(min, max) of the displayed field per row, without drawing anything.
 
     Use it to set a shared ``g_limit`` the way the published figures did: from the largest
@@ -200,11 +200,11 @@ def plot_attribution_mosaic(
     atlas="allen",
     g_limit: float,
     roi_col: str = "roi",
-    effect_col: str = "hedges_g",
+    effect_col: str = "cohens_d",
     significant_col: str | None = "significant",
     significance_label: str = "q < 0.05",
     title: str = "",
-    colorbar_label: str = "Hedges' g  (blue: KO < WT    red: KO > WT)",
+    colorbar_label: str = "Cohen's d  (blue: KO < WT    red: KO > WT)",
     slice_mm: dict[str, float] | None = None,
     width_in: float = 7.2,
     dpi: int = 300,
@@ -294,7 +294,7 @@ def attribution_caption(displacement: pd.DataFrame, table_ref: str,
                         significance_text: str = "Bold outlines mark q < 0.05.") -> str:
     """The standard caption (MS1 Figure 4 wording), with this table's displacement range."""
     lo, hi = displacement["displacement_mm"].min(), displacement["displacement_mm"].max()
-    return (f"Each parcel's Hedges' g is spread by a Gaussian whose standard deviation is that parcel's own "
+    return (f"Each parcel's Cohen's d is spread by a Gaussian whose standard deviation is that parcel's own "
             f"measured peak displacement ({lo:.2f}–{hi:.2f} mm; {table_ref}). The map shows where an effect can "
             f"be attributed, not a new estimate; a value at any point is not that parcel's tested effect size. "
             f"{significance_text}")

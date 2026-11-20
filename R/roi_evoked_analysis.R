@@ -283,7 +283,7 @@ for (contrast in contrasts) {
             q_value = con_df$q_value[i],
             emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
             emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-            hedges_g = hg,
+            cohens_d = hg,
             significant = con_df$q_value[i] < 0.05,
             .resid_sd = resid_sd,
             stringsAsFactors = FALSE
@@ -473,7 +473,7 @@ if (length(config$roi_categories) > 0) {
               q_value = con_df$q_value[i],
               emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
               emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-              hedges_g = hg,
+              cohens_d = hg,
               significant = con_df$q_value[i] < 0.05,
               .resid_sd = resid_sd,
               stringsAsFactors = FALSE
@@ -702,15 +702,15 @@ if (nrow(posthoc_df) > 0) {
   sig_ph <- posthoc_df %>% filter(significant == TRUE)
   if (nrow(sig_ph) > 0) {
     sig_ph$label <- paste0(sig_ph$contrast, " | ", sig_ph$roi)
-    sig_ph <- sig_ph %>% arrange(desc(abs(hedges_g)))
+    sig_ph <- sig_ph %>% arrange(desc(abs(cohens_d)))
 
     if (nrow(sig_ph) > 30) sig_ph <- sig_ph[1:30, ]
 
-    p <- ggplot(sig_ph, aes(x = hedges_g, y = reorder(label, hedges_g))) +
+    p <- ggplot(sig_ph, aes(x = cohens_d, y = reorder(label, cohens_d))) +
       geom_point(aes(color = measure), size = 2) +
       geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.5) +
       labs(title = "Significant Post-Hoc Effects (Top 30)",
-           x = "Hedges' g", y = "", color = "Measure") +
+           x = "Cohen's d", y = "", color = "Measure") +
       theme_minimal(base_size = 10)
 
     ggsave(file.path(fig_dir, "roi_evoked_posthoc_forest.png"), p,
@@ -824,13 +824,13 @@ if (nrow(posthoc_df) > 0) {
       msig <- sig_ph %>% filter(measure == mname)
       add("### ", mname, " (", msig$measure_type[1], ")")
       add("")
-      add("| Contrast | ROI | Estimate | SE | t | q | Hedges' g |")
+      add("| Contrast | ROI | Estimate | SE | t | q | Cohen's d |")
       add("| --- | --- | --- | --- | --- | --- | --- |")
       for (i in seq_len(nrow(msig))) {
         row <- msig[i, ]
         add(sprintf("| %s | %s | %.4f | %.4f | %.2f | %.4f | %.2f |",
                     row$contrast, row$roi, row$estimate, row$SE,
-                    row$t_ratio, row$q_value, row$hedges_g))
+                    row$t_ratio, row$q_value, row$cohens_d))
       }
       add("")
     }

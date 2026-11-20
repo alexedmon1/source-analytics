@@ -886,7 +886,7 @@ report.
 ### Brain maps from ROI effects
 
 `viz/` draws ROI effects on atlas slices two ways, both from a per-ROI table (`roi`,
-`hedges_g`, p or a significance flag) and the data's own atlas:
+`cohens_d` by default, p or a significance flag) and the data's own atlas:
 
 - **`plot_effect_size_mosaic`** (`viz/brain_roi.py`): each parcel filled with its effect.
 - **`plot_attribution_mosaic`** (`viz/attribution_map.py`): the published MS1 figures'

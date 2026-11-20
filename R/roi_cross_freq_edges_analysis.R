@@ -271,7 +271,7 @@ for (metric in metrics) {
     add("")
     gc <- if (nrow(hyp_global) > 0) hyp_global[hyp_global$kind == "contrast", , drop = FALSE] else data.frame()
     if (nrow(gc) > 0) {
-      add("| Hypothesis | DV | Freq pair | estimate | t | q | Hedges' g | Sig |")
+      add("| Hypothesis | DV | Freq pair | estimate | t | q | Cohen's d | Sig |")
       add("| --- | --- | --- | --- | --- | --- | --- | --- |")
       for (i in seq_len(nrow(gc))) {
         row <- gc[i, ]

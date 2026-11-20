@@ -13,10 +13,10 @@ Reference for all visualization functions in `source_analytics.viz`.
 - **Typical filename**: `significance_{band}_{power_type}.png`, `significance_aperiodic_{dv}.png`
 
 ### `plot_effect_size_mosaic`
-- **Purpose**: ROI-level Hedges' g map on atlas slices with diverging colormap
+- **Purpose**: ROI-level Cohen's d map on atlas slices with diverging colormap
 - **Colormap**: Diverging (RdBu_r), blue = KO < WT, red = KO > WT
 - **Layout**: 1 row (all ROIs) or 2 rows (+ FDR-corrected threshold row)
-- **Input**: DataFrame with `roi`, `hedges_g`, `p_value` columns
+- **Input**: DataFrame with `roi`, `cohens_d`, `p_value` columns
 - **Correction**: Benjamini-Hochberg FDR applied internally across ROIs
 - **Typical filename**: `effect_size_{band}_{power_type}.png`, `effect_size_aperiodic_{dv}.png`
 

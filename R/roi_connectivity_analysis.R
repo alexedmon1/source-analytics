@@ -138,9 +138,9 @@ run_global_ttests <- function(global_df, contrasts, bands) {
           message("  t-test failed for ", cname, "/", band_name, "/", metric_name, ": ", conditionMessage(e))
         })
 
-        # Hedges' g (pooled SD approximation)
+        # Cohen's d (pooled SD, no small-sample correction)
         pooled_sd <- sqrt(((n_a - 1) * sd_a^2 + (n_b - 1) * sd_b^2) / (n_a + n_b - 2))
-        hedges_g <- if (!is.na(pooled_sd) && pooled_sd > 0) (mean_a - mean_b) / pooled_sd else NA
+        cohens_d <- if (!is.na(pooled_sd) && pooled_sd > 0) (mean_a - mean_b) / pooled_sd else NA
 
         results[[length(results) + 1]] <- data.frame(
           contrast = cname,
@@ -157,7 +157,7 @@ run_global_ttests <- function(global_df, contrasts, bands) {
           t_stat = as.numeric(t_stat),
           df = as.numeric(df_val),
           p_value = as.numeric(p_val),
-          hedges_g = hedges_g,
+          cohens_d = cohens_d,
           stringsAsFactors = FALSE
         )
       }
@@ -402,7 +402,7 @@ run_posthoc_emmeans_region_pair <- function(region_pair_df, contrasts, bands,
               q_value = con_df$q_value[i],
               emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
               emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-              hedges_g = hg,
+              cohens_d = hg,
               significant = con_df$q_value[i] < 0.05,
               stringsAsFactors = FALSE
             )
@@ -701,7 +701,7 @@ write_connectivity_summary <- function(global_df, global_ttest_df,
       "Type III ANOVA with Satterthwaite df. ",
       "FDR (BH) across bands. ",
       "Post-hoc: emmeans pairwise group contrasts per region pair, Holm correction. ",
-      "Hedges' g = emmean difference / residual SD."
+      "Cohen's d = emmean difference / residual SD."
     )
   }
   add(stats_lines)
@@ -723,7 +723,7 @@ write_connectivity_summary <- function(global_df, global_ttest_df,
                   ifelse(is.na(row$df), 0, row$df),
                   ifelse(is.na(row$p_value), 1, row$p_value),
                   ifelse(is.na(row$q_value), 1, row$q_value),
-                  ifelse(is.na(row$hedges_g), 0, row$hedges_g),
+                  ifelse(is.na(row$cohens_d), 0, row$cohens_d),
                   sig_str))
     }
     add("")
@@ -765,13 +765,13 @@ write_connectivity_summary <- function(global_df, global_ttest_df,
             band_sig <- sig_ph %>% filter(metric == m, band == bname)
             add("#### ", bname, " (", gsub("_", " ", m), ")")
             add("")
-            add("| Region Pair | Estimate | SE | t | q | Hedges' g |")
+            add("| Region Pair | Estimate | SE | t | q | Cohen's d |")
             add("| --- | --- | --- | --- | --- | --- |")
             for (i in seq_len(nrow(band_sig))) {
               row <- band_sig[i, ]
               add(sprintf("| %s | %.4f | %.4f | %.2f | %.4f | %.2f |",
                           row$region_pair, row$estimate, row$SE, row$t_ratio,
-                          row$q_value, row$hedges_g))
+                          row$q_value, row$cohens_d))
             }
             add("")
           }
@@ -801,9 +801,9 @@ write_connectivity_summary <- function(global_df, global_ttest_df,
       any_sig <- TRUE
       for (i in seq_len(nrow(sig_global))) {
         row <- sig_global[i, ]
-        add(sprintf("- **%s %s** [%s, global]: t=%.2f, q=%.4f, g=%.2f (mean_a=%.4f, mean_b=%.4f)",
+        add(sprintf("- **%s %s** [%s, global]: t=%.2f, q=%.4f, d=%.2f (mean_a=%.4f, mean_b=%.4f)",
                     row$band, row$metric, row$contrast,
-                    row$t_stat, row$q_value, row$hedges_g, row$mean_a, row$mean_b))
+                    row$t_stat, row$q_value, row$cohens_d, row$mean_a, row$mean_b))
       }
     }
   }

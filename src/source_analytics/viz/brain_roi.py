@@ -236,7 +236,7 @@ def plot_brain_roi_mosaic(
     vmin: float | None = None,
     vmax: float | None = None,
     vcenter: float = 0.0,
-    colorbar_label: str = "Hedges' g",
+    colorbar_label: str = "Cohen's d",
     atlas_dir: str | Path | None = None,
     roi_opacity: float = 0.85,
     gamma: float = 0.5,
@@ -255,7 +255,7 @@ def plot_brain_roi_mosaic(
     Parameters
     ----------
     region_values : dict
-        Region name → scalar value (e.g. Hedges' g).
+        Region name → scalar value (e.g. Cohen's d).
     roi_categories : dict
         Region name → list of ROI abbreviations.
     output_path : str or Path
@@ -790,7 +790,7 @@ def plot_effect_size_mosaic(
     *,
     title: str = "",
     roi_col: str = "roi",
-    effect_col: str = "hedges_g",
+    effect_col: str = "cohens_d",
     p_col: str = "p_value",
     q_col: str | None = None,
     correction_label: str = "FDR",
@@ -805,7 +805,7 @@ def plot_effect_size_mosaic(
 ) -> Path:
     """Plot an effect-size mosaic with diverging colormap.
 
-    Top row: all ROIs colored by Hedges' g.
+    Top row: all ROIs colored by Cohen's d.
     Bottom row (if any survive): post-hoc-corrected ROIs only, thresholded
     at ``q < alpha``.
 
@@ -827,7 +827,7 @@ def plot_effect_size_mosaic(
     roi_col : str
         Column with ROI names matching the atlas.
     effect_col : str
-        Column with effect sizes (default ``"hedges_g"``).
+        Column with effect sizes (default ``"cohens_d"``).
     p_col : str
         Column with uncorrected p-values. Used only when *q_col* is None
         (legacy BH-FDR fallback).
@@ -843,7 +843,7 @@ def plot_effect_size_mosaic(
         Diverging colormap name.
     colorbar_label : str, optional
         Custom colorbar label. If *None*, defaults to
-        ``"Hedges' g  (blue: KO < WT    red: KO > WT)"``.
+        ``"Cohen's d  (blue: KO < WT    red: KO > WT)"``.
     atlas_name : str
         Atlas to load (default ``"allen"``).
     auto_slices : bool
@@ -876,10 +876,10 @@ def plot_effect_size_mosaic(
     label_vals_sig = _build_roi_label_to_value(sig_values, roi_mapping)
     n_sig = len(sig_values)
 
-    row_configs = [(label_vals_all, "Hedges' g (all ROIs)")]
+    row_configs = [(label_vals_all, "Cohen's d (all ROIs)")]
     if n_sig > 0:
         row_configs.append(
-            (label_vals_sig, f"Hedges' g ({correction_label} q < {alpha}, n={n_sig})")
+            (label_vals_sig, f"Cohen's d ({correction_label} q < {alpha}, n={n_sig})")
         )
 
     slice_kwargs: dict[str, int] = {}
@@ -897,7 +897,7 @@ def plot_effect_size_mosaic(
     return _compact_mosaic(
         row_configs, title, label_data, anat_norm, affine,
         Path(output_path), cmap, norm, vmin, vmax,
-        colorbar_label=colorbar_label or "Hedges' g  (blue: KO < WT    red: KO > WT)",
+        colorbar_label=colorbar_label or "Cohen's d  (blue: KO < WT    red: KO > WT)",
         roi_opacity=roi_opacity, dpi=dpi, **slice_kwargs,
     )
 
@@ -952,13 +952,13 @@ def render_posthoc_mosaics(
     output_dir: Path,
     *,
     analysis_name: str = "psd",
-    effect_col: str = "hedges_g",
+    effect_col: str = "cohens_d",
     roi_col: str = "roi",
     p_col: str = "p_value",
     q_col: str | None = None,
     correction_label: str = "FDR",
     facet_cols: list[str] | None = None,
-    colorbar_label: str = "Hedges' g",
+    colorbar_label: str = "Cohen's d",
     alpha: float = 0.05,
     auto_slices: bool = True,
     atlas=None,
@@ -1130,7 +1130,7 @@ def plot_brain_roi(
     vmin: float | None = None,
     vmax: float | None = None,
     vcenter: float = 0.0,
-    colorbar_label: str = "Hedges' g",
+    colorbar_label: str = "Cohen's d",
     atlas_dir: str | Path | None = None,
     views: dict[str, dict] | None = None,
     brain_opacity: float = 0.15,
@@ -1145,7 +1145,7 @@ def plot_brain_roi(
     Parameters
     ----------
     region_values : dict
-        Mapping of region name -> scalar value (e.g., Hedges' g).
+        Mapping of region name -> scalar value (e.g., Cohen's d).
     roi_categories : dict
         Mapping of region name -> list of ROI abbreviations (atlas names).
     output_path : str or Path

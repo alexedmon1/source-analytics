@@ -336,7 +336,7 @@ plot_regional_heatmap <- function(band_df, roi_categories, group_colors,
 #' Significance heatmap (ROI x band)
 #'
 #' Heatmap with ROIs on the y-axis and frequency bands on the x-axis.
-#' Fill = Hedges' g, asterisks on significant cells.
+#' Fill = Cohen's d, asterisks on significant cells.
 #'
 #' @param posthoc_df data.frame from run_posthoc_emmeans()
 #' @param output_dir path to figures/ directory
@@ -372,7 +372,7 @@ plot_significance_heatmap <- function(posthoc_df, output_dir) {
         scale_fill_gradient2(
           low = "#2166AC", mid = "white", high = "#B2182B",
           midpoint = 0, limits = c(-clim, clim),
-          name = "Hedges' g"
+          name = "Cohen's d"
         ) +
         labs(x = "Frequency Band", y = NULL,
              title = paste0("ROI x Band Significance: ", cname, " (", ptype, ")"),
@@ -423,7 +423,7 @@ plot_region_significance_heatmap <- function(posthoc_region_df, output_dir) {
 
       p <- ggplot(pdata, aes(x = band, y = region, fill = effect_size)) +
         geom_tile(color = "white", linewidth = 0.5) +
-        # One centered label per cell: Hedges' g with a trailing * when
+        # One centered label per cell: Cohen's d with a trailing * when
         # significant (the two separate layers + vjust=-0.5 shifted the text up).
         geom_text(aes(label = paste0(sprintf("%.2f", effect_size), sig_label),
                       fontface = ifelse(significant, "bold", "plain")),
@@ -431,7 +431,7 @@ plot_region_significance_heatmap <- function(posthoc_region_df, output_dir) {
         scale_fill_gradient2(
           low = "#2166AC", mid = "white", high = "#B2182B",
           midpoint = 0, limits = c(-clim, clim),
-          name = "Hedges' g"
+          name = "Cohen's d"
         ) +
         labs(x = "Frequency Band", y = NULL,
              title = paste0("Region x Band Significance: ", cname, " (", ptype, ")"),

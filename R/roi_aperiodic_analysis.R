@@ -270,9 +270,9 @@ run_posthoc_emmeans_aperiodic <- function(ap_df, contrasts, dv_name, omnibus_df,
             q_value = con_df$q_value[i],
             emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
             emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-            hedges_g = hg,
-            hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
-            hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
+            cohens_d = hg,
+            cohens_d_lcl = con_df$lower.CL[i] / resid_sd,
+            cohens_d_ucl = con_df$upper.CL[i] / resid_sd,
             significant = con_df$q_value[i] < 0.05,
             stringsAsFactors = FALSE
           )
@@ -452,9 +452,9 @@ run_posthoc_emmeans_region_aperiodic <- function(ap_df, contrasts, roi_categorie
             q_value = con_df$q_value[i],
             emmean_a = if (length(emm_a) > 0) emm_a[1] else NA,
             emmean_b = if (length(emm_b) > 0) emm_b[1] else NA,
-            hedges_g = hg,
-            hedges_g_lcl = con_df$lower.CL[i] / resid_sd,
-            hedges_g_ucl = con_df$upper.CL[i] / resid_sd,
+            cohens_d = hg,
+            cohens_d_lcl = con_df$lower.CL[i] / resid_sd,
+            cohens_d_ucl = con_df$upper.CL[i] / resid_sd,
             significant = con_df$q_value[i] < 0.05,
             stringsAsFactors = FALSE
           )
@@ -656,7 +656,7 @@ plot_aperiodic_by_region <- function(ap_df, roi_categories, group_colors,
 #' Significance heatmap (ROI x DV) for aperiodic analysis
 #'
 #' Heatmap with ROIs on the y-axis and DVs (exponent, offset) on the x-axis.
-#' Fill = Hedges' g, asterisks on significant cells.
+#' Fill = Cohen's d, asterisks on significant cells.
 #' Uses PiYG diverging palette (aperiodic-specific).
 #'
 #' @param posthoc_df data.frame from run_posthoc_emmeans_aperiodic()
@@ -691,7 +691,7 @@ plot_aperiodic_significance_heatmap <- function(posthoc_df, output_dir) {
       scale_fill_gradient2(
         low = "#4D9221", mid = "white", high = "#C51B7D",
         midpoint = 0, limits = c(-clim, clim),
-        name = "Hedges' g"
+        name = "Cohen's d"
       ) +
       labs(x = "Dependent Variable", y = NULL,
            title = paste0("ROI x DV Significance: ", cname),
@@ -768,12 +768,12 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
       "Per-contrast tests: the planned hypotheses in the study's design spec, as emmeans ",
       "contrasts per ROI/region (hypothesis layer), not gated on the omnibus, which is ",
       "diagnostic; ", correction_phrase(posthoc_all), ". ",
-      "Hedges' g = emmean difference / residual SD. ",
+      "Cohen's d = emmean difference / residual SD. ",
       "No FDR correction across bands (single DV per model).")
   } else {
     stats_lines <- paste0(stats_lines,
       "Post-hoc: emmeans pairwise group contrasts per ROI/region, gated on significant ",
-      "omnibus effects, Holm correction. Hedges' g = emmean difference / residual SD. ",
+      "omnibus effects, Holm correction. Cohen's d = emmean difference / residual SD. ",
       "No FDR correction across bands (single DV per model).")
   }
   add(stats_lines)
@@ -814,7 +814,7 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
         add("Significant region-level group differences (q < 0.05; ",
             correction_phrase(posthoc_region_df), "):")
         add("")
-        add("| DV | Region | Estimate | SE | t | q | Hedges' g |")
+        add("| DV | Region | Estimate | SE | t | q | Cohen's d |")
         add("| --- | --- | --- | --- | --- | --- | --- |")
         for (i in seq_len(nrow(sig_region))) {
           row <- sig_region[i, ]
@@ -869,7 +869,7 @@ write_aperiodic_summary <- function(omnibus_df, posthoc_df, config, n_subjects, 
         dv_sig <- sig_posthoc %>% filter(dv == dv_name)
         add("#### ", dv_name)
         add("")
-        add("| ROI | Estimate | SE | t | q | Hedges' g |")
+        add("| ROI | Estimate | SE | t | q | Cohen's d |")
         add("| --- | --- | --- | --- | --- | --- |")
         for (i in seq_len(nrow(dv_sig))) {
           row <- dv_sig[i, ]

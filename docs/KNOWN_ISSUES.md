@@ -6,16 +6,17 @@ hypothesis tables (`feat/power-mde`), and added to since. Items marked
 
 ## Defects
 
-1. **Fixed 2026-11-20 in the hypothesis tables** (decided: rename, not correct). **`hedges_g` is not
-   Hedges' g.** The hypothesis layer labelled `effect_size_type = "hedges_g"` on a value computed as the
-   estimate divided by the residual SD, with no small-sample correction: Cohen's d against the model's
-   residual SD. It is now labelled `cohens_d` (`R/hypothesis.R`, `hypothesis/tabular.py`); the value is
-   unchanged. Tables written before keep the old label, which `results_spec` still describes and flags.
-   **Still open:** the legacy post-hoc tables' `hedges_g`, `hedges_g_lcl` and `hedges_g_ucl` columns
-   (`R/stats_utils.R` and the module scripts) hold the same uncorrected value under the old name, and
-   source-lightbox and the brain-mosaic figures read that column name. Genuinely corrected g keeps its
-   name: `roi_graph`'s global metrics (`stats/graph_metrics.py`), `electrode_comparison`, and
-   `stats/cluster_permutation.hedges_g` (electrode_connectivity's legacy per-electrode table).
+1. **Fixed 2026-11-20** (decided: rename, not correct). **`hedges_g` is not Hedges' g.** The hypothesis
+   layer labelled `effect_size_type = "hedges_g"`, and the legacy post-hoc tables had `hedges_g`,
+   `hedges_g_lcl` and `hedges_g_ucl` columns, on a value with no small-sample correction: the estimate over
+   the model's residual SD, or a per-edge difference over the pooled SD. That is Cohen's d. The label is now
+   `cohens_d` (`R/hypothesis.R`, `hypothesis/tabular.py`) and the columns `cohens_d`, `cohens_d_lcl` and
+   `cohens_d_ucl` (`R/stats_utils.R` and the roi_aperiodic, roi_evoked, electrode_evoked, roi_connectivity,
+   roi_pac and roi_transfer_entropy scripts); the values are unchanged. Readers accept the old name for
+   tables written before (`report.R`, `viz/figure_registry.OLD_EFFECT_NAMES`, `results_spec`). Genuinely
+   corrected g keeps its name: electrode_aperiodic's legacy tables (`effectsize::hedges_g`), `roi_graph`'s
+   global metrics (`stats/graph_metrics.py`), `electrode_comparison`, and `stats/cluster_permutation.hedges_g`
+   (electrode_connectivity's and roi_network's legacy per-node tables, TFCE).
 
 2. **Fixed 2026-11-03** (re-locked with the `results` extra). **`uv.lock` is out of step with `pyproject.toml`.** The lock records
    source-analytics 0.8.0 and `pyproject.toml` says 0.8.2, so any `uv run` or
