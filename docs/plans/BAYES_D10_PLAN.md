@@ -1,13 +1,19 @@
 # Bayesian coverage for every outcome: the D10 plan (20 Nov 2026)
 
-**Status:** step 1 (M1) merged 20 Nov (393a08c); steps 2-17 not started. Written from the coverage table ([BAYES_COVERAGE.md](BAYES_COVERAGE.md)). It is
+**Status:** step 1 (M1) merged 20 Nov (393a08c); steps 1b and 2-17 not started. Steps 1b and 4b added 20 Nov from a
+check of what source-localization 0.9.12 writes (section 6). Written from the coverage table ([BAYES_COVERAGE.md](BAYES_COVERAGE.md)). It is
 step 3 of bayes-sl's close-out plan section 9 (`/mnt/e/research/EEG/bayes-sl/reports/2026-11-18_closeout_migration_plan.md`).
 
 **What was decided (the user):**
 - **D10 (19 Nov):** nothing is deferred. Every outcome source-analytics handles gets a Bayesian path. That includes
   the per-region gate rule for single-group claims, the equivalence margin's unit, sessions and within-subject factors,
   the other outcome types, omnibus tests and the convergence work.
-- **D11 (19 Nov):** not tied to source-localization 1.0.0. Only reading its new file format waits for that release.
+- **D11 (19 Nov):** not tied to source-localization 1.0.0. (It also said reading 1.0.0's new file format waits for
+  that release; withdrawn 20 Nov, see below.)
+- **20 Nov (answer to "is a new source-localization file format still planned?"):** no. Per-source time series
+  are no longer written by default (source-localization 0.9.9) to save space; no analysis needs them, and they can
+  be asked for when debugging (`--save-source-series`). The region series files stay as they are, so there is no
+  new format for source-analytics to read.
 - **D12 (19 Nov):** main stays fully working throughout.
 - **20 Nov (answer to "should signatures stay frequentist-only?"):** no. The classifier signature modules
   (`roi_signature`, `electrode_signature`) and the source-vs-sensor comparison (`electrode_comparison`) get
@@ -26,14 +32,17 @@ step 3 of bayes-sl's close-out plan section 9 (`/mnt/e/research/EEG/bayes-sl/rep
 - **Version numbers** (the user, 20 Nov: releases at milestones, not per step). A merged step is not a release by
   itself: outputs already record the exact commit (`v0.10.0-13-g393a08c`). 0.11.0 comes once steps 1-3 are in
   (bayes-sl's M1-M3 retired), or sooner to put the `cohens_d` rename under a version number. 1.0.0 comes once every
-  step is in and source-localization 1.0.0's file format is read.
+  step is in and source-analytics reads source-localization 1.0.0's runs correctly (its run records, step 1b, and its
+  band power, step 4b).
 - bayes-sl supplies reference numbers only (decision D6). The work happens in source-analytics.
 
 ## 2. Order
 
 Steps 1-3 come first because they close bayes-sl. Their checks reproduce bayes-sl's numbers from its stored fits,
 which may be deleted once M1 and M4 pass (decision D5). They also need the engine exactly as it is, so the engine's
-recoding (step 4) comes after them. From step 5 on, the order is what the studies need:
+recoding (step 4) comes after them. Step 1b goes before any study is rerun on source-localization 0.9.12: without it
+a study mixing 0.9.11 and 0.9.12 runs is pooled without a word, and frequentist and Bayesian results alike would rest
+on it. Step 4b waits for source-localization to ship D6. From step 5 on, the order is what the studies need:
 - **FORGE's treatment study** (KO vs WT plus rescue, five groups) is the most active study. Its MS2 rerun of
   9-10 Nov is not yet frozen. It runs every region-level module: `roi_psd`, `roi_aperiodic`, `roi_connectivity`,
   `roi_cross_freq`, `roi_directed`, `roi_graph`, `roi_nbs` and `roi_signature`. It also has an exploratory group
@@ -51,9 +60,11 @@ Sizes are my estimates, not measured.
 | # | Step | Serves | Work | Check | Size |
 |---|---|---|---|---|---|
 | 1 | **M1: running and scoring benchmark arms** | bayes-sl close-out | Arm runner (the engine with both prior sets, the frequentist `roi_psd` step, and frequentist models built like the engine), with the retry for temporary CSVs that vanish; "which region differs most" probabilities from posterior draws; the paired gain over the no-difference twin in `benchmark location` | The two-source benchmark's scorecard and the final location scorecard rows reproduced from bayes-sl's stored fits (to 1e-9 where deterministic) | 1 day |
+| 1b | **Reading source-localization's run records** (frequentist; section 6) | every study rerun on 0.9.12 or later; FORGE's MS2 rerun first | (a) The pooling check (`RunManifest.signature`) gains what the numbers now depend on: `inverse.snr`, the BEM mesh's vertices, the sphere's electrode centring and analytic electrodes, the inverse standardisation (`step5_inverse_standardisation.json`), the Monte Carlo direction mode (`step6_mc_directions.json`) and, from 0.9.13, its readout (`mc_readout`); a record absent from an older run counts as that version's default, as source-localization's `study/run_status.py` does. (b) A parcel missing from a run (`step6_roi_coverage.json`, 0.9.11: empty parcels are left out, not zero-filled) is reported per subject, with the choice to drop the parcel for the study or drop the subject, instead of the loader's bare KeyError. (c) Region-level hypothesis tables and reports carry the leakage caveat: a difference in one parcel shows up in most others (source-localization's 20 Nov test: 64-100% of other parcels significant at 6 dB; the true parcel largest in 1-29% of experiments), so a significant parcel does not place the difference there | A study mixing 0.9.11 and 0.9.12 runs is refused, naming the setting that differs; one mixing Monte Carlo readouts likewise; a subject missing a parcel is reported with both choices; the caveat appears in `roi_psd`'s tables and summary. Full suite passes | 1 day |
 | 2 | **M2: design analysis command** | bayes-sl close-out; SL's confirmatory design | Mice per group needed for a target rate of decisions, over the engine and the gate | The 11 Nov source-level design table (`reports/2026-11-11_source_design.md`) reproduced at the same seeds | 0.5 day |
 | 3 | **M3: coarse contrasts** (cortex vs deep, per compartment) | bayes-sl close-out; surface-evoked | Declared hypotheses if they can express them; otherwise a port of `coarse_fit.R` | The 26 Oct compartment numbers | 0.5 day |
 | 4 | **Engine recoding and the convergence rule** (needs your yes, section 4) | every later step | The model rewrite from the convergence report, section 6: offsets split into a mean plus deviations that sum to zero, with the region offsets sampled centred and Stan's `sum_to_zero_vector`. Gate rule: bulk ESS (effective sample size) of at least 400 on every estimand and scale parameter, beside R-hat < 1.05. The dense mass matrix becomes an option for small models, not the default. New engine version | Exactness test: the log density equals brms's own model's up to the Jacobian, at 20 points, as a test in the engine; the E0 replay of the FORGE G1 fits within Monte Carlo error; step 2's table within Monte Carlo error; bayes-sl's five convergence fits meet the rule | 1 day |
+| 4b | **Band power from summed component power** (frequentist and Bayesian; waits for source-localization D6) | every `roi_psd` study | source-localization's D6 makes `inverse.signed_orientation: leadfield` the default and computes band power from summed component power, not the signed series: the signed series loses up to half an effect where a parcel's sources are coherent (its 20 Nov test: 61% of 6 dB differences detected against 99%). `roi_psd` reads the signed series today. Read the new band power (or compute it from the component series, whichever source-localization writes), record which in the run signature (step 1b), and refuse to pool the two | A D6 run's `roi_psd` tables against the same recordings' 0.9.12 tables: effects at least as large where parcels are coherent; the gate at FORGE's design if the engine's input changes | 0.5-1 day, once D6 ships |
 | 5 | **FORGE region outcomes the engine can already read** | FORGE treatment | Built-in tables (`BAYES_TABLES`) for `roi_psd` relative power and delta-referenced power, the `roi_aperiodic` offset, phase-amplitude coupling (`roi_cross_freq` PAC) and `roi_graph`'s nodal and global metrics. Posterior predictive check for each; if the Gaussian model fails it (relative power is a fraction, degree and betweenness are counts), that outcome goes to step 14 | Each compared with its frequentist result on FORGE's treatment study, as in G1 | 1.5 days |
 | 6 | **Decisions D10 left open** | FORGE treatment, SL | (a) The equivalence margin's unit: the residual SD (as now, and as the frequentist adapter does) or the between-mouse SD. (b) The gate rule for one group's level against 0, per region. Both need a proposal and your answer, section 4 | Gate results for both at FORGE's design | 0.5 day |
 | 7 | **Omnibus** | FORGE treatment (exploratory `group_omnibus`) | Bayesian counterpart of the F test: a Bayes factor for "every group equal" in each band, by Savage-Dickey on the vector of group differences (the prior is Gaussian, so its density at 0 is exact; the posterior density at 0 comes from a multivariate normal fit to the draws). Also reported: the posterior probability that every difference is inside the ROPE. The engine's `not_implemented_bayes` row goes | Gate: the null rate at FORGE's design; on real data, agreement in direction with the F test's verdict | 1 day |
@@ -68,7 +79,7 @@ Sizes are my estimates, not measured.
 | 16 | **Source-vs-sensor comparison** (`electrode_comparison`) | FORGE | Per band, a Bayesian correlation between electrode and source power, with the bands partially pooled (Fisher z). The level comparison is source vs electrode as a within-mouse factor, so it uses step 10 | Against Pearson r and Hedges g on FORGE | 1 day |
 | 17 | **Docs** | everyone | Each step updates the catalogue and `BAYES_ENGINE.md`. At the end, the coverage table is redone with every "possible" or "missing" mark changed or explained (with bayes-sl's M5) | read-through | 0.5 day |
 
-Total: about 17-19 days of work, plus fitting time for the gates (FORGE-sized gates have taken hours each).
+Total: about 19-21 days of work (steps 1b and 4b included), plus fitting time for the gates (FORGE-sized gates have taken hours each).
 
 ## 4. Decisions this plan needs from you
 
@@ -86,3 +97,21 @@ Total: about 17-19 days of work, plus fitting time for the gates (FORGE-sized ga
   (close-out plan section 4).
 - Rerunning the benchmarks on the fixed head model, and moving the real-data source results to their studies
   (bayes-sl items 441d, Stage 2-3). They come after M4 and are not conditions for closing bayes-sl.
+
+## 6. What source-localization 0.9.12 writes, and what source-analytics reads (checked 20 Nov)
+
+source-analytics reads the region series (`step6_roi_timeseries_*.pkl`, `roi_timeseries_*.set`), `step1_info.pkl`,
+`step7_band_power.pkl` if present, the run config (`config_resolved.yaml`), `field_run.json`,
+`monte_carlo_report.json`, `step5_stc*.pkl` (the loader's fallback and the retired vertex plugin; off by default since
+source-localization 0.9.9) and `study qc`'s `analysis.json` (gallery); region-values CSVs reach the engine as
+declared `csv:` tables. It does not read the newer run records: `step4_forward_solver.json`,
+`step5_inverse_standardisation.json`, `step5_source_summary.json`, `step6_mc_directions.json`,
+`step6_roi_coverage.json`, `step2_interpolated_channels.json`, `analysis/bands.json`, `qc/recordings.csv`. Step 1b
+reads those the pooling check and the missing-parcel report need.
+
+No new outcome type: source-localization writes no evoked or epoch files (source-analytics computes evoked measures
+from the region series). The one candidate is 0.9.13's debiased evoked power (`step6_roi_power_debiased.pkl`, Monte
+Carlo evoked runs only), not yet shipped; it would be its own outcome if a study wants it.
+
+Source: source-localization's draft notice to source-analytics (`reports/ship_2026-11-20/notice_e61f.md`, Esprit item
+e61f, not sent on 20 Nov) and its code at fd1f876 (0.9.12, local).
