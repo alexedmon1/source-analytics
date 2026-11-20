@@ -53,7 +53,7 @@ figures → summary`. `DEFAULT_RUN_STEPS` excludes `figures`.
 - Working tree: `paths.analytics/[<profile>/]<paradigm>/<analysis>/` holds
   `data/` (per-subject CSVs + `study_config.yaml` snapshot) and `ANALYSIS_SUMMARY.md`.
 - Published: `paths.results/[<profile>/]{tables,figures}/<paradigm>/<analysis>/`
-  (`BaseAnalysis.tbl_dir` / `fig_dir`). source-lightbox reads these.
+  (`BaseAnalysis.tbl_dir` / `fig_dir`). The Lumière gallery (`gallery build`) reads these.
 - Every inferential module writes `<analysis>_hypotheses.csv` (one row per
   band × spatial cell, or per cluster for map modules) into `tables/`.
 - Every tabular row carries the minimum detectable effect, because DUET (OPEN.md
@@ -78,7 +78,8 @@ figures → summary`. `DEFAULT_RUN_STEPS` excludes `figures`.
   `roi_aperiodic`.
 - `source-analytics gallery build` (`gallery.py`) runs each opted-in module's
   `figures()` from its tables, lists the figures in `analysis.json`, and calls
-  `lumiere.gallery.build`; source-lightbox is being retired in its favour.
+  `lumiere.gallery.build`. source-lightbox is no longer used; when an output name changes,
+  check Lumière (`lumiere/gallery/digest.py`, `gallery/static/gallery.js`), not source-lightbox.
 - Band power CSVs carry `absolute` (mean power density, dB/Hz) and `relative`.
   There is no `dB` column.
 

@@ -24,7 +24,8 @@
   figures and the results specification still read tables written before under the old name. Genuinely corrected
   Hedges' g keeps its name (electrode_aperiodic's legacy tables, roi_graph's global metrics,
   electrode_comparison, the cluster helper behind electrode_connectivity, roi_network and TFCE). A reader outside
-  this package that looks for `hedges_g` in the legacy tables needs the new name (source-lightbox does).
+  this package that looks for `hedges_g` in the legacy tables needs the new name. Lumière's gallery already reads
+  `cohens_d` as a signed difference labelled d; source-lightbox, no longer used, is not updated.
 - **`mde_percent` divides by the design reference group's mean in every post-hoc table**, as it does in the
   hypothesis tables. The `R/stats_utils.R` post-hoc tables divided by `emmean_b`, which for a contrast like
   `{WT: +1, KO: -1}` with reference WT is the KO mean. They now use `.add_posthoc_mde` (`R/hypothesis.R`):

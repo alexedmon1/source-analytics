@@ -4,8 +4,8 @@ Group-level statistical analysis toolkit for **source-localized EEG**. It is the
 middle stage of a three-package pipeline:
 
 ```
-source-localization  ──►  source-analytics  ──►  source-lightbox
-(reconstruct sources)     (stats + figures)       (render the gallery)
+source-localization  ──►  source-analytics  ──►  Lumière gallery
+(reconstruct sources)     (stats + figures)       (source-analytics gallery build)
 ```
 
 [`source-localization`](../source-localization) turns raw EEG into per-subject
@@ -19,8 +19,10 @@ source reconstructions (ROI timeseries, whole-brain source estimates).
 > `uv run --no-project --with "mkdocs-material>=9.5,<10" mkdocs serve`.
 **source-analytics** reads those reconstructions, runs group-level analyses
 (spectral, connectivity, cross-frequency, directed, …), and writes
-publication-quality statistics tables and figures. [`source-lightbox`](../source-lightbox)
-then reads the *same study config* and the stat tables to build a browsable gallery.
+publication-quality statistics tables and figures. `source-analytics gallery build`
+then reads the *same study config* and the stat tables and builds a browsable gallery
+with Lumière's shared shell (see [The study gallery](#output-structure)).
+`source-lightbox`, which used to build the gallery, is no longer used.
 
 **Python** handles orchestration, signal processing, and I/O. **R** handles the
 linear-mixed-model statistics (lme4/lmerTest/emmeans) and ggplot2 figures. Vertex-
@@ -182,8 +184,7 @@ and in one **domain** (what it measures).
 - **Domain** — **Spectral**, **Connectivity**, **Cross-frequency**, **Directed**,
   **Sensor-level**, or **Evoked**.
 
-`ANALYSIS_METADATA` in `core.py` is the single source of truth for this map;
-`source-lightbox` reads it to group the gallery.
+`ANALYSIS_METADATA` in `core.py` is the single source of truth for this map.
 
 **2. Paradigms.** A study config groups analyses under `paradigms:` keys (e.g.
 `resting`, `evoked`). A paradigm names *where the reconstruction data lives* and
@@ -322,7 +323,7 @@ referenced by a declared hypothesis/contrast are analysed
 ## Study configuration
 
 One YAML drives the whole study — and the **same file** is read by
-`source-lightbox`. Study-design keys (groups, `design:`/`hypotheses:`, bands) are
+`source-analytics gallery build`. Study-design keys (groups, `design:`/`hypotheses:`, bands) are
 global; the **per-paradigm `analyses:` block** gives each analysis its data
 location and parameters. Minimal shape:
 
@@ -361,9 +362,9 @@ bands:                               # name → [fmin, fmax] Hz
   Low Gamma: [30, 55]
   High Gamma: [65, 80]
 
-circos_metrics: [imag_coherence, dwpli, pli, aec, coherence]   # gallery circos chords
-                                     # (read by source-lightbox only; source-analytics
-                                     #  passes it through untouched)
+circos_metrics: [imag_coherence, dwpli, pli, aec, coherence]   # circos chords for the
+                                     # retired source-lightbox gallery; nothing in
+                                     # source-analytics reads it
 
 jobs: -1                             # default worker count for --jobs (-1/0 = all but one core)
 
@@ -390,7 +391,7 @@ epoch_sampling:
   n_epochs: 80
   n_bootstrap: 500                   # 0 = use the full timeseries, no sampling
 
-# ── Output locations (shared with source-lightbox) ─────────────────
+# ── Output locations (the gallery reads paths.results) ─────────────
 paths:
   analytics: ./analytics             # working dir: ANALYSIS_SUMMARY.md + data/
   results:   ./results               # published tables/ + figures/  (gallery reads this)
@@ -710,7 +711,7 @@ Selectable dimensions vary by module (`metric` / `band` / `hypothesis` /
 Two trees, both segmented by paradigm (and by profile when `--profile` is used).
 The **working tree** under `paths.analytics` holds the per-subject data and the
 narrative; the **published tree** under `paths.results` holds the tables and
-figures that `source-lightbox` reads. `tables/` and `figures/` do **not** live
+figures that the gallery is built from. `tables/` and `figures/` do **not** live
 inside the analysis working directory.
 
 ```
@@ -765,7 +766,7 @@ tables, lists them in its `analysis.json`, and adds the localization summaries t
 source-localization's `study qc` writes. Settings come from a `gallery.yaml` beside the
 study config (sections, links, group labels; the format is in `lumiere.gallery`), or
 from the config itself. It will not replace a folder it did not build, such as a
-source-lightbox gallery.
+gallery from the retired source-lightbox.
 
 **The shared results specification.** With the `results` extra installed, a module
 that declares a `RESULTS_SPEC` (today `roi_aperiodic`) describes its hypothesis
