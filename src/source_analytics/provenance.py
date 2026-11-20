@@ -41,6 +41,8 @@ SCHEMA_VERSION = 1
 _MANIFEST_FIELDS = (
     "version", "readout_mode", "template", "projection", "preset", "atlas", "bem_type", "source_type",
     "surface_method", "spacing_mm", "source_sampling", "inverse_method", "orientation",
+    "regularisation", "bem_mesh_vertices", "analytic_electrodes", "electrode_centered",
+    "inverse_standardisation", "mc_directions", "mc_readout",
 )
 
 

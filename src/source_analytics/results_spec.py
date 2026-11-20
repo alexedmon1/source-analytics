@@ -179,6 +179,15 @@ def common_caveats(rows: list[dict], folder: Path, described: set[str]) -> list[
     return [text for text, wanted in zip(COMMON_CAVEATS, keep, strict=True) if wanted]
 
 
+def region_caveats(level: str, record: dict) -> list[str]:
+    """The spatial-leakage caveat, for region-level analyses of source parcels (not field readouts)."""
+    from .io.run_manifest import REGION_LEAKAGE_CAVEAT
+
+    if level != "roi" or (record.get("localization") or {}).get("readout_mode") == "field":
+        return []
+    return [REGION_LEAKAGE_CAVEAT]
+
+
 def available() -> bool:
     return lumiere is not None
 
@@ -518,7 +527,8 @@ def _write(analysis, spec: ResultsSpec, record: dict, started: str) -> Any:
                                                 "model's residual SD for contrasts, partial omega squared "
                                                 "for omnibus rows, the standardized slope for regressions"},
         "tables": tables,
-        "caveats": [*spec.caveats, *common_caveats(all_rows, folder, {p.name for _t, p in found})],
+        "caveats": [*spec.caveats, *common_caveats(all_rows, folder, {p.name for _t, p in found}),
+                    *region_caveats(level, record)],
         "run": {"id": run_id, "label": f"{analysis.name} on {paradigm}" if paradigm else analysis.name},
     }
     declared = contrasts(analysis.config, all_rows)

@@ -136,7 +136,7 @@ class ConnectivityAnalysis(BaseAnalysis):
 
         # Use signed timeseries to preserve oscillatory phase
         roi_ts = loader.load_or_extract_roi_timeseries(
-            signed=True, atlas_dir=self._atlas_dir, rois=self.config.rois,
+            signed=True, atlas_dir=self._atlas_dir, rois=self.config.rois, drop=self.config.drop_parcels,
         )
         # Exclude corpus callosum white matter tracts
         roi_ts = {k: v for k, v in roi_ts.items() if k not in CC_ROIS}

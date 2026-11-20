@@ -250,12 +250,48 @@ fly from `step5_stc_*.pkl` + `step3_source_coords_mm.npy` using the atlas.
 | `config_resolved.yaml` | YAML | The fully resolved source-localization config, written from 0.4.2 on: atlas, head model, source space, inverse method, orientation, sampling mode. Read via `io.run_manifest.read_run_manifest`; absent for older runs, which read as *unknown*, never as fixed |
 | `monte_carlo_report.json` | JSON | Monte Carlo runs only. Per parcel: SNR `gain` over a single draw, `coverage`, and `collinear_with` |
 | `field_run.json` | JSON | Field runs only (source-localization's field mode): the field template's name, version and sha256, the projection's catalogue id and version. Takes precedence over `config_resolved.yaml`; the run reads as `readout_mode: field` |
+| `step5_inverse_standardisation.json` | JSON | 0.9.1 on: how free-orientation sources were standardised (`per-source-v1`, or the legacy per-component tag; for eLORETA `eloreta_weights`). Read as correct / faulty / not affected / unknown |
+| `step6_mc_directions.json` | JSON | Monte Carlo runs, 0.9.2 on: whether the pool's free sources kept three directions or were collapsed to one, and from 0.9.13 the magnitude readout (`magnitude_readout`) |
+| `step6_roi_coverage.json` | JSON | 0.9.11 on: the parcels the run has no sources in (`parcels_without_sources`); they are left out of its outputs, not zero-filled |
 
 **An analysis refuses a cohort that was not localized the same way.** Pooling a
 fixed-grid subject with a Monte Carlo one, or two atlases, is a group statistic
 over two different measurements, and is otherwise silent — the arrays have the
 same shape and the parcel names line up. Subjects with no manifest are skipped
-rather than guessed at.
+rather than guessed at. What is compared (`io.run_manifest.COHORT_FIELDS`, also
+`RunManifest.signature`) is what the numbers depend on, not the package version or
+preset name: atlas, head model, source space, sampling, inverse method and
+orientation; the inverse's regularisation (`lambda2`, or `1/snr²`); the BEM mesh's
+vertices per surface; the analytic sphere's electrode placement; whether a sphere is
+centred under the electrodes; the inverse standardisation; and for Monte Carlo runs
+the draws, the directions and the magnitude readout. A setting a run's record leaves
+out is read as the only value its release had, as source-localization's own
+`study/run_status.py` does: `inverse.snr` 3 before 0.9.12 and 1 from it (by the
+record's `source_localization_version`), 642 mesh vertices and raw analytic-sphere
+electrodes before 0.9.12, a brain-centred sphere, and the Monte Carlo readout of
+0.9.2-0.9.12 (`vector_mean`). So a study mixing 0.9.11 and 0.9.12 runs is refused,
+naming `inverse.snr` and the mesh, unless the newer runs were made with the older
+settings. The refusal lists the subjects on each side; re-localize the odd ones out
+or split the study.
+
+**A parcel some subject's run has no sources in is reported before anything runs**
+(region-level modules). From source-localization 0.9.11 such a parcel is left out of
+the run's outputs, so one subject can lack a parcel the others have. The analysis
+stops, lists the parcels missing per subject, and offers the two fixes, both in the
+study file: leave the parcel out of the whole study (`drop_parcels: [name, …]`,
+top level or in a paradigm's block; it is removed from `roi_categories` and any
+profile's ROIs too), or leave the subject out (`exclude: true` under `subjects:`). A
+parcel empty in every subject of a study that does not name its ROIs is in nobody's
+data, so it is only logged.
+
+**Region-level results carry a spatial-leakage caveat.** source-localization's
+simulated two-group studies (20 Nov 2026; FORGE recordings, allen32, Monte Carlo
+sLORETA) put a 6 dB difference in one parcel at a time: 42-100% of the other parcels
+were also significant, and the parcel holding the difference had the largest effect
+in only 1-29% of experiments. A significant region shows that the groups differ, not
+that the difference is in that region. Every region-level module's
+`ANALYSIS_SUMMARY.md` ends with this caveat and its `analysis.json` lists it under
+`caveats`; field readouts and sensor-level modules do not get it.
 
 ### Field runs
 
@@ -428,6 +464,7 @@ paradigms:
 | `bands` | all spectral/connectivity | frequency bands analysed |
 | `pipeline.atlas`, `atlas_files`, `atlas_dir` | atlas I/O, R region tier, mosaics | which parcellation the ROI data use: resolved by name through source-localization's `registry.yaml` to that atlas's own labels / mapping / categories / anatomy; `atlas_files` names the files of an unregistered atlas. The 10× voxel convention is read from each NIfTI header, never inferred from its filename |
 | `roi_categories` | region tier (Python + R), mosaics | category → ROI map. The study's map (or a profile's narrowing) always wins over the atlas default, on the Python and R sides alike |
+| `drop_parcels` | region-level modules (Python + R) | parcels left out of the whole study, e.g. one some subject's run has no sources in (see "Run provenance"); removed from `roi_categories` and profiles' ROIs |
 | `<analysis>.r_timeout_sec` | R-backed analyses | wall-clock limit for that module's R statistics step; unset = no limit. A step that fails or times out fails the run (exit 1); a paradigm-wide run finishes its other modules first |
 | `epoch_sampling` | spectral/connectivity, all levels | random-epoch resampling (`n_bootstrap: 0` = full timeseries). Precedence: global → `<paradigm>.epoch_sampling` → per-analysis block |
 | `jobs` | `run --jobs` default | worker count when `--jobs` is not given |

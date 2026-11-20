@@ -104,7 +104,7 @@ class ROIEvokedAnalysis(BaseAnalysis):
         # Load ROI epochs
         loader = SubjectLoader(subject.data_dir)
         roi_epochs = loader.load_roi_epochs(
-            epoch_samples, signed=True, atlas_dir=self._atlas_dir,
+            epoch_samples, signed=True, atlas_dir=self._atlas_dir, drop=self.config.drop_parcels,
         )
 
         uid = f"{subject.group}_{subject.subject_id}"

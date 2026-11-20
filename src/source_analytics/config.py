@@ -337,6 +337,31 @@ class StudyConfig:
     profile_name: str | None = None
     raw: dict = field(default_factory=dict, repr=False)
 
+    def __post_init__(self) -> None:
+        # drop_parcels: leaves parcels out of the whole study (a parcel some subject's run has no sources in;
+        # BaseAnalysis reports those). Applied here, so every constructor and profile sees it: a dropped parcel
+        # is in no ROI allowlist and no category, on the Python and R sides alike.
+        drop = set(self.drop_parcels)
+        if not drop:
+            return
+        if self.rois:
+            kept = [r for r in self.rois if r not in drop]
+            if not kept:
+                raise ValueError(f"drop_parcels: leaves none of this study's ROIs ({', '.join(self.rois)}).")
+            self.rois = kept
+        self.roi_categories = {
+            cat: kept for cat, members in (self.roi_categories or {}).items()
+            if (kept := [r for r in members if r not in drop])
+        }
+
+    @property
+    def drop_parcels(self) -> list[str]:
+        """Parcels left out of the study (``drop_parcels:`` in the study file, or a paradigm's block)."""
+        value = (getattr(self, "raw", None) or {}).get("drop_parcels") or []
+        if isinstance(value, str):
+            value = [value]
+        return [str(v) for v in value]
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> StudyConfig:
         """Load a study config from a YAML file.
@@ -634,6 +659,7 @@ class StudyConfig:
             # it, so it's the authority on which ROI names exist.
             known = {r for members in self.roi_categories.values() for r in members}
             if known:
+                known |= set(self.drop_parcels)          # dropped, not unknown: __post_init__ removes them
                 unknown = sorted(set(rois) - known)
                 if unknown:
                     raise ValueError(

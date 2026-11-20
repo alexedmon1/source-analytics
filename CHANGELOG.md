@@ -4,6 +4,23 @@
 
 ### Added
 
+- **source-localization's run records are read** (D10 plan step 1b). The pooling check now also compares the
+  inverse's regularisation (`inverse.snr` / `lambda2`), the BEM mesh's vertices, the analytic sphere's electrode
+  placement and electrode centring, the inverse standardisation (`step5_inverse_standardisation.json`), and for
+  Monte Carlo runs the draws, the directions (`step6_mc_directions.json`) and the 0.9.13 magnitude readout. A record
+  an older run lacks reads as that release's only value, as source-localization's `study/run_status.py` decides it,
+  so a study mixing 0.9.11 and 0.9.12 runs is refused, naming the settings. `provenance.json` records them. Before
+  this, the Monte Carlo draws were in `RunManifest.signature` but not in the check that ran, so cohorts with
+  different draws were pooled.
+- **Missing parcels are reported before anything runs.** A region-level module reads each subject's
+  `step6_roi_coverage.json` (0.9.11 leaves empty parcels out of the outputs) and stops, listing the parcels missing
+  per subject and the two fixes: the new study key `drop_parcels:` (leave the parcel out of the study) or
+  `exclude: true` (leave the subject out). Before, a study that named its ROIs lost those subjects one by one to a
+  bare KeyError, and one that did not pooled subjects with different parcel sets.
+- **Spatial-leakage caveat on region-level results**: a paragraph at the end of `ANALYSIS_SUMMARY.md` and an entry
+  in `analysis.json`'s caveats. In source-localization's 20 Nov simulation a 6 dB difference in one parcel made
+  42-100% of the other parcels significant.
+
 - **The benchmark runs its arms, not only scores them** (D10 plan step 1, M1; ported from bayes-sl). `benchmark run
   --arm engine|F0|F1|F1c` runs a method on a frozen cohort set's simulated studies: the engine (prior set W or I),
   the `roi_psd` R step unchanged, and the engine's model fitted by lme4 without priors (mice resampled, or the
@@ -44,6 +61,9 @@
   `contrasts_from_spec` carry `reference` for it. Only `mde_percent` changes, and only for such contrasts.
 
 ### Fixed
+
+- The on-the-fly ROI extraction (runs without `step6_*` files) returned its first, uncached result without applying
+  the study's ROI list; it is applied now, as it was on every later call.
 
 - **The module scripts' own post-hoc tables carry the MDE columns** (KNOWN_ISSUES 5): roi_evoked ROI and region,
   electrode_evoked channel and region, and electrode_aperiodic region_nested, which also gains `df`, `emmean_a`

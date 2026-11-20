@@ -11,6 +11,7 @@ from pathlib import Path
 from .. import viz_ticks
 from ..config import StudyConfig
 from ..io.discovery import SubjectInfo
+from ..io.run_manifest import COHORT_FIELDS
 
 logger = logging.getLogger(__name__)
 viz_ticks.install()  # no colour bar's numbers overlap, in any module's figures
@@ -672,19 +673,9 @@ class BaseAnalysis(ABC):
             logger.info("Provenance: %s", path)
         return record
 
-    _COHORT_FIELDS = (
-        ("readout_mode", "readout (source or field)"),
-        ("template", "field template"),
-        ("projection", "field projection"),
-        ("atlas", "atlas"),
-        ("bem_type", "BEM"),
-        ("source_type", "source space"),
-        ("surface_method", "surface method"),
-        ("spacing_mm", "spacing_mm"),
-        ("source_sampling", "source sampling"),
-        ("inverse_method", "inverse method"),
-        ("orientation", "orientation"),
-    )
+    #: What subjects must share to be pooled (``io.run_manifest.COHORT_FIELDS``, also behind
+    #: ``RunManifest.signature``).
+    _COHORT_FIELDS = COHORT_FIELDS
 
     def _check_cohort_homogeneous(self, subjects: list[SubjectInfo]) -> dict:
         """Refuse to pool subjects that were localized differently.
@@ -732,11 +723,102 @@ class BaseAnalysis(ABC):
                 + "\n".join(disagreements)
                 + "\n\nRe-localize the odd ones out, or split them into separate "
                 "studies. Each run records what built it in "
-                "data/config_resolved.yaml."
+                "data/config_resolved.yaml and its step records "
+                "(step5_inverse_standardisation.json, step6_mc_directions.json); a "
+                "setting a run's record leaves out is read as the only value its "
+                "source-localization release had."
             )
 
         self._log_monte_carlo_caveats(manifests)
         return manifests
+
+    @property
+    def _reads_parcels(self) -> bool:
+        """True for modules that read source parcels (``level: roi`` in ANALYSIS_METADATA)."""
+        from ..core import ANALYSIS_METADATA
+
+        return ANALYSIS_METADATA.get(self.name, {}).get("level") == "roi"
+
+    _LEAKAGE_HEADING = "## Caveat: spatial leakage between regions"
+
+    def _append_region_caveat(self, manifests: dict) -> None:
+        """Add the spatial-leakage caveat to a region-level module's ANALYSIS_SUMMARY.md.
+
+        The modules (and their R scripts) write the summary; the caveat is the
+        same for all of them, so it is added here, once, after they have. Not for
+        field readouts, where the measurement is a fixed projection, not a parcel.
+        """
+        if not self._reads_parcels or any(m.readout_mode == "field" for m in manifests.values()):
+            return
+        from ..io.run_manifest import REGION_LEAKAGE_CAVEAT
+
+        path = self.output_dir / "ANALYSIS_SUMMARY.md"
+        try:
+            if not path.exists():
+                return
+            text = path.read_text()
+            if self._LEAKAGE_HEADING in text:
+                return
+            path.write_text(text.rstrip("\n") + f"\n\n{self._LEAKAGE_HEADING}\n\n{REGION_LEAKAGE_CAVEAT}\n")
+        except OSError as exc:                     # a caveat must not fail a finished run
+            logger.warning("Could not add the leakage caveat to %s: %s", path, exc)
+
+    def _check_parcel_coverage(self, subjects: list[SubjectInfo]) -> None:
+        """Refuse, before any subject is processed, a study whose subjects lack parcels it uses.
+
+        From source-localization 0.9.11 a parcel with no sources is left out of a
+        run's outputs (``step6_roi_coverage.json`` lists it), where it used to be
+        zero-filled. A study that names its ROIs would otherwise fail per subject
+        with a bare KeyError halfway through; one that does not would silently pool
+        subjects with different parcel sets, so a parcel's group statistic would
+        rest on whichever subjects happen to have it. Either way the choice is the
+        user's: leave the parcel out of the study, or leave the subject out.
+
+        A parcel empty in every subject of a study that does not name its ROIs is
+        consistent (it is in nobody's data) and only logged. Runs without the
+        record are not checked; the loader's error is the backstop.
+        """
+        if not self._reads_parcels:
+            return
+        from ..io.run_manifest import read_empty_parcels
+
+        drop = set(self.config.drop_parcels)
+        empty = {}
+        for subject in subjects:
+            parcels = read_empty_parcels(subject.data_dir)
+            if parcels is not None:
+                empty[subject.subject_id] = [p for p in parcels if p not in drop]
+        if not empty:
+            return
+
+        declared = set(self.config.rois)
+        if declared:
+            problems = {sid: [p for p in ps if p in declared] for sid, ps in empty.items()}
+        else:
+            # Empty in every subject (all of them recorded): in nobody's data, so nothing to reconcile.
+            nowhere = (set.intersection(*(set(ps) for ps in empty.values()))
+                       if len(empty) == len(subjects) else set())
+            if nowhere:
+                logger.info("Parcel(s) with no sources in any subject's run, so not in this study: %s",
+                            ", ".join(sorted(nowhere)))
+            problems = {sid: [p for p in ps if p not in nowhere] for sid, ps in empty.items()}
+        problems = {sid: sorted(ps) for sid, ps in problems.items() if ps}
+        if not problems:
+            return
+
+        parcels = sorted({p for ps in problems.values() for p in ps})
+        ids = [sid.removeprefix("sub-") for sid in sorted(problems)]
+        raise ValueError(
+            f"{self.name}: {len(problems)} subject(s)' runs have no sources in parcel(s) this study uses "
+            f"(step6_roi_coverage.json; source-localization leaves empty parcels out of its outputs from "
+            f"0.9.11):\n"
+            + "\n".join(f"  {sid}: {', '.join(ps)}" for sid, ps in sorted(problems.items()))
+            + "\n\nChoose one in the study file and run again:\n"
+            f"  - leave the parcel(s) out of the whole study (every subject keeps its place):\n"
+            f"      drop_parcels: [{', '.join(parcels)}]\n"
+            f"  - leave the subject(s) out (every parcel keeps its place): exclude: true on "
+            f"{', '.join(ids)} under subjects:"
+        )
 
     def _log_monte_carlo_caveats(self, manifests: dict) -> None:
         """Say once, up front, which parcels this cohort cannot resolve.
@@ -793,6 +875,7 @@ class BaseAnalysis(ABC):
         logger.info("=== %s Analysis ===", self.name)
         started = datetime.now(timezone.utc).isoformat(timespec="seconds")
         manifests = self._check_cohort_homogeneous(subjects)
+        self._check_parcel_coverage(subjects)
         if select:
             self._selection = select
         if steps is None:
@@ -846,6 +929,7 @@ class BaseAnalysis(ABC):
         if _should_run("summary"):
             logger.info("Step 6/6: Summary")
             self.summary()
+            self._append_region_caveat(manifests)
         else:
             logger.info("Step 6/6: Summary — skipped")
 

@@ -194,6 +194,7 @@ class SubjectLoader:
         epoch_samples: int,
         signed: bool = True,
         atlas_dir: str | Path | None = None,
+        drop: Sequence[str] = (),
     ) -> dict[str, np.ndarray]:
         """Load ROI time series reshaped into epochs.
 
@@ -210,6 +211,8 @@ class SubjectLoader:
         atlas_dir : str or Path, optional
             Atlas directory for on-the-fly extraction (passed through to
             :meth:`load_or_extract_roi_timeseries`).
+        drop : sequence of str
+            Parcels the study leaves out (``drop_parcels:``).
 
         Returns
         -------
@@ -221,7 +224,7 @@ class SubjectLoader:
         ValueError
             If total samples is not evenly divisible by epoch_samples.
         """
-        roi_ts = self.load_or_extract_roi_timeseries(signed=signed, atlas_dir=atlas_dir)
+        roi_ts = self.load_or_extract_roi_timeseries(signed=signed, atlas_dir=atlas_dir, drop=drop)
         roi_epochs = {}
         for roi_name, ts in roi_ts.items():
             n_total = len(ts)
@@ -273,13 +276,21 @@ class SubjectLoader:
     @staticmethod
     def _restrict_rois(
         roi_ts: dict[str, np.ndarray], rois: Sequence[str] | None,
+        drop: Sequence[str] = (),
     ) -> dict[str, np.ndarray]:
-        """Restrict ROI time series to ``rois`` (order-preserving); no-op if empty.
+        """Leave out ``drop``, then restrict to ``rois`` (order-preserving; empty = all).
 
         Raises on a requested ROI that isn't present rather than silently returning
         a smaller set: the ROI set is the FDR correction family, so quietly dropping
         one would shrink every family with nothing in the output to show for it.
+        ``BaseAnalysis`` reports a study's missing parcels before any subject is
+        processed (``step6_roi_coverage.json``); this is the backstop for runs
+        without that record.
         """
+        if drop:
+            gone = set(drop)
+            roi_ts = {r: ts for r, ts in roi_ts.items() if r not in gone}
+            rois = [r for r in (rois or ()) if r not in gone] or None
         if not rois:
             return roi_ts
         wanted = list(dict.fromkeys(rois))
@@ -287,7 +298,8 @@ class SubjectLoader:
         if missing:
             raise KeyError(
                 f"Requested ROI(s) not present in the data: {', '.join(missing)}. "
-                f"Available: {', '.join(sorted(roi_ts))}"
+                f"Available: {', '.join(sorted(roi_ts))}. Leave the parcel out of the "
+                f"study (drop_parcels: in the study file) or the subject (exclude: true)."
             )
         return {r: roi_ts[r] for r in wanted}
 
@@ -298,6 +310,7 @@ class SubjectLoader:
         method: str = "nearest",
         proximity_radius_mm: float = 2.0,
         rois: Sequence[str] | None = None,
+        drop: Sequence[str] = (),
     ) -> dict[str, np.ndarray]:
         """Load ROI time series, extracting on-the-fly from step5 if needed.
 
@@ -320,6 +333,8 @@ class SubjectLoader:
             Restrict the result to these ROIs, in this order (a profile's
             ``config.rois``). None/empty returns every ROI in the data — the
             default, and byte-identical to the pre-profile behaviour.
+        drop : sequence of str
+            Parcels the study leaves out (``drop_parcels:``), removed first.
 
         Returns
         -------
@@ -328,7 +343,7 @@ class SubjectLoader:
         """
         # 1. Try loading pre-extracted step6 files
         try:
-            return self._restrict_rois(self.load_roi_timeseries(signed=signed), rois)
+            return self._restrict_rois(self.load_roi_timeseries(signed=signed), rois, drop)
         except FileNotFoundError:
             pass
 
@@ -337,7 +352,7 @@ class SubjectLoader:
         # narrowed call can't poison it for a later unnarrowed one.
         cache_key = "signed" if signed else "magnitude"
         if cache_key in self._roi_cache:
-            return self._restrict_rois(self._roi_cache[cache_key], rois)
+            return self._restrict_rois(self._roi_cache[cache_key], rois, drop)
 
         logger.info(
             "No step6 ROI files in %s — extracting on-the-fly from step5",
@@ -359,7 +374,7 @@ class SubjectLoader:
             proximity_radius_mm=proximity_radius_mm,
         )
         self._roi_cache[cache_key] = result
-        return result
+        return self._restrict_rois(result, rois, drop)
 
     def load_source_timecourses(self, magnitude: bool = False) -> np.ndarray:
         """Load full source time courses.
