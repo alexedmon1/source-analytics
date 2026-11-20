@@ -847,13 +847,94 @@ def cmd_benchmark_location(args):
     from .bayes.benchmark_location import read_hierarchy, score_location
 
     try:
+        from .bayes.arms import parse_reps
+
         diff = read_claims(args.differ) if args.differ else None
+        if bool(args.twin_probs) != bool(args.twin_cohorts):
+            raise BenchmarkError("--twin-probs and --twin-cohorts go together (twins scored in another cohort set)")
         tabs = score_location(read_claims(args.probs), CohortSet.load(args.cohorts), read_hierarchy(args.hierarchy),
-                              question=args.question, diff=diff, out=args.out)
+                              question=args.question, diff=diff, out=args.out, twins=args.twins,
+                              twin_probs=read_claims(args.twin_probs) if args.twin_probs else None,
+                              twin_cs=CohortSet.load(args.twin_cohorts) if args.twin_cohorts else None,
+                              group_by=args.group_by or (), reps=parse_reps(args.reps))
     except BenchmarkError as exc:
         print(f"ERROR: {exc}")
         sys.exit(1)
     print(f"benchmark location: {len(tabs['tables'])} tables scored -> {args.out}/summary.txt")
+
+
+def cmd_benchmark_run(args):
+    """Run one arm on a cohort set (source_analytics.bayes.arms)."""
+    from .bayes import arms
+    from .bayes.benchmark import BenchmarkError, CohortSet
+
+    try:
+        cs = CohortSet.load(args.cohorts)
+        bands = [b.strip() for b in args.bands.split(",")] if args.bands else None
+        kw = dict(cells=args.cells.split(",") if args.cells else None, reps=arms.parse_reps(args.reps),
+                  ns=[int(n) for n in args.n.split(",")] if args.n else None)
+        if args.arm == "engine":
+            kw.update(prior_set=args.prior_set, informative=args.informative, bands=bands, parts=args.parts,
+                      chains=args.chains, iter=args.iter, warmup=args.warmup, sa_r=args.r_dir)
+        elif args.arm == "F0":
+            kw.update(bands=bands, workers=args.parts, sa_r=args.r_dir)
+        else:
+            kw.update(band=bands[0] if bands else None, parts=args.parts, sa_r=args.r_dir)
+        t = arms.run(args.arm, cs, args.out, **kw)
+    except BenchmarkError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
+    print(f"benchmark run: {args.arm} on {len(t)} cohort x N -> {args.out}")
+
+
+def cmd_benchmark_claims(args):
+    """Claims table from an arm's runs (source_analytics.bayes.arms)."""
+    from .bayes import arms
+    from .bayes.benchmark import BenchmarkError, CohortSet
+
+    try:
+        if args.arm == "engine":
+            c = arms.claims_engine(args.runs)
+        else:
+            if not args.cohorts:
+                raise BenchmarkError("F0 claims need --cohorts (the cohort set its runs used)")
+            c = arms.claims_f0(args.runs, CohortSet.load(args.cohorts))
+    except BenchmarkError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    c.to_csv(args.out, index=False)
+    print(f"benchmark claims: {len(c)} rows, {c.cohort.nunique()} cohorts -> {args.out}")
+
+
+def cmd_benchmark_probs(args):
+    """Region probabilities from arms' draws (source_analytics.bayes.benchmark_probs)."""
+    import pandas as pd
+
+    from .bayes.benchmark import BenchmarkError, CohortSet
+    from .bayes.benchmark_location import read_hierarchy
+    from .bayes.benchmark_probs import build
+
+    try:
+        cs = CohortSet.load(args.cohorts)
+        fits = dict(a.split("=", 1) for a in args.fits or [])
+        if any(not v for v in fits.values()):
+            raise BenchmarkError("--fits takes ARM=DIR (engine/W, engine/I, F1, F1c)")
+        f0 = pd.read_csv(args.f0_claims, keep_default_na=False, na_values=[""]) if args.f0_claims else None
+        out = build(fits, args.band or cs.manifest["plant_band"], f0_claims=f0,
+                    unit_fits=args.unit_fits or fits.get("engine/W"),
+                    hierarchy=read_hierarchy(args.hierarchy) if args.hierarchy else None, cohorts_root=cs.root,
+                    rope=args.rope)
+    except BenchmarkError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
+    args.out.mkdir(parents=True, exist_ok=True)
+    for k, v in out.items():
+        v.to_csv(args.out / f"{k}.csv", index=False)
+    print(f"benchmark probs: {', '.join(f'{k} {len(v)} rows' for k, v in out.items())} -> {args.out}")
 
 
 def cmd_bayes(args):
@@ -1138,7 +1219,49 @@ def main():
                             "groups differ (truth: planted ROIs with effect_sd > 0, else none)")
     p_loc.add_argument("--differ", type=Path, nargs="*", help="Group-difference CSVs, or directories")
     p_loc.add_argument("--out", type=Path, required=True, help="Output directory")
+    p_loc.add_argument("--twins", action="store_true",
+                       help="Also the gain over each study's no-difference twin, the twins in this cohort set")
+    p_loc.add_argument("--twin-cohorts", type=Path, help="The twins' cohort set, when they are another set")
+    p_loc.add_argument("--twin-probs", type=Path, nargs="*", help="The twins' region probabilities (with --twin-cohorts)")
+    p_loc.add_argument("--group-by", nargs="*", help="Manifest fields to group the gain by (e.g. spacing_mm pair)")
+    p_loc.add_argument("--reps", help="Reps the gain uses, e.g. 1:7 (default all)")
     p_loc.set_defaults(func=cmd_benchmark_location)
+    p_run = bench_sub.add_parser("run", help="Run one arm (engine, F0, F1, F1c) on a cohort set; resumes")
+    p_run.add_argument("--arm", choices=("engine", "F0", "F1", "F1c"), required=True)
+    p_run.add_argument("--cohorts", type=Path, required=True, help="Cohort set (the directory with MANIFEST.json)")
+    p_run.add_argument("--out", type=Path, required=True, help="Output directory (fits/ for engine, F1, F1c)")
+    p_run.add_argument("--cells", help="Comma-separated cells (default all)")
+    p_run.add_argument("--reps", help="Reps, e.g. 1:7 or 1,3,901:902 (default all)")
+    p_run.add_argument("--n", help="Comma-separated N per group (default each cohort's n_nested)")
+    p_run.add_argument("--bands", help="Comma-separated bands (default the planted band and the control band; F1/F1c: "
+                                       "the first, default the planted band)")
+    p_run.add_argument("--prior-set", choices=("W", "I"), default="W", help="Engine prior set")
+    p_run.add_argument("--informative", type=Path, help="Set I's entries: JSON x_<band>_<group> -> [mean, sd]")
+    p_run.add_argument("--parts", type=int, default=4, help="Parallel Rscript processes (F0: workers)")
+    p_run.add_argument("--chains", type=int, default=4)
+    p_run.add_argument("--iter", type=int, default=2000)
+    p_run.add_argument("--warmup", type=int, default=1000)
+    p_run.add_argument("--r-dir", type=Path, help="R directory to source the engine / roi_psd step from (a frozen "
+                                                  "copy repeats old fits exactly; default this package's)")
+    p_run.set_defaults(func=cmd_benchmark_run)
+    p_cl = bench_sub.add_parser("claims", help="Claims table (the scorer's contract) from an arm's runs")
+    p_cl.add_argument("--arm", choices=("engine", "F0"), required=True)
+    p_cl.add_argument("--runs", type=Path, required=True, help="The arm's --out directory")
+    p_cl.add_argument("--cohorts", type=Path, help="Cohort set (needed for F0)")
+    p_cl.add_argument("--out", type=Path, required=True, help="Claims CSV to write")
+    p_cl.set_defaults(func=cmd_benchmark_claims)
+    p_pr = bench_sub.add_parser("probs", help="Region probabilities (which region differs most; cortex vs deep, "
+                                              "right vs left) from arms' draws, for `benchmark location`")
+    p_pr.add_argument("--cohorts", type=Path, required=True, help="Cohort set (truth for the coarse statements)")
+    p_pr.add_argument("--fits", nargs="*", metavar="ARM=DIR",
+                      help="engine/W=DIR engine/I=DIR F1=DIR F1c=DIR: each arm's --out (its fits/ directory)")
+    p_pr.add_argument("--f0-claims", type=Path, help="F0's claims CSV (independent normal draws from estimate and SE)")
+    p_pr.add_argument("--unit-fits", help="Engine W fits whose units put F0 in SD units (default the engine/W fits)")
+    p_pr.add_argument("--hierarchy", type=Path, help="CSV roi, compartment, hemisphere, group: adds the coarse table")
+    p_pr.add_argument("--band", help="Band (default the planted band)")
+    p_pr.add_argument("--rope", type=float, default=0.1, help="P(none): every |contrast| below this (SD units)")
+    p_pr.add_argument("--out", type=Path, required=True, help="Output directory (probs.csv, contrasts.csv)")
+    p_pr.set_defaults(func=cmd_benchmark_probs)
 
     args = parser.parse_args()
     setup_logging(args.verbose)

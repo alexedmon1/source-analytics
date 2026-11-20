@@ -4,6 +4,17 @@
 
 ### Added
 
+- **The benchmark runs its arms, not only scores them** (D10 plan step 1, M1; ported from bayes-sl). `benchmark run
+  --arm engine|F0|F1|F1c` runs a method on a frozen cohort set's simulated studies: the engine (prior set W or I),
+  the `roi_psd` R step unchanged, and the engine's model fitted by lme4 without priors (mice resampled, or the
+  conditional covariance). Parts run in parallel with their own TMPDIR and are retried up to 3 times, for the cmdstan
+  CSVs that vanish on `/mnt/e`; `--r-dir` runs a frozen engine copy. `benchmark claims` turns runs into the scorer's
+  claims table. `benchmark probs` gives "which region differs most" probabilities (and P(cortex > deep), P(right >
+  left)) from each arm's joint draws. `benchmark location --twins` adds the gain over each study's no-difference twin:
+  hits the difference caused, with a bootstrap interval over reps. Checked against bayes-sl's stored fits (with
+  `SA_BAYES_BENCH`): its L4 probabilities, its R2 two-source scorecard and its final location scorecard (L6) are
+  reproduced to 1e-9, and a rerun repeats its stored F0, F1, F1c and engine W and I fits exactly. `docs/methods/BENCHMARK.md`.
+
 - **Where the data came from, in `provenance.json` (Lumière 0.4.5's `derived_from`).** Each analysis names the
   source-localization run(s) it read, upstream of source-analytics: the version, the stage ("source localization",
   or "field projection" for a field readout) and the settings' one-line description. A cohort localized with more

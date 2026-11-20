@@ -42,9 +42,20 @@ So a confident location here is a claim the plant did not cause, not necessarily
 **Finest reliable level** (rule fixed 2026-10-30, before any method was scored): at that N, in every informative plant
 cell, set90_coverage >= 0.85 and the bits' interval above 0; on noise, a confident location (top_prob >= 0.9) at most
 0.05 of the time. Each part is reported, so a method failing on noise alone is visible.
+
+**Gain over the no-difference twin** (``gain``; D10 plan step 1, M1; bayes-sl R2 and L6 scorecards). A cell with a
+difference can have a twin: the same source(s) in both groups, no difference, the same seeds per rep. The twin is the
+cell's manifest ``twin`` if given, else ``<condition>_nodiff`` where ``<condition>`` is the cell's name without its
+trailing ``_<effect size>`` (``Thalamus_1.0`` -> ``Thalamus_nodiff``). The twin may be in the same cohort set or in
+another (bayes-sl v1 and v1_l5). Per method x N x level, a study's hit is paired with its twin's ``top_at_source`` (the
+same answer won with no difference): gain = hit - twin's hit, the hits the difference caused. Its 95% interval
+resamples reps within each cell (a rep's N rows share mice). Grouped by cell, by any manifest field given (spacing,
+pair, ...), and pooled. Where the manifest names ``shared_rois`` (bayes-sl R2), also the share of ROI-level answers
+naming the first shared ROI, in the studies and in their twins.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -312,10 +323,92 @@ def differ_table(diff: pd.DataFrame, cs: CohortSet) -> pd.DataFrame:
         says_negligible=("says_negligible", "mean"), brier=("brier", "mean")).reset_index()
 
 
+GAIN_SEED, GAIN_BOOT = 20261112, 2000           # bayes-sl R2's seed and resamples
+PAIR = ["arm", "prior_set", "band", "rep", "n_per_group", "level"]
+
+
+def twin_cell(cs: CohortSet, cell: str) -> str:
+    """The cell's no-difference twin: the manifest's ``twin``, else ``<condition>_nodiff``."""
+    return cs.cells[cell].get("twin") or re.sub(r"_[\d.]+$", "", cell) + "_nodiff"
+
+
+def twin_pairs(t: pd.DataFrame, cs: CohortSet, tw: pd.DataFrame | None = None,
+               tw_cs: CohortSet | None = None) -> pd.DataFrame:
+    """Each study row (a cell with a difference whose twin was scored) beside its twin's top_at_source. ``t``: the
+    scorer's tables; ``tw``/``tw_cs``: the twins' tables and cohort set when they are another run (default: ``t``,
+    ``cs``). Adds twin_hit, gain, the cell's manifest fields, and names_shared / twin_names_shared (ROI level, where
+    the manifest names shared_rois)."""
+    tw, tw_cs = (t, cs) if tw is None else (tw, tw_cs or cs)
+    have = set(tw.cell)
+    study = t[t.cell.map(lambda c: float(cs.cells[c]["effect_sd"]) > 0 and twin_cell(cs, c) in have)].copy()
+    if study.empty:
+        raise BenchmarkError("no study cell has its no-difference twin among the scored tables")
+    for c in study.cell.unique():
+        if float(tw_cs.cells[twin_cell(cs, c)]["effect_sd"]) != 0:
+            raise BenchmarkError(f"twin {twin_cell(cs, c)} of {c} has a difference")
+    study["twin_cell"] = study.cell.map(lambda c: twin_cell(cs, c))
+    x = tw[PAIR + ["cell", "top_at_source", "top_region"]].rename(
+        columns={"cell": "twin_cell", "top_at_source": "twin_hit", "top_region": "twin_top"})
+    m = study.merge(x, on=PAIR + ["twin_cell"], how="left")
+    if m.twin_hit.isna().any():
+        k = m[m.twin_hit.isna()].iloc[0]
+        raise BenchmarkError(f"{int(m.twin_hit.isna().sum())} study rows have no twin row, e.g. {k.cohort} N{k.n_per_group}"
+                             f" {k.level} ({k.arm}{'/' + k.prior_set if k.prior_set else ''})")
+    m["gain"] = m.hit - m.twin_hit
+    fields = sorted({f for c in m.cell.unique() for f, v in cs.cells[c].items() if np.isscalar(v) or v is None}
+                    - set(m.columns))
+    for f in fields:
+        m[f] = m.cell.map(lambda c: cs.cells[c].get(f))
+    shared = m.cell.map(lambda c: (cs.cells[c].get("shared_rois") or [None])[0])
+    roi = m.level == "roi"
+    m["names_shared"] = np.where(roi & shared.notna(), (m.top_region == shared).astype(float), np.nan)
+    m["twin_names_shared"] = np.where(roi & shared.notna(), (m.twin_top == shared).astype(float), np.nan)
+    return m
+
+
+def boot_mean(d: pd.DataFrame, col: str, rng, n: int = GAIN_BOOT, within: str = "cell") -> tuple[float, float]:
+    """95% interval of the mean of ``col``, resampling reps within each ``within`` group (a rep's N rows share mice)."""
+    tot, cnt = np.zeros(n), np.zeros(n)
+    for _, y in d.groupby(within):
+        g = y.groupby("rep")[col]
+        s, k = g.sum().to_numpy(), g.size().to_numpy()
+        i = rng.integers(0, len(s), (n, len(s)))
+        tot += s[i].sum(1)
+        cnt += k[i].sum(1)
+    q = tot / cnt
+    return float(np.quantile(q, 0.025)), float(np.quantile(q, 0.975))
+
+
+def gain_table(m: pd.DataFrame, group_by=(), seed: int = GAIN_SEED, n_boot: int = GAIN_BOOT) -> pd.DataFrame:
+    """Per method x band x level x grouping (cell, each field in ``group_by``, pooled): accuracy, the twins' accuracy,
+    the gain with its bootstrap interval, and the shared-ROI shares. One generator, in this order, so a table is
+    reproduced exactly from the same pairs."""
+    miss = [f for f in group_by if f not in m]
+    if miss:
+        raise BenchmarkError(f"grouping field(s) not in the cohort set's manifest: {miss}")
+    rng = np.random.default_rng(seed)
+    rows = []
+    for (arm, ps, band, lv), x in m.groupby(["arm", "prior_set", "band", "level"]):
+        for by in ("cell", *group_by, None):
+            for key, y in (x.groupby(by) if by else [("pooled", x)]):
+                lo, hi = boot_mean(y, "gain", rng, n_boot)
+                rows.append(dict(arm=arm, prior_set=ps, band=band, level=lv, grouping=by or "pooled", value=key,
+                                 rows=len(y), reps=y[["cell", "rep"]].drop_duplicates().shape[0], accuracy=y.hit.mean(),
+                                 twin=y.twin_hit.mean(), gain=y.gain.mean(), gain_lo=lo, gain_hi=hi,
+                                 names_shared=y.names_shared.mean(), twin_names_shared=y.twin_names_shared.mean()))
+    return pd.DataFrame(rows)
+
+
 def score_location(probs: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, *, question: str,
-                   diff: pd.DataFrame | None = None, out: Path | str | None = None) -> dict[str, pd.DataFrame]:
+                   diff: pd.DataFrame | None = None, out: Path | str | None = None,
+                   twins: bool = False, twin_probs: pd.DataFrame | None = None, twin_cs: CohortSet | None = None,
+                   group_by=(), reps=None) -> dict[str, pd.DataFrame]:
     """Every table; written to ``out`` (one CSV per table and summary.txt) when given. ``question`` says what the
-    probabilities answer: "signal" (where is the source) or "difference" (where do the groups differ)."""
+    probabilities answer: "signal" (where is the source) or "difference" (where do the groups differ).
+
+    ``twins``: also the gain over each study's no-difference twin (``gain``, and its rows ``gain_pairs``), the twins
+    being in this cohort set, or scored from ``twin_probs`` against ``twin_cs``. ``group_by``: manifest fields to
+    group the gain by. ``reps``: the reps the gain uses (e.g. bayes-sl R2's test reps, leaving out its pilot)."""
     _check_question(question)
     d = expand_levels(validate_probs(probs, cs, h), h)
     t = score_tables(d, cs, h, question)
@@ -325,6 +418,16 @@ def score_location(probs: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, *, quest
             "reliable": reliable_table(loc, noi)}
     if diff is not None:
         tabs["differ"] = differ_table(diff, cs)
+    if twins or twin_probs is not None:
+        tw = None
+        if twin_probs is not None:
+            if twin_cs is None:
+                raise BenchmarkError("twin probabilities need their cohort set")
+            tw = score_tables(expand_levels(validate_probs(twin_probs, twin_cs, h), h), twin_cs, h, question)
+        m = twin_pairs(t, cs, tw, twin_cs)
+        if reps is not None:
+            m = m[m.rep.isin(set(reps))]
+        tabs["gain_pairs"], tabs["gain"] = m, gain_table(m, group_by)
     if out is not None:
         out = Path(out)
         out.mkdir(parents=True, exist_ok=True)
@@ -336,5 +439,10 @@ def score_location(probs: pd.DataFrame, cs: CohortSet, h: pd.DataFrame, *, quest
             lines += ["Finest reliable level:", f.fillna("none").to_string(), ""]
         if len(tabs["calibration_error"]):
             lines += ["Calibration error:", tabs["calibration_error"].round(3).to_string(index=False), ""]
+        if "gain" in tabs:
+            g = tabs["gain"][tabs["gain"].grouping == "pooled"]
+            lines += ["Gain over the no-difference twin (hits the difference caused), pooled:",
+                      g[["arm", "prior_set", "band", "level", "reps", "accuracy", "twin", "gain", "gain_lo", "gain_hi"]]
+                      .round(3).to_string(index=False), ""]
         (out / "summary.txt").write_text("\n".join(lines) + "\n")
     return tabs

@@ -1,6 +1,6 @@
 # Bayesian coverage for every outcome: the D10 plan (20 Nov 2026)
 
-**Status:** plan, not started. Written from the coverage table ([BAYES_COVERAGE.md](BAYES_COVERAGE.md)). It is
+**Status:** step 1 (M1) built and its check passed on branch `d10-m1-arms` (20 Nov), waiting for your yes to merge; steps 2-17 not started. Written from the coverage table ([BAYES_COVERAGE.md](BAYES_COVERAGE.md)). It is
 step 3 of bayes-sl's close-out plan section 9 (`/mnt/e/research/EEG/bayes-sl/reports/2026-11-18_closeout_migration_plan.md`).
 
 **What was decided (the user):**
