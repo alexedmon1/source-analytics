@@ -231,7 +231,7 @@ class ROIDirectedAnalysis(BaseAnalysis):
 
     def _plot_global_hypotheses(self) -> None:
         """Per directed measure: declared contrast x band heatmap of the whole-brain test's
-        Hedges g, * where significant (results plan 5b.4, moved here from source-lightbox, which
+        Cohen's d, * where significant (results plan 5b.4, moved here from source-lightbox, which
         showed the disease effect only)."""
         import matplotlib
         matplotlib.use("Agg")
@@ -257,12 +257,12 @@ class ROIDirectedAnalysis(BaseAnalysis):
             fig, ax = plt.subplots(figsize=(1.0 * len(cols) + 4.5, 0.5 * len(rows) + 2))
             im = hh.draw(ax, vals, sig, rows, cols, row_labels=labels)
             measure = str(sub["measure"].iloc[0]) if "measure" in sub.columns else dv
-            ax.set_title(f"Whole-brain {measure.replace('_', ' ')}: Hedges g per contrast and band "
+            ax.set_title(f"Whole-brain {measure.replace('_', ' ')}: Cohen's d per contrast and band "
                          "(* significant)", fontsize=10)
-            fig.colorbar(im, ax=ax, label="Hedges g (group A - group B)")
+            fig.colorbar(im, ax=ax, label="Cohen's d (group A - group B)")
             out = hh.save(fig, self.fig_dir / f"{self.name}_global_hypotheses__{dv}.png")
             record_figure(self.fig_dir, out, measure=dv, kind="summary", shows=table,
-                          caption=f"Whole-brain {measure.replace('_', ' ')}: Hedges g per declared "
+                          caption=f"Whole-brain {measure.replace('_', ' ')}: Cohen's d per declared "
                                   "contrast and band; * significant.")
 
     def summary(self) -> None:

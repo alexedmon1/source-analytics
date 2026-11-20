@@ -632,7 +632,7 @@ The `hypothesis` layer is a shared inference engine (peer to `R/stats_utils.R` a
 | kind | question | payload | effect size |
 |---|---|---|---|
 | `omnibus` | do these groups differ at all? | `groups` (default: all levels) | partial ω² |
-| `contrast` | a specific linear comparison (post-hoc) | `weights: {level: w}` | Hedges g |
+| `contrast` | a specific linear comparison (post-hoc) | `weights: {level: w}` | Cohen's d |
 | `regression` | slope of a continuous predictor | `predictor` (+ optional `by`) | standardized β |
 | `equivalence` | is a contrast within a margin? (TOST) | `weights` + `margin` | — |
 

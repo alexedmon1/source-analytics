@@ -6,12 +6,16 @@ hypothesis tables (`feat/power-mde`), and added to since. Items marked
 
 ## Defects
 
-1. **`hedges_g` is not Hedges' g.** The hypothesis layer labels
-   `effect_size_type = "hedges_g"` on a value computed as the estimate divided by
-   the residual SD, with no small-sample correction (`R/hypothesis.R`, lines 412
-   and 659; `src/source_analytics/hypothesis/tabular.py`, line 256). That is an
-   uncorrected standardized difference (Cohen's d against the model's residual
-   SD). Either apply the correction or rename the type.
+1. **Fixed 2026-11-20 in the hypothesis tables** (decided: rename, not correct). **`hedges_g` is not
+   Hedges' g.** The hypothesis layer labelled `effect_size_type = "hedges_g"` on a value computed as the
+   estimate divided by the residual SD, with no small-sample correction: Cohen's d against the model's
+   residual SD. It is now labelled `cohens_d` (`R/hypothesis.R`, `hypothesis/tabular.py`); the value is
+   unchanged. Tables written before keep the old label, which `results_spec` still describes and flags.
+   **Still open:** the legacy post-hoc tables' `hedges_g`, `hedges_g_lcl` and `hedges_g_ucl` columns
+   (`R/stats_utils.R` and the module scripts) hold the same uncorrected value under the old name, and
+   source-lightbox and the brain-mosaic figures read that column name. Genuinely corrected g keeps its
+   name: `roi_graph`'s global metrics (`stats/graph_metrics.py`), `electrode_comparison`, and
+   `stats/cluster_permutation.hedges_g` (electrode_connectivity's legacy per-electrode table).
 
 2. **Fixed 2026-11-03** (re-locked with the `results` extra). **`uv.lock` is out of step with `pyproject.toml`.** The lock records
    source-analytics 0.8.0 and `pyproject.toml` says 0.8.2, so any `uv run` or

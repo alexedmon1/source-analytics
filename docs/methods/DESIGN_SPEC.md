@@ -185,7 +185,7 @@ apples-to-apples); only the result contract and method knobs differ, and they fo
 | kind | implementation |
 |---|---|
 | omnibus | `emmeans::joint_tests(fit)` on the `group` term (or `anova` on the reduced model) → F, df1, df2, p |
-| contrast | `emmeans(fit, ~ group)` → `contrast(emm, method = list(name = weight_vector))` → estimate, SE, df, CI, t, p, Hedges g |
+| contrast | `emmeans(fit, ~ group)` → `contrast(emm, method = list(name = weight_vector))` → estimate, SE, df, CI, t, p, Cohen's d |
 | regression | `emmeans::emtrends(fit, ~1, var = predictor)` (slope) or `emtrends(fit, ~ group, var = predictor)` + `contrast` when `by:` set |
 | equivalence | `tost_equivalent(estimate, SE, df, margin, alpha)` on the contrast (`stats_utils.R:742`, kept) |
 
@@ -288,7 +288,7 @@ exchangeability on a synthetic covariate).
 
 ## 10. Resolved decisions (2026-06-22)
 
-1. **§10.1 Effect sizes per kind.** Hedges g for contrasts (existing). **Omnibus → partial ω²**;
+1. **§10.1 Effect sizes per kind.** Cohen's d for contrasts (labelled Hedges g until 2026-11-20). **Omnibus → partial ω²**;
    **regression → standardized β**. Each adapter computes its kind's effect size in-paradigm
    (emmeans: ω² from the F/df; permutation: ω² from the null F-distribution).
 2. **§10.2 Multiple-comparison scope.** **FDR within a single `run_hypothesis` call's cells**

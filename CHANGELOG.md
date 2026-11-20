@@ -14,6 +14,13 @@
 
 ### Changed
 
+- **The hypothesis tables label their contrast effect size `cohens_d`, not `hedges_g`** (KNOWN_ISSUES 1). The
+  value, the estimate over the model's residual SD, is unchanged: it never had Hedges' small-sample correction,
+  so the old name overstated it. Rows of kind contrast and equivalence, from the R adapter and the Python
+  tabular adapter (roi_graph, evoked), now say `effect_size_type = cohens_d`; the brain mosaics and roi_directed's
+  heatmaps drawn from these tables say "Cohen's d". The results specification describes both labels, and its
+  caveat about the misleading name now appears only for tables written before this change. The legacy post-hoc
+  tables' `hedges_g` columns are unchanged.
 - **`mde_percent` divides by the design reference group's mean in every post-hoc table**, as it does in the
   hypothesis tables. The `R/stats_utils.R` post-hoc tables divided by `emmean_b`, which for a contrast like
   `{WT: +1, KO: -1}` with reference WT is the KO mean. They now use `.add_posthoc_mde` (`R/hypothesis.R`):

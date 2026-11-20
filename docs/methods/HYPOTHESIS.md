@@ -80,7 +80,7 @@ weights are `{group_a: +1, group_b: -1}`. You do not have to migrate to start us
 | kind | question | payload | effect size |
 |---|---|---|---|
 | **omnibus** | "do these groups differ at all?" | `groups` | partial ω² |
-| **contrast** | a specific linear comparison (post-hoc) | `weights` | Hedges g |
+| **contrast** | a specific linear comparison (post-hoc) | `weights` | Cohen's d |
 | **regression** | slope of a continuous predictor | `predictor` (+`by`) | standardized β |
 | **equivalence** | is a contrast within a margin? (TOST) | `weights` + `margin` | — |
 

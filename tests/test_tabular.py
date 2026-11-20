@@ -81,7 +81,7 @@ def test_contrast_matches_pooled_one_way():
     assert abs(res["SE"] - se) < 1e-9
     assert abs(res["stat"] - est / se) < 1e-9
     assert res["df"] == N - k
-    assert res["effect_size_type"] == "hedges_g"
+    assert res["effect_size_type"] == "cohens_d"
     assert res["group_a"] == "KO_VEH" and res["group_b"] == "WT_VEH"
     # sample sizes and the effect's interval (the estimate's, over the residual SD)
     assert res["n"] == N

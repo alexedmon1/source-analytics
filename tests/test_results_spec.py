@@ -52,7 +52,7 @@ def _rows(spatial=("NA",), method="BH", dvs=("exponent", "offset"), band="NA"):
         for sp in spatial:
             common = {"role": "phenotype", "band": band, "spatial": sp, "estimate": "0.12", "SE": "0.05", "df": "18",
                           "df_num": "1", "stat_type": "t", "p_value": "0.03", "estimate_lcl": "0.02",
-                          "estimate_ucl": "0.22", "effect_size": "0.9", "effect_size_type": "hedges_g",
+                          "estimate_ucl": "0.22", "effect_size": "0.9", "effect_size_type": "cohens_d",
                           "effect_size_lcl": "0.15", "effect_size_ucl": "1.65", "n": "20", "n_a": "10", "n_b": "10",
                           "mde": "0.15", "mde_percent": "12.5", "mde_power": "0.8", "mde_alpha": "0.05",
                           "mde_note": "", "dv": dv, "group_a": "KO", "group_b": "WT"}
@@ -646,7 +646,7 @@ def test_electrode_comparison_is_described_as_a_diagnostic(tmp_path):
 
 
 def test_common_caveats_only_where_they_apply(tmp_path):
-    """The NBS has no Hedges g, interval, MDE or legacy tables, so it is told about none of them."""
+    """The NBS has no standardized difference, interval, MDE or legacy tables, so it is told about none of them."""
     from source_analytics.results_spec import COMMON_CAVEATS, common_caveats
 
     (tmp_path / "roi_nbs_hypotheses.csv").write_text("x\n")
@@ -655,6 +655,9 @@ def test_common_caveats_only_where_they_apply(tmp_path):
     (tmp_path / "roi_psd_posthoc_roi.csv").write_text("x\n")
     contrast = [{"effect_size_type": "hedges_g", "effect_size_lcl": "0.1", "mde": "0.4"}]
     assert common_caveats(contrast, tmp_path, {"roi_nbs_hypotheses.csv"}) == list(COMMON_CAVEATS)
+    # the current label: the interval caveat still applies, the old-name caveat does not
+    current = [{"effect_size_type": "cohens_d", "effect_size_lcl": "0.1", "mde": "0.4"}]
+    assert common_caveats(current, tmp_path, {"roi_nbs_hypotheses.csv"}) == list(COMMON_CAVEATS[1:])
 
 
 def test_provenance_says_which_localization_the_data_came_from(module):

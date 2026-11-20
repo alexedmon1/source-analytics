@@ -478,7 +478,7 @@ mde_from_se <- function(se, df = Inf, alpha = MDE_ALPHA, power = MDE_POWER) {
 .emm_lcl  <- function(cd) if ("lower.CL" %in% names(cd)) cd$lower.CL else cd$asymp.LCL
 .emm_ucl  <- function(cd) if ("upper.CL" %in% names(cd)) cd$upper.CL else cd$asymp.UCL
 
-#' Weighted linear contrast over group means, per spatial cell. Hedges g.
+#' Weighted linear contrast over group means, per spatial cell. Cohen's d (estimate over the residual SD).
 #' marginal=TRUE collapses the spatial dimension: the contrast is taken on the
 #' group means MARGINALIZED over .sp (one row), reproducing the legacy "global"
 #' marginal-over-ROI contrast (group*spatial fit, emmeans ~ group).
@@ -515,7 +515,7 @@ mde_from_se <- function(se, df = Inf, alpha = MDE_ALPHA, power = MDE_POWER) {
     estimate = cd$estimate, SE = cd$SE, df = .emm_df(cd), df_num = 1,
     stat = .emm_stat(cd), stat_type = "t", p_value = cd$p.value,
     estimate_lcl = .emm_lcl(cd), estimate_ucl = .emm_ucl(cd),
-    effect_size = cd$estimate / resid_sd, effect_size_type = "hedges_g",
+    effect_size = cd$estimate / resid_sd, effect_size_type = "cohens_d",
     effect_size_lcl = .emm_lcl(cd) / resid_sd, effect_size_ucl = .emm_ucl(cd) / resid_sd,
     group_a = ga, group_b = gb,
     n = .n_subjects(fo$data), n_a = nab[1], n_b = nab[2],
@@ -768,7 +768,7 @@ write_module_hypotheses <- function(df, config, tbl_dir, prefix, dv_cols,
     estimate = est, SE = se, df = df_res, df_num = 1,
     stat = tval, stat_type = "t", p_value = pval,
     estimate_lcl = est - tcrit * se, estimate_ucl = est + tcrit * se,
-    effect_size = est / resid_sd, effect_size_type = "hedges_g",
+    effect_size = est / resid_sd, effect_size_type = "cohens_d",
     effect_size_lcl = (est - tcrit * se) / resid_sd, effect_size_ucl = (est + tcrit * se) / resid_sd,
     group_a = if (length(pos) == 1) pos else NA_character_,
     group_b = if (length(neg) == 1) neg else NA_character_,

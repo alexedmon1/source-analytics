@@ -149,9 +149,9 @@ POWER_CAVEATS = (
 
 #: Caveats every hypothesis-layer analysis carries (docs/KNOWN_ISSUES.md).
 COMMON_CAVEATS = (
-    ("effect_size_type 'hedges_g' is the estimate divided by the model's residual SD, with no "
-     "small-sample correction: an uncorrected standardized difference, despite its name "
-     "(docs/KNOWN_ISSUES.md 1)."),
+    ("effect_size_type 'hedges_g', in tables written before 2026-11-20, is the estimate divided "
+     "by the model's residual SD, with no small-sample correction: Cohen's d, which is what it "
+     "is labelled now (docs/KNOWN_ISSUES.md 1)."),
     ("The interval of a standardized difference is the estimate's interval divided by the "
      "residual SD, which it treats as known, so it is slightly too narrow."),
     ("mde is at power 0.80 and two-sided alpha 0.05, nominal: no multiple-comparison "
@@ -164,16 +164,18 @@ COMMON_CAVEATS = (
 
 def common_caveats(rows: list[dict], folder: Path, described: set[str]) -> list[str]:
     """The COMMON_CAVEATS that apply to these tables: each only where what it warns about is
-    there (a Hedges g, its interval, an MDE, legacy tables beside the described ones), so an
-    analysis without them, such as the NBS, is not told about them."""
+    there (the old 'hedges_g' label, a standardized difference's interval, an MDE, legacy tables
+    beside the described ones), so an analysis without them, such as the NBS, is not told about
+    them."""
     def has(column: str, value: str | None = None) -> bool:
         return any((str(r.get(column) or "") == value) if value else str(r.get(column) or "") not in
                    ("", "nan", "None") for r in rows)  # fmt: skip
 
-    hedges = has("effect_size_type", "hedges_g")
+    old_label = has("effect_size_type", "hedges_g")
+    std_diff = old_label or has("effect_size_type", "cohens_d")
     legacy = any(p.suffix in (".csv", ".tsv") and p.name not in described
                  and ("omnibus" in p.name or "posthoc" in p.name) for p in folder.iterdir())
-    keep = (hedges, hedges and has("effect_size_lcl"), has("mde"), legacy)
+    keep = (old_label, std_diff and has("effect_size_lcl"), has("mde"), legacy)
     return [text for text, wanted in zip(COMMON_CAVEATS, keep, strict=True) if wanted]
 
 
@@ -297,9 +299,10 @@ def columns(cols: list[str], rows: list[dict[str, str]], table: SpecTable, spec:
         "effect_size": {"Description": "the effect size; its measure is effect_size_type",
                         "Standard": "effect_size", "EffectMeasure": "per_row"},
         "effect_size_type": {"Description": "the row's effect measure", "Standard": "effect_measure",
-                             "Levels": {"hedges_g": "the estimate divided by the model's residual SD, "
-                                                    "uncorrected (an uncorrected standardized "
-                                                    "difference, despite the name)",
+                             "Levels": {"cohens_d": "the estimate divided by the model's residual SD "
+                                                    "(Cohen's d, no small-sample correction)",
+                                        "hedges_g": "the label of cohens_d in tables written before "
+                                                    "2026-11-20 (the same value, uncorrected)",
                                         "omega2_partial": "partial omega squared of the omnibus F",
                                         "std_beta": "the standardized slope"}},
         "effect_size_lcl": {"Description": "lower bound of the effect's 95% interval",

@@ -68,7 +68,7 @@ for (r in rois) {
   e_new <- new_con$estimate[new_con$spatial == r]
   ok(near(e_old, e_new, 1e-4), sprintf("contrast estimate matches legacy @ roi %s (%.4f)", r, e_new))
 }
-ok(all(new_con$effect_size_type == "hedges_g"), "contrast reports hedges_g")
+ok(all(new_con$effect_size_type == "cohens_d"), "contrast reports cohens_d")
 
 # ---- 4. omnibus F (2-group, per_contrast) == legacy group_F ----
 new_omni2 <- run_hypothesis(df, parse_hypothesis(list(name = "o2", kind = "omnibus",
@@ -227,8 +227,8 @@ de_ba <- de[de$kind == "contrast" & de$source == "B" & de$target == "A", ]
 ok(de_ab$significant && !de_ba$significant,
    sprintf("directed asymmetry: A->B sig (q=%.4f) but reverse B->A not (q=%.4f)",
            de_ab$q_value, de_ba$q_value))
-ok(de_ab$effect_size_type == "hedges_g" && de_ab$estimate > 0.5,
-   "signal edge reports hedges_g with a positive KO>WT effect")
+ok(de_ab$effect_size_type == "cohens_d" && de_ab$estimate > 0.5,
+   "signal edge reports cohens_d with a positive KO>WT effect")
 
 # Omnibus rows: finite F, partial omega^2 in [0,1), 3 numerator df (4 groups)
 de_om <- de[de$kind == "omnibus", ]

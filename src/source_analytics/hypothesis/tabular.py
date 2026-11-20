@@ -21,7 +21,7 @@ independently within each (hypothesis × facet) family — mirroring the R side,
 each dv is a separate ``run_hypothesis`` call.
 
 Kinds: ``omnibus`` (group F, partial ω²), ``contrast`` (weighted group contrast,
-Hedges g), ``equivalence`` (TOST, sd margin). ``regression`` is not supported here
+Cohen's d), ``equivalence`` (TOST, sd margin). ``regression`` is not supported here
 (no per-cell continuous predictor contract).
 
 Every contrast/equivalence row carries the minimum detectable effect (``mde``,
@@ -295,7 +295,7 @@ def _adapt_cell(by_group: dict[str, np.ndarray], hyp: Hypothesis,
         "df_num": 1.0, "stat": float(t), "stat_type": "t", "p_value": p,
         "estimate_lcl": est - tcrit * se, "estimate_ucl": est + tcrit * se,
         "effect_size": est / resid_sd if resid_sd > 0 else float("nan"),
-        "effect_size_type": "hedges_g",
+        "effect_size_type": "cohens_d",
         # the estimate's interval over the residual SD (treated as known), as in R
         "effect_size_lcl": (est - tcrit * se) / resid_sd if resid_sd > 0 else float("nan"),
         "effect_size_ucl": (est + tcrit * se) / resid_sd if resid_sd > 0 else float("nan"),
